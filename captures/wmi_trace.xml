@@ -1,0 +1,2245 @@
+<Events>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Guid="{9e814aad-3204-11d2-9a82-006008a86939}" />
+		<EventID>0</EventID>
+		<Version>2</Version>
+		<Level>0</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x0</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:03.812888200+06:59" />
+		<Correlation ActivityID="{00000000-0000-0000-0000-000000000000}" />
+		<Execution ProcessID="4432" ThreadID="5272" ProcessorID="0" KernelTime="15" UserTime="15" />
+		<Channel />
+		<Computer />
+	</System>
+	<EventData>
+		<Data Name="BufferSize">    8192</Data>
+		<Data Name="Version">83951626</Data>
+		<Data Name="ProviderVersion">   26200</Data>
+		<Data Name="NumberOfProcessors">      24</Data>
+		<Data Name="EndTime">134193841601863505</Data>
+		<Data Name="TimerResolution">  156250</Data>
+		<Data Name="MaxFileSize">       0</Data>
+		<Data Name="LogFileMode">0x0</Data>
+		<Data Name="BuffersWritten">      14</Data>
+		<Data Name="StartBuffers">       1</Data>
+		<Data Name="PointerSize">       8</Data>
+		<Data Name="EventsLost">       0</Data>
+		<Data Name="CPUSpeed">    3072</Data>
+		<Data Name="LoggerName">0x9</Data>
+		<Data Name="LogFileName">0x6</Data>
+		<Data Name="BootTime">134193758745000000</Data>
+		<Data Name="PerfFreq">10000000</Data>
+		<Data Name="StartTime">134193841238128882</Data>
+		<Data Name="ReservedFlags">0x1</Data>
+		<Data Name="BuffersLost">       0</Data>
+		<Data Name="SessionNameString">wmitrace</Data>
+		<Data Name="LogFileNameString">C:\Users\Jon\clean\wmi_trace.etl</Data>
+	</EventData>
+	<RenderingInfo Culture="en-US">
+		<Opcode>Header</Opcode>
+		<Provider>MSNT_SystemTrace</Provider>
+		<EventName xmlns="http://schemas.microsoft.com/win/2004/08/events/trace">EventTrace</EventName>
+	</RenderingInfo>
+	<ExtendedTracingInfo xmlns="http://schemas.microsoft.com/win/2004/08/events/trace">
+		<EventGuid>{68fdd900-4a3e-11d1-84f4-0000f80464e3}</EventGuid>
+	</ExtendedTracingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Guid="{9e814aad-3204-11d2-9a82-006008a86939}" />
+		<EventID>0</EventID>
+		<Version>2</Version>
+		<Level>0</Level>
+		<Task>0</Task>
+		<Opcode>80</Opcode>
+		<Keywords>0x0</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:03.812888200+06:59" />
+		<Correlation ActivityID="{00000000-0000-0000-0000-000000000000}" />
+		<Execution ProcessID="4432" ThreadID="5272" ProcessorID="0" KernelTime="15" UserTime="15" />
+		<Channel />
+		<Computer />
+	</System>
+	<ProcessingErrorData>
+		<ErrorCode>15005</ErrorCode>
+		<DataItemName />
+		<EventPayload>000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000</EventPayload>
+	</ProcessingErrorData>
+	<RenderingInfo Culture="en-US">
+		<Opcode>PartitionInfoExtensionV2</Opcode>
+		<Provider>MSNT_SystemTrace</Provider>
+		<EventName xmlns="http://schemas.microsoft.com/win/2004/08/events/trace">EventTrace</EventName>
+	</RenderingInfo>
+	<ExtendedTracingInfo xmlns="http://schemas.microsoft.com/win/2004/08/events/trace">
+		<EventGuid>{68fdd900-4a3e-11d1-84f4-0000f80464e3}</EventGuid>
+	</ExtendedTracingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>24</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:04.511947100+06:59" />
+		<Correlation ActivityID="{395adfa7-c083-0015-1ae4-5a3983c0dc01}" />
+		<Execution ProcessID="3340" ThreadID="7452" ProcessorID="23" KernelTime="645" UserTime="135" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_PollingQuery xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><GroupOperationId>394</GroupOperationId><Query>select * from Win32_Process</Query><NamespaceName>//./root/CIMV2</NamespaceName></Operation_PollingQuery>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>GroupOperationId = 394; Executing polling query select * from Win32_Process in namespace //./root/CIMV2 </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>50</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:04.513009700+06:59" />
+		<Correlation ActivityID="{dd4b50e4-c97c-445b-8db8-e1e5b87a6f40}" RelatedActivityID="{00000000-0000-0000-0000-000000000000}" />
+		<Execution ProcessID="3340" ThreadID="4280" ProcessorID="4" KernelTime="660" UserTime="825" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<EventData>
+	</EventData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>Activity Transfer </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>12</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:04.513010900+06:59" />
+		<Correlation ActivityID="{dd4b50e4-c97c-445b-8db8-e1e5b87a6f40}" />
+		<Execution ProcessID="3340" ThreadID="4280" ProcessorID="4" KernelTime="660" UserTime="825" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_Provider_Info_New xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><GroupOperationId>440</GroupOperationId><Operation>Provider::CreateInstanceEnum - CIMWin32 : Win32_Process</Operation><HostId>6616</HostId><ProviderName>CIMWin32</ProviderName><ProviderGuid>{d63a5850-8f16-11cf-9f47-00aa00bf345c}</ProviderGuid><Path>%systemroot%\system32\wbem\cimwin32.dll</Path></Operation_Provider_Info_New>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>ProviderInfo for GroupOperationId = 440; Operation = Provider::CreateInstanceEnum - CIMWin32 : Win32_Process; HostID = 6616; ProviderName = CIMWin32; ProviderGuid = {d63a5850-8f16-11cf-9f47-00aa00bf345c}; Path = %systemroot%\system32\wbem\cimwin32.dll </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>24</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:06.584143800+06:59" />
+		<Correlation ActivityID="{395adfa7-c083-0015-1ae4-5a3983c0dc01}" />
+		<Execution ProcessID="3340" ThreadID="7452" ProcessorID="23" KernelTime="660" UserTime="150" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_PollingQuery xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><GroupOperationId>394</GroupOperationId><Query>select * from Win32_Process</Query><NamespaceName>//./root/CIMV2</NamespaceName></Operation_PollingQuery>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>GroupOperationId = 394; Executing polling query select * from Win32_Process in namespace //./root/CIMV2 </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>50</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:06.585686400+06:59" />
+		<Correlation ActivityID="{cc6507be-2a37-4d27-a60e-3b37864977d1}" RelatedActivityID="{00000000-0000-0000-0000-000000000000}" />
+		<Execution ProcessID="3340" ThreadID="4280" ProcessorID="2" KernelTime="660" UserTime="825" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<EventData>
+	</EventData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>Activity Transfer </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>12</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:06.585688600+06:59" />
+		<Correlation ActivityID="{cc6507be-2a37-4d27-a60e-3b37864977d1}" />
+		<Execution ProcessID="3340" ThreadID="4280" ProcessorID="2" KernelTime="660" UserTime="825" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_Provider_Info_New xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><GroupOperationId>440</GroupOperationId><Operation>Provider::CreateInstanceEnum - CIMWin32 : Win32_Process</Operation><HostId>6616</HostId><ProviderName>CIMWin32</ProviderName><ProviderGuid>{d63a5850-8f16-11cf-9f47-00aa00bf345c}</ProviderGuid><Path>%systemroot%\system32\wbem\cimwin32.dll</Path></Operation_Provider_Info_New>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>ProviderInfo for GroupOperationId = 440; Operation = Provider::CreateInstanceEnum - CIMWin32 : Win32_Process; HostID = 6616; ProviderName = CIMWin32; ProviderGuid = {d63a5850-8f16-11cf-9f47-00aa00bf345c}; Path = %systemroot%\system32\wbem\cimwin32.dll </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>24</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:08.634982200+06:59" />
+		<Correlation ActivityID="{395adfa7-c083-0015-1ae4-5a3983c0dc01}" />
+		<Execution ProcessID="3340" ThreadID="7452" ProcessorID="11" KernelTime="675" UserTime="150" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_PollingQuery xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><GroupOperationId>394</GroupOperationId><Query>select * from Win32_Process</Query><NamespaceName>//./root/CIMV2</NamespaceName></Operation_PollingQuery>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>GroupOperationId = 394; Executing polling query select * from Win32_Process in namespace //./root/CIMV2 </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>50</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:08.636316900+06:59" />
+		<Correlation ActivityID="{21386e05-c7bb-45ec-a605-342869f8198c}" RelatedActivityID="{00000000-0000-0000-0000-000000000000}" />
+		<Execution ProcessID="3340" ThreadID="4280" ProcessorID="5" KernelTime="660" UserTime="825" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<EventData>
+	</EventData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>Activity Transfer </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>12</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:08.636318800+06:59" />
+		<Correlation ActivityID="{21386e05-c7bb-45ec-a605-342869f8198c}" />
+		<Execution ProcessID="3340" ThreadID="4280" ProcessorID="5" KernelTime="660" UserTime="825" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_Provider_Info_New xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><GroupOperationId>440</GroupOperationId><Operation>Provider::CreateInstanceEnum - CIMWin32 : Win32_Process</Operation><HostId>6616</HostId><ProviderName>CIMWin32</ProviderName><ProviderGuid>{d63a5850-8f16-11cf-9f47-00aa00bf345c}</ProviderGuid><Path>%systemroot%\system32\wbem\cimwin32.dll</Path></Operation_Provider_Info_New>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>ProviderInfo for GroupOperationId = 440; Operation = Provider::CreateInstanceEnum - CIMWin32 : Win32_Process; HostID = 6616; ProviderName = CIMWin32; ProviderGuid = {d63a5850-8f16-11cf-9f47-00aa00bf345c}; Path = %systemroot%\system32\wbem\cimwin32.dll </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>24</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:10.703070400+06:59" />
+		<Correlation ActivityID="{395adfa7-c083-0015-1ae4-5a3983c0dc01}" />
+		<Execution ProcessID="3340" ThreadID="7452" ProcessorID="10" KernelTime="690" UserTime="150" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_PollingQuery xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><GroupOperationId>394</GroupOperationId><Query>select * from Win32_Process</Query><NamespaceName>//./root/CIMV2</NamespaceName></Operation_PollingQuery>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>GroupOperationId = 394; Executing polling query select * from Win32_Process in namespace //./root/CIMV2 </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>50</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:10.704694000+06:59" />
+		<Correlation ActivityID="{1a0a9d1c-9ffb-43bf-aca2-5e51d2f4c26f}" RelatedActivityID="{00000000-0000-0000-0000-000000000000}" />
+		<Execution ProcessID="3340" ThreadID="4280" ProcessorID="5" KernelTime="660" UserTime="825" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<EventData>
+	</EventData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>Activity Transfer </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>12</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:10.704695900+06:59" />
+		<Correlation ActivityID="{1a0a9d1c-9ffb-43bf-aca2-5e51d2f4c26f}" />
+		<Execution ProcessID="3340" ThreadID="4280" ProcessorID="5" KernelTime="660" UserTime="825" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_Provider_Info_New xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><GroupOperationId>440</GroupOperationId><Operation>Provider::CreateInstanceEnum - CIMWin32 : Win32_Process</Operation><HostId>6616</HostId><ProviderName>CIMWin32</ProviderName><ProviderGuid>{d63a5850-8f16-11cf-9f47-00aa00bf345c}</ProviderGuid><Path>%systemroot%\system32\wbem\cimwin32.dll</Path></Operation_Provider_Info_New>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>ProviderInfo for GroupOperationId = 440; Operation = Provider::CreateInstanceEnum - CIMWin32 : Win32_Process; HostID = 6616; ProviderName = CIMWin32; ProviderGuid = {d63a5850-8f16-11cf-9f47-00aa00bf345c}; Path = %systemroot%\system32\wbem\cimwin32.dll </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>24</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:12.773276800+06:59" />
+		<Correlation ActivityID="{395adfa7-c083-0015-1ae4-5a3983c0dc01}" />
+		<Execution ProcessID="3340" ThreadID="7452" ProcessorID="0" KernelTime="705" UserTime="150" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_PollingQuery xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><GroupOperationId>394</GroupOperationId><Query>select * from Win32_Process</Query><NamespaceName>//./root/CIMV2</NamespaceName></Operation_PollingQuery>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>GroupOperationId = 394; Executing polling query select * from Win32_Process in namespace //./root/CIMV2 </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>50</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:12.774605700+06:59" />
+		<Correlation ActivityID="{ca72787b-818b-42e9-a164-53ade7b59dba}" RelatedActivityID="{00000000-0000-0000-0000-000000000000}" />
+		<Execution ProcessID="3340" ThreadID="4280" ProcessorID="3" KernelTime="660" UserTime="825" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<EventData>
+	</EventData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>Activity Transfer </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>12</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:12.774608000+06:59" />
+		<Correlation ActivityID="{ca72787b-818b-42e9-a164-53ade7b59dba}" />
+		<Execution ProcessID="3340" ThreadID="4280" ProcessorID="3" KernelTime="660" UserTime="825" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_Provider_Info_New xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><GroupOperationId>440</GroupOperationId><Operation>Provider::CreateInstanceEnum - CIMWin32 : Win32_Process</Operation><HostId>6616</HostId><ProviderName>CIMWin32</ProviderName><ProviderGuid>{d63a5850-8f16-11cf-9f47-00aa00bf345c}</ProviderGuid><Path>%systemroot%\system32\wbem\cimwin32.dll</Path></Operation_Provider_Info_New>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>ProviderInfo for GroupOperationId = 440; Operation = Provider::CreateInstanceEnum - CIMWin32 : Win32_Process; HostID = 6616; ProviderName = CIMWin32; ProviderGuid = {d63a5850-8f16-11cf-9f47-00aa00bf345c}; Path = %systemroot%\system32\wbem\cimwin32.dll </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>24</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:14.856693400+06:59" />
+		<Correlation ActivityID="{395adfa7-c083-0015-1ae4-5a3983c0dc01}" />
+		<Execution ProcessID="3340" ThreadID="7452" ProcessorID="10" KernelTime="705" UserTime="165" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_PollingQuery xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><GroupOperationId>394</GroupOperationId><Query>select * from Win32_Process</Query><NamespaceName>//./root/CIMV2</NamespaceName></Operation_PollingQuery>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>GroupOperationId = 394; Executing polling query select * from Win32_Process in namespace //./root/CIMV2 </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>50</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:14.858288000+06:59" />
+		<Correlation ActivityID="{038ce942-ef11-4d13-b409-87f285791543}" RelatedActivityID="{00000000-0000-0000-0000-000000000000}" />
+		<Execution ProcessID="3340" ThreadID="4280" ProcessorID="4" KernelTime="660" UserTime="825" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<EventData>
+	</EventData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>Activity Transfer </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>12</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:14.858289800+06:59" />
+		<Correlation ActivityID="{038ce942-ef11-4d13-b409-87f285791543}" />
+		<Execution ProcessID="3340" ThreadID="4280" ProcessorID="4" KernelTime="660" UserTime="825" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_Provider_Info_New xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><GroupOperationId>440</GroupOperationId><Operation>Provider::CreateInstanceEnum - CIMWin32 : Win32_Process</Operation><HostId>6616</HostId><ProviderName>CIMWin32</ProviderName><ProviderGuid>{d63a5850-8f16-11cf-9f47-00aa00bf345c}</ProviderGuid><Path>%systemroot%\system32\wbem\cimwin32.dll</Path></Operation_Provider_Info_New>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>ProviderInfo for GroupOperationId = 440; Operation = Provider::CreateInstanceEnum - CIMWin32 : Win32_Process; HostID = 6616; ProviderName = CIMWin32; ProviderGuid = {d63a5850-8f16-11cf-9f47-00aa00bf345c}; Path = %systemroot%\system32\wbem\cimwin32.dll </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>24</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:16.921291200+06:59" />
+		<Correlation ActivityID="{395adfa7-c083-0015-1ae4-5a3983c0dc01}" />
+		<Execution ProcessID="3340" ThreadID="7452" ProcessorID="11" KernelTime="720" UserTime="165" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_PollingQuery xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><GroupOperationId>394</GroupOperationId><Query>select * from Win32_Process</Query><NamespaceName>//./root/CIMV2</NamespaceName></Operation_PollingQuery>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>GroupOperationId = 394; Executing polling query select * from Win32_Process in namespace //./root/CIMV2 </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>50</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:16.922893900+06:59" />
+		<Correlation ActivityID="{f883c94a-4613-4d7c-ac61-fee4280cb9ac}" RelatedActivityID="{00000000-0000-0000-0000-000000000000}" />
+		<Execution ProcessID="3340" ThreadID="4280" ProcessorID="3" KernelTime="660" UserTime="825" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<EventData>
+	</EventData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>Activity Transfer </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>12</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:16.922895800+06:59" />
+		<Correlation ActivityID="{f883c94a-4613-4d7c-ac61-fee4280cb9ac}" />
+		<Execution ProcessID="3340" ThreadID="4280" ProcessorID="3" KernelTime="660" UserTime="825" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_Provider_Info_New xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><GroupOperationId>440</GroupOperationId><Operation>Provider::CreateInstanceEnum - CIMWin32 : Win32_Process</Operation><HostId>6616</HostId><ProviderName>CIMWin32</ProviderName><ProviderGuid>{d63a5850-8f16-11cf-9f47-00aa00bf345c}</ProviderGuid><Path>%systemroot%\system32\wbem\cimwin32.dll</Path></Operation_Provider_Info_New>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>ProviderInfo for GroupOperationId = 440; Operation = Provider::CreateInstanceEnum - CIMWin32 : Win32_Process; HostID = 6616; ProviderName = CIMWin32; ProviderGuid = {d63a5850-8f16-11cf-9f47-00aa00bf345c}; Path = %systemroot%\system32\wbem\cimwin32.dll </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>24</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:18.992967900+06:59" />
+		<Correlation ActivityID="{395adfa7-c083-0015-1ae4-5a3983c0dc01}" />
+		<Execution ProcessID="3340" ThreadID="7452" ProcessorID="11" KernelTime="735" UserTime="165" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_PollingQuery xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><GroupOperationId>394</GroupOperationId><Query>select * from Win32_Process</Query><NamespaceName>//./root/CIMV2</NamespaceName></Operation_PollingQuery>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>GroupOperationId = 394; Executing polling query select * from Win32_Process in namespace //./root/CIMV2 </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>50</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:18.994373000+06:59" />
+		<Correlation ActivityID="{0621a3e2-4d65-457c-b0a6-dd364d3baaf3}" RelatedActivityID="{00000000-0000-0000-0000-000000000000}" />
+		<Execution ProcessID="3340" ThreadID="4280" ProcessorID="3" KernelTime="660" UserTime="825" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<EventData>
+	</EventData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>Activity Transfer </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>12</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:18.994374800+06:59" />
+		<Correlation ActivityID="{0621a3e2-4d65-457c-b0a6-dd364d3baaf3}" />
+		<Execution ProcessID="3340" ThreadID="4280" ProcessorID="3" KernelTime="660" UserTime="825" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_Provider_Info_New xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><GroupOperationId>440</GroupOperationId><Operation>Provider::CreateInstanceEnum - CIMWin32 : Win32_Process</Operation><HostId>6616</HostId><ProviderName>CIMWin32</ProviderName><ProviderGuid>{d63a5850-8f16-11cf-9f47-00aa00bf345c}</ProviderGuid><Path>%systemroot%\system32\wbem\cimwin32.dll</Path></Operation_Provider_Info_New>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>ProviderInfo for GroupOperationId = 440; Operation = Provider::CreateInstanceEnum - CIMWin32 : Win32_Process; HostID = 6616; ProviderName = CIMWin32; ProviderGuid = {d63a5850-8f16-11cf-9f47-00aa00bf345c}; Path = %systemroot%\system32\wbem\cimwin32.dll </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>24</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:21.044814500+06:59" />
+		<Correlation ActivityID="{395adfa7-c083-0015-1ae4-5a3983c0dc01}" />
+		<Execution ProcessID="3340" ThreadID="7452" ProcessorID="3" KernelTime="735" UserTime="180" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_PollingQuery xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><GroupOperationId>394</GroupOperationId><Query>select * from Win32_Process</Query><NamespaceName>//./root/CIMV2</NamespaceName></Operation_PollingQuery>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>GroupOperationId = 394; Executing polling query select * from Win32_Process in namespace //./root/CIMV2 </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>50</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:21.045951000+06:59" />
+		<Correlation ActivityID="{1e71b828-feb2-4ba2-8411-5e2ef6138464}" RelatedActivityID="{00000000-0000-0000-0000-000000000000}" />
+		<Execution ProcessID="3340" ThreadID="4280" ProcessorID="3" KernelTime="660" UserTime="825" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<EventData>
+	</EventData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>Activity Transfer </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>12</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:21.045952500+06:59" />
+		<Correlation ActivityID="{1e71b828-feb2-4ba2-8411-5e2ef6138464}" />
+		<Execution ProcessID="3340" ThreadID="4280" ProcessorID="3" KernelTime="660" UserTime="825" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_Provider_Info_New xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><GroupOperationId>440</GroupOperationId><Operation>Provider::CreateInstanceEnum - CIMWin32 : Win32_Process</Operation><HostId>6616</HostId><ProviderName>CIMWin32</ProviderName><ProviderGuid>{d63a5850-8f16-11cf-9f47-00aa00bf345c}</ProviderGuid><Path>%systemroot%\system32\wbem\cimwin32.dll</Path></Operation_Provider_Info_New>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>ProviderInfo for GroupOperationId = 440; Operation = Provider::CreateInstanceEnum - CIMWin32 : Win32_Process; HostID = 6616; ProviderName = CIMWin32; ProviderGuid = {d63a5850-8f16-11cf-9f47-00aa00bf345c}; Path = %systemroot%\system32\wbem\cimwin32.dll </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>11</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:21.978275300+06:59" />
+		<Correlation ActivityID="{00000000-0000-0000-0000-000000000000}" />
+		<Execution ProcessID="3340" ThreadID="7452" ProcessorID="2" KernelTime="735" UserTime="195" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_New xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><CorrelationId></CorrelationId><GroupOperationId>10489</GroupOperationId><OperationId>10489</OperationId><Operation>IWbemServices::Connect</Operation><ClientMachine>PC</ClientMachine><ClientMachineFQDN>PC</ClientMachineFQDN><User>NT AUTHORITY\SYSTEM</User><ClientProcessId>12652</ClientProcessId><ClientProcessCreationTime>134193758937311266</ClientProcessCreationTime><NamespaceName>\\.\root\WMI</NamespaceName><IsLocal>true</IsLocal></Operation_New>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>CorrelationId = ; GroupOperationId = 10489; OperationId = 10489; Operation = IWbemServices::Connect; ClientMachine = PC; User = NT AUTHORITY\SYSTEM; ClientProcessId = 12652; NamespaceName = 134193758937311266 </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>50</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:21.978625500+06:59" />
+		<Correlation ActivityID="{07a90cc8-200e-4dbd-8ebb-a4fc10660899}" RelatedActivityID="{00000000-0000-0000-0000-000000000000}" />
+		<Execution ProcessID="3340" ThreadID="7452" ProcessorID="2" KernelTime="735" UserTime="195" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<EventData>
+	</EventData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>Activity Transfer </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>11</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:21.978626100+06:59" />
+		<Correlation ActivityID="{07a90cc8-200e-4dbd-8ebb-a4fc10660899}" />
+		<Execution ProcessID="3340" ThreadID="7452" ProcessorID="2" KernelTime="735" UserTime="195" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_New xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><CorrelationId>{00000000-0000-0000-0000-000000000000}</CorrelationId><GroupOperationId>10490</GroupOperationId><OperationId>10491</OperationId><Operation>Start IWbemServices::ExecQuery - root\WMI : select * from WmiMonitorBrightness</Operation><ClientMachine>PC</ClientMachine><ClientMachineFQDN>PC</ClientMachineFQDN><User>NT AUTHORITY\SYSTEM</User><ClientProcessId>12652</ClientProcessId><ClientProcessCreationTime>134193758937311266</ClientProcessCreationTime><NamespaceName>\\.\root\WMI</NamespaceName><IsLocal>true</IsLocal></Operation_New>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>CorrelationId = {00000000-0000-0000-0000-000000000000}; GroupOperationId = 10490; OperationId = 10491; Operation = Start IWbemServices::ExecQuery - root\WMI : select * from WmiMonitorBrightness; ClientMachine = PC; User = NT AUTHORITY\SYSTEM; ClientProcessId = 12652; NamespaceName = 134193758937311266 </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>50</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:21.985213100+06:59" />
+		<Correlation ActivityID="{0aa09652-7375-44b6-b383-062b3dc23990}" RelatedActivityID="{00000000-0000-0000-0000-000000000000}" />
+		<Execution ProcessID="3340" ThreadID="8328" ProcessorID="5" KernelTime="15390" UserTime="7950" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<EventData>
+	</EventData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>Activity Transfer </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>11</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:21.985213900+06:59" />
+		<Correlation ActivityID="{0aa09652-7375-44b6-b383-062b3dc23990}" />
+		<Execution ProcessID="3340" ThreadID="8328" ProcessorID="5" KernelTime="15390" UserTime="7950" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_New xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><CorrelationId>{00000000-0000-0000-0000-000000000000}</CorrelationId><GroupOperationId>10498</GroupOperationId><OperationId>10498</OperationId><Operation>IWbemServices::Connect</Operation><ClientMachine>PC</ClientMachine><ClientMachineFQDN>PC</ClientMachineFQDN><User>NT AUTHORITY\SYSTEM</User><ClientProcessId>6224</ClientProcessId><ClientProcessCreationTime>134193758901482762</ClientProcessCreationTime><NamespaceName>root\wmi</NamespaceName><IsLocal>true</IsLocal></Operation_New>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>CorrelationId = {00000000-0000-0000-0000-000000000000}; GroupOperationId = 10498; OperationId = 10498; Operation = IWbemServices::Connect; ClientMachine = PC; User = NT AUTHORITY\SYSTEM; ClientProcessId = 6224; NamespaceName = 134193758901482762 </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>5857</EventID>
+		<Version>0</Version>
+		<Level>0</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x4000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:21.985462700+06:59" />
+		<Correlation ActivityID="{395adfa7-c083-0009-2de1-5a3983c0dc01}" />
+		<Execution ProcessID="6224" ThreadID="12892" ProcessorID="5" KernelTime="435" UserTime="225" />
+		<Channel>Microsoft-Windows-WMI-Activity/Operational</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_StartedOperational xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><ProviderName>WMIProv</ProviderName><Code>0x0</Code><HostProcess>wmiprvse.exe</HostProcess><ProcessID>6224</ProcessID><ProviderPath>%systemroot%\system32\wbem\wmiprov.dll</ProviderPath></Operation_StartedOperational>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Message>WMIProv provider started with result code 0x0. HostProcess = wmiprvse.exe; ProcessID = 6224; ProviderPath = %systemroot%\system32\wbem\wmiprov.dll </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Operational</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>50</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:21.986666500+06:59" />
+		<Correlation ActivityID="{b1e6d50a-f43c-40c2-ade0-5d1d16bb06be}" RelatedActivityID="{00000000-0000-0000-0000-000000000000}" />
+		<Execution ProcessID="3340" ThreadID="4280" ProcessorID="4" KernelTime="660" UserTime="825" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<EventData>
+	</EventData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>Activity Transfer </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>12</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:21.986667500+06:59" />
+		<Correlation ActivityID="{b1e6d50a-f43c-40c2-ade0-5d1d16bb06be}" />
+		<Execution ProcessID="3340" ThreadID="4280" ProcessorID="4" KernelTime="660" UserTime="825" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_Provider_Info_New xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><GroupOperationId>10490</GroupOperationId><Operation>Provider::CreateInstanceEnum - WMIProv : WmiMonitorBrightness</Operation><HostId>6224</HostId><ProviderName>WMIProv</ProviderName><ProviderGuid>{D2D588B5-D081-11d0-99E0-00C04FC2F8EC}</ProviderGuid><Path>%systemroot%\system32\wbem\wmiprov.dll</Path></Operation_Provider_Info_New>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>ProviderInfo for GroupOperationId = 10490; Operation = Provider::CreateInstanceEnum - WMIProv : WmiMonitorBrightness; HostID = 6224; ProviderName = WMIProv; ProviderGuid = {D2D588B5-D081-11d0-99E0-00C04FC2F8EC}; Path = %systemroot%\system32\wbem\wmiprov.dll </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>50</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:21.990810200+06:59" />
+		<Correlation ActivityID="{5d7834fe-d699-47f4-98ff-2c87261be4aa}" RelatedActivityID="{00000000-0000-0000-0000-000000000000}" />
+		<Execution ProcessID="3340" ThreadID="8328" ProcessorID="2" KernelTime="15390" UserTime="7950" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<EventData>
+	</EventData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>Activity Transfer </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>13</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:21.990810900+06:59" />
+		<Correlation ActivityID="{5d7834fe-d699-47f4-98ff-2c87261be4aa}" />
+		<Execution ProcessID="3340" ThreadID="8328" ProcessorID="2" KernelTime="15390" UserTime="7950" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_Stop_New xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><OperationId>10491</OperationId><ResultCode>0x0</ResultCode></Operation_Stop_New>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>Stop OperationId = 10491; ResultCode = 0x0 </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>11</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:22.607304700+06:59" />
+		<Correlation ActivityID="{00000000-0000-0000-0000-000000000000}" />
+		<Execution ProcessID="3340" ThreadID="8328" ProcessorID="5" KernelTime="15390" UserTime="7950" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_New xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><CorrelationId></CorrelationId><GroupOperationId>10500</GroupOperationId><OperationId>10500</OperationId><Operation>IWbemServices::Connect</Operation><ClientMachine>PC</ClientMachine><ClientMachineFQDN>PC</ClientMachineFQDN><User>NT AUTHORITY\SYSTEM</User><ClientProcessId>12652</ClientProcessId><ClientProcessCreationTime>134193758937311266</ClientProcessCreationTime><NamespaceName>\\.\root\WMI</NamespaceName><IsLocal>true</IsLocal></Operation_New>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>CorrelationId = ; GroupOperationId = 10500; OperationId = 10500; Operation = IWbemServices::Connect; ClientMachine = PC; User = NT AUTHORITY\SYSTEM; ClientProcessId = 12652; NamespaceName = 134193758937311266 </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>50</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:22.607704000+06:59" />
+		<Correlation ActivityID="{6a4d0ec5-c619-43b9-9f26-58c859cde43a}" RelatedActivityID="{00000000-0000-0000-0000-000000000000}" />
+		<Execution ProcessID="3340" ThreadID="8328" ProcessorID="5" KernelTime="15390" UserTime="7950" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<EventData>
+	</EventData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>Activity Transfer </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>11</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:22.607704500+06:59" />
+		<Correlation ActivityID="{6a4d0ec5-c619-43b9-9f26-58c859cde43a}" />
+		<Execution ProcessID="3340" ThreadID="8328" ProcessorID="5" KernelTime="15390" UserTime="7950" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_New xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><CorrelationId>{00000000-0000-0000-0000-000000000000}</CorrelationId><GroupOperationId>10501</GroupOperationId><OperationId>10502</OperationId><Operation>Start IWbemServices::ExecQuery - root\WMI : select * from WmiMonitorBrightness</Operation><ClientMachine>PC</ClientMachine><ClientMachineFQDN>PC</ClientMachineFQDN><User>NT AUTHORITY\SYSTEM</User><ClientProcessId>12652</ClientProcessId><ClientProcessCreationTime>134193758937311266</ClientProcessCreationTime><NamespaceName>\\.\root\WMI</NamespaceName><IsLocal>true</IsLocal></Operation_New>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>CorrelationId = {00000000-0000-0000-0000-000000000000}; GroupOperationId = 10501; OperationId = 10502; Operation = Start IWbemServices::ExecQuery - root\WMI : select * from WmiMonitorBrightness; ClientMachine = PC; User = NT AUTHORITY\SYSTEM; ClientProcessId = 12652; NamespaceName = 134193758937311266 </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>50</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:22.608264400+06:59" />
+		<Correlation ActivityID="{16a1c348-2fcf-4029-b4ad-f3fb97223165}" RelatedActivityID="{00000000-0000-0000-0000-000000000000}" />
+		<Execution ProcessID="3340" ThreadID="4280" ProcessorID="0" KernelTime="660" UserTime="825" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<EventData>
+	</EventData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>Activity Transfer </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>12</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:22.608265300+06:59" />
+		<Correlation ActivityID="{16a1c348-2fcf-4029-b4ad-f3fb97223165}" />
+		<Execution ProcessID="3340" ThreadID="4280" ProcessorID="0" KernelTime="660" UserTime="825" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_Provider_Info_New xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><GroupOperationId>10501</GroupOperationId><Operation>Provider::CreateInstanceEnum - WMIProv : WmiMonitorBrightness</Operation><HostId>6224</HostId><ProviderName>WMIProv</ProviderName><ProviderGuid>{D2D588B5-D081-11d0-99E0-00C04FC2F8EC}</ProviderGuid><Path>%systemroot%\system32\wbem\wmiprov.dll</Path></Operation_Provider_Info_New>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>ProviderInfo for GroupOperationId = 10501; Operation = Provider::CreateInstanceEnum - WMIProv : WmiMonitorBrightness; HostID = 6224; ProviderName = WMIProv; ProviderGuid = {D2D588B5-D081-11d0-99E0-00C04FC2F8EC}; Path = %systemroot%\system32\wbem\wmiprov.dll </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>50</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:22.609425600+06:59" />
+		<Correlation ActivityID="{48b23456-e4d6-4db7-8048-12a37ddf0f5d}" RelatedActivityID="{00000000-0000-0000-0000-000000000000}" />
+		<Execution ProcessID="3340" ThreadID="7452" ProcessorID="4" KernelTime="735" UserTime="195" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<EventData>
+	</EventData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>Activity Transfer </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>13</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:22.609426300+06:59" />
+		<Correlation ActivityID="{48b23456-e4d6-4db7-8048-12a37ddf0f5d}" />
+		<Execution ProcessID="3340" ThreadID="7452" ProcessorID="4" KernelTime="735" UserTime="195" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_Stop_New xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><OperationId>10502</OperationId><ResultCode>0x0</ResultCode></Operation_Stop_New>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>Stop OperationId = 10502; ResultCode = 0x0 </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>24</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:23.115442600+06:59" />
+		<Correlation ActivityID="{395adfa7-c083-0015-1ae4-5a3983c0dc01}" />
+		<Execution ProcessID="3340" ThreadID="7452" ProcessorID="11" KernelTime="735" UserTime="195" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_PollingQuery xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><GroupOperationId>394</GroupOperationId><Query>select * from Win32_Process</Query><NamespaceName>//./root/CIMV2</NamespaceName></Operation_PollingQuery>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>GroupOperationId = 394; Executing polling query select * from Win32_Process in namespace //./root/CIMV2 </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>50</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:23.116565300+06:59" />
+		<Correlation ActivityID="{1df0a2ed-b729-4e51-8ca1-60dabdff2f14}" RelatedActivityID="{00000000-0000-0000-0000-000000000000}" />
+		<Execution ProcessID="3340" ThreadID="4280" ProcessorID="2" KernelTime="660" UserTime="825" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<EventData>
+	</EventData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>Activity Transfer </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>12</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:23.116567100+06:59" />
+		<Correlation ActivityID="{1df0a2ed-b729-4e51-8ca1-60dabdff2f14}" />
+		<Execution ProcessID="3340" ThreadID="4280" ProcessorID="2" KernelTime="660" UserTime="825" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_Provider_Info_New xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><GroupOperationId>440</GroupOperationId><Operation>Provider::CreateInstanceEnum - CIMWin32 : Win32_Process</Operation><HostId>6616</HostId><ProviderName>CIMWin32</ProviderName><ProviderGuid>{d63a5850-8f16-11cf-9f47-00aa00bf345c}</ProviderGuid><Path>%systemroot%\system32\wbem\cimwin32.dll</Path></Operation_Provider_Info_New>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>ProviderInfo for GroupOperationId = 440; Operation = Provider::CreateInstanceEnum - CIMWin32 : Win32_Process; HostID = 6616; ProviderName = CIMWin32; ProviderGuid = {d63a5850-8f16-11cf-9f47-00aa00bf345c}; Path = %systemroot%\system32\wbem\cimwin32.dll </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>24</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:25.180867600+06:59" />
+		<Correlation ActivityID="{395adfa7-c083-0015-1ae4-5a3983c0dc01}" />
+		<Execution ProcessID="3340" ThreadID="7452" ProcessorID="2" KernelTime="750" UserTime="195" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_PollingQuery xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><GroupOperationId>394</GroupOperationId><Query>select * from Win32_Process</Query><NamespaceName>//./root/CIMV2</NamespaceName></Operation_PollingQuery>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>GroupOperationId = 394; Executing polling query select * from Win32_Process in namespace //./root/CIMV2 </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>50</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:25.182063900+06:59" />
+		<Correlation ActivityID="{e60b373b-25dc-4b55-a645-91b2f340c0c0}" RelatedActivityID="{00000000-0000-0000-0000-000000000000}" />
+		<Execution ProcessID="3340" ThreadID="4280" ProcessorID="4" KernelTime="660" UserTime="825" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<EventData>
+	</EventData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>Activity Transfer </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>12</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:25.182065800+06:59" />
+		<Correlation ActivityID="{e60b373b-25dc-4b55-a645-91b2f340c0c0}" />
+		<Execution ProcessID="3340" ThreadID="4280" ProcessorID="4" KernelTime="660" UserTime="825" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_Provider_Info_New xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><GroupOperationId>440</GroupOperationId><Operation>Provider::CreateInstanceEnum - CIMWin32 : Win32_Process</Operation><HostId>6616</HostId><ProviderName>CIMWin32</ProviderName><ProviderGuid>{d63a5850-8f16-11cf-9f47-00aa00bf345c}</ProviderGuid><Path>%systemroot%\system32\wbem\cimwin32.dll</Path></Operation_Provider_Info_New>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>ProviderInfo for GroupOperationId = 440; Operation = Provider::CreateInstanceEnum - CIMWin32 : Win32_Process; HostID = 6616; ProviderName = CIMWin32; ProviderGuid = {d63a5850-8f16-11cf-9f47-00aa00bf345c}; Path = %systemroot%\system32\wbem\cimwin32.dll </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>24</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:27.251714200+06:59" />
+		<Correlation ActivityID="{395adfa7-c083-0015-1ae4-5a3983c0dc01}" />
+		<Execution ProcessID="3340" ThreadID="7452" ProcessorID="1" KernelTime="765" UserTime="195" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_PollingQuery xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><GroupOperationId>394</GroupOperationId><Query>select * from Win32_Process</Query><NamespaceName>//./root/CIMV2</NamespaceName></Operation_PollingQuery>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>GroupOperationId = 394; Executing polling query select * from Win32_Process in namespace //./root/CIMV2 </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>50</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:27.252838900+06:59" />
+		<Correlation ActivityID="{25f698c2-8714-44db-af64-78fb41b3d0aa}" RelatedActivityID="{00000000-0000-0000-0000-000000000000}" />
+		<Execution ProcessID="3340" ThreadID="4280" ProcessorID="4" KernelTime="660" UserTime="825" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<EventData>
+	</EventData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>Activity Transfer </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>12</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:27.252840700+06:59" />
+		<Correlation ActivityID="{25f698c2-8714-44db-af64-78fb41b3d0aa}" />
+		<Execution ProcessID="3340" ThreadID="4280" ProcessorID="4" KernelTime="660" UserTime="825" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_Provider_Info_New xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><GroupOperationId>440</GroupOperationId><Operation>Provider::CreateInstanceEnum - CIMWin32 : Win32_Process</Operation><HostId>6616</HostId><ProviderName>CIMWin32</ProviderName><ProviderGuid>{d63a5850-8f16-11cf-9f47-00aa00bf345c}</ProviderGuid><Path>%systemroot%\system32\wbem\cimwin32.dll</Path></Operation_Provider_Info_New>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>ProviderInfo for GroupOperationId = 440; Operation = Provider::CreateInstanceEnum - CIMWin32 : Win32_Process; HostID = 6616; ProviderName = CIMWin32; ProviderGuid = {d63a5850-8f16-11cf-9f47-00aa00bf345c}; Path = %systemroot%\system32\wbem\cimwin32.dll </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>50</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:28.326468100+06:59" />
+		<Correlation ActivityID="{6f0bca64-d688-4720-91d5-6abc1f7746e5}" RelatedActivityID="{00000000-0000-0000-0000-000000000000}" />
+		<Execution ProcessID="3340" ThreadID="7452" ProcessorID="3" KernelTime="765" UserTime="210" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<EventData>
+	</EventData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>Activity Transfer </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>11</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:28.326470000+06:59" />
+		<Correlation ActivityID="{6f0bca64-d688-4720-91d5-6abc1f7746e5}" />
+		<Execution ProcessID="3340" ThreadID="7452" ProcessorID="3" KernelTime="765" UserTime="210" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_New xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><CorrelationId>{00000000-0000-0000-0000-000000000000}</CorrelationId><GroupOperationId>511</GroupOperationId><OperationId>10510</OperationId><Operation>Start IWbemServices::ExecMethod - root\WMI : AcpiTest_MULong.InstanceName=&quot;ACPI\\PNP0C14\\1_1&quot;::GetSetULong</Operation><ClientMachine>PC</ClientMachine><ClientMachineFQDN>PC</ClientMachineFQDN><User>NT AUTHORITY\SYSTEM</User><ClientProcessId>12652</ClientProcessId><ClientProcessCreationTime>134193758937311266</ClientProcessCreationTime><NamespaceName>\\.\root\WMI</NamespaceName><IsLocal>true</IsLocal></Operation_New>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>CorrelationId = {00000000-0000-0000-0000-000000000000}; GroupOperationId = 511; OperationId = 10510; Operation = Start IWbemServices::ExecMethod - root\WMI : AcpiTest_MULong.InstanceName=&quot;ACPI\\PNP0C14\\1_1&quot;::GetSetULong; ClientMachine = PC; User = NT AUTHORITY\SYSTEM; ClientProcessId = 12652; NamespaceName = 134193758937311266 </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>50</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:28.327189500+06:59" />
+		<Correlation ActivityID="{67a30f65-4f92-48c1-be62-d507168e0e9b}" RelatedActivityID="{00000000-0000-0000-0000-000000000000}" />
+		<Execution ProcessID="3340" ThreadID="4256" ProcessorID="2" KernelTime="1410" UserTime="2430" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<EventData>
+	</EventData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>Activity Transfer </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>12</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:28.327191200+06:59" />
+		<Correlation ActivityID="{67a30f65-4f92-48c1-be62-d507168e0e9b}" />
+		<Execution ProcessID="3340" ThreadID="4256" ProcessorID="2" KernelTime="1410" UserTime="2430" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_Provider_Info_New xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><GroupOperationId>511</GroupOperationId><Operation>Provider::GetObject - WMIProv : AcpiTest_MULong.InstanceName=&quot;ACPI\\PNP0C14\\1_1&quot;</Operation><HostId>6224</HostId><ProviderName>WMIProv</ProviderName><ProviderGuid>{D2D588B5-D081-11d0-99E0-00C04FC2F8EC}</ProviderGuid><Path>%systemroot%\system32\wbem\wmiprov.dll</Path></Operation_Provider_Info_New>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>ProviderInfo for GroupOperationId = 511; Operation = Provider::GetObject - WMIProv : AcpiTest_MULong.InstanceName=&quot;ACPI\\PNP0C14\\1_1&quot;; HostID = 6224; ProviderName = WMIProv; ProviderGuid = {D2D588B5-D081-11d0-99E0-00C04FC2F8EC}; Path = %systemroot%\system32\wbem\wmiprov.dll </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>50</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:28.328870200+06:59" />
+		<Correlation ActivityID="{96282056-7ea3-4d19-a388-86f64f01cc9b}" RelatedActivityID="{00000000-0000-0000-0000-000000000000}" />
+		<Execution ProcessID="3340" ThreadID="4256" ProcessorID="2" KernelTime="1410" UserTime="2430" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<EventData>
+	</EventData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>Activity Transfer </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>22</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:28.328871600+06:59" />
+		<Correlation ActivityID="{96282056-7ea3-4d19-a388-86f64f01cc9b}" />
+		<Execution ProcessID="3340" ThreadID="4256" ProcessorID="2" KernelTime="1410" UserTime="2430" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<MethodExec xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><CorrelationId>{00000000-0000-0000-0000-000000000000}</CorrelationId><GroupOperationId>511</GroupOperationId><OperationId>510</OperationId><ClassName>AcpiTest_MULong</ClassName><MethodName>GetSetULong</MethodName><ImplementationClass>AcpiTest_MULong</ImplementationClass><ClientMachine>PC</ClientMachine><ClientMachineFQDN>PC</ClientMachineFQDN><User>NT AUTHORITY\SYSTEM</User><ClientProcessId>12652</ClientProcessId><ClientProcessCreationTime>134193758937311266</ClientProcessCreationTime><NamespaceName>\\.\root\WMI</NamespaceName><IsLocal>true</IsLocal></MethodExec>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>CorrelationId = {00000000-0000-0000-0000-000000000000}; GroupOperationId = 511; OperationId = 510; ClassName= AcpiTest_MULong; MethodName = GetSetULong; ImplementationClass = AcpiTest_MULong; ClientMachine = PC; User = NT AUTHORITY\SYSTEM; ClientProcessId = 12652; NamespaceName = \\.\root\WMI </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>50</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:28.328938900+06:59" />
+		<Correlation ActivityID="{faa159a2-0f7f-4fc8-b479-c052cf6f9a76}" RelatedActivityID="{00000000-0000-0000-0000-000000000000}" />
+		<Execution ProcessID="3340" ThreadID="4256" ProcessorID="2" KernelTime="1410" UserTime="2430" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<EventData>
+	</EventData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>Activity Transfer </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>12</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:28.328939900+06:59" />
+		<Correlation ActivityID="{faa159a2-0f7f-4fc8-b479-c052cf6f9a76}" />
+		<Execution ProcessID="3340" ThreadID="4256" ProcessorID="2" KernelTime="1410" UserTime="2430" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_Provider_Info_New xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><GroupOperationId>511</GroupOperationId><Operation>Provider::ExecMethod - WMIProv : AcpiTest_MULong.InstanceName=&quot;ACPI\\PNP0C14\\1_1&quot;::GetSetULong</Operation><HostId>6224</HostId><ProviderName>WMIProv</ProviderName><ProviderGuid>{D2D588B5-D081-11d0-99E0-00C04FC2F8EC}</ProviderGuid><Path>%systemroot%\system32\wbem\wmiprov.dll</Path></Operation_Provider_Info_New>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>ProviderInfo for GroupOperationId = 511; Operation = Provider::ExecMethod - WMIProv : AcpiTest_MULong.InstanceName=&quot;ACPI\\PNP0C14\\1_1&quot;::GetSetULong; HostID = 6224; ProviderName = WMIProv; ProviderGuid = {D2D588B5-D081-11d0-99E0-00C04FC2F8EC}; Path = %systemroot%\system32\wbem\wmiprov.dll </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>50</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:28.334401400+06:59" />
+		<Correlation ActivityID="{c25658eb-dc03-40a9-8273-9e2e00e971fd}" RelatedActivityID="{00000000-0000-0000-0000-000000000000}" />
+		<Execution ProcessID="3340" ThreadID="4256" ProcessorID="3" KernelTime="1410" UserTime="2430" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<EventData>
+	</EventData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>Activity Transfer </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>13</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:28.334402200+06:59" />
+		<Correlation ActivityID="{c25658eb-dc03-40a9-8273-9e2e00e971fd}" />
+		<Execution ProcessID="3340" ThreadID="4256" ProcessorID="3" KernelTime="1410" UserTime="2430" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_Stop_New xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><OperationId>10510</OperationId><ResultCode>0x0</ResultCode></Operation_Stop_New>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>Stop OperationId = 10510; ResultCode = 0x0 </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>11</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:28.335959100+06:59" />
+		<Correlation ActivityID="{00000000-0000-0000-0000-000000000000}" />
+		<Execution ProcessID="3340" ThreadID="7452" ProcessorID="4" KernelTime="765" UserTime="225" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_New xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><CorrelationId></CorrelationId><GroupOperationId>10512</GroupOperationId><OperationId>10512</OperationId><Operation>IWbemServices::Connect</Operation><ClientMachine>PC</ClientMachine><ClientMachineFQDN>PC</ClientMachineFQDN><User>NT AUTHORITY\SYSTEM</User><ClientProcessId>12652</ClientProcessId><ClientProcessCreationTime>134193758937311266</ClientProcessCreationTime><NamespaceName>\\.\root\WMI</NamespaceName><IsLocal>true</IsLocal></Operation_New>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>CorrelationId = ; GroupOperationId = 10512; OperationId = 10512; Operation = IWbemServices::Connect; ClientMachine = PC; User = NT AUTHORITY\SYSTEM; ClientProcessId = 12652; NamespaceName = 134193758937311266 </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>50</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:28.336548100+06:59" />
+		<Correlation ActivityID="{c70e2407-9de3-4d72-bb48-021576b2565f}" RelatedActivityID="{00000000-0000-0000-0000-000000000000}" />
+		<Execution ProcessID="3340" ThreadID="7452" ProcessorID="4" KernelTime="765" UserTime="225" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<EventData>
+	</EventData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>Activity Transfer </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>11</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:28.336549300+06:59" />
+		<Correlation ActivityID="{c70e2407-9de3-4d72-bb48-021576b2565f}" />
+		<Execution ProcessID="3340" ThreadID="7452" ProcessorID="4" KernelTime="765" UserTime="225" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_New xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><CorrelationId>{00000000-0000-0000-0000-000000000000}</CorrelationId><GroupOperationId>10513</GroupOperationId><OperationId>10514</OperationId><Operation>Start IWbemServices::ExecQuery - root\WMI : select * from WmiMonitorBrightness</Operation><ClientMachine>PC</ClientMachine><ClientMachineFQDN>PC</ClientMachineFQDN><User>NT AUTHORITY\SYSTEM</User><ClientProcessId>12652</ClientProcessId><ClientProcessCreationTime>134193758937311266</ClientProcessCreationTime><NamespaceName>\\.\root\WMI</NamespaceName><IsLocal>true</IsLocal></Operation_New>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>CorrelationId = {00000000-0000-0000-0000-000000000000}; GroupOperationId = 10513; OperationId = 10514; Operation = Start IWbemServices::ExecQuery - root\WMI : select * from WmiMonitorBrightness; ClientMachine = PC; User = NT AUTHORITY\SYSTEM; ClientProcessId = 12652; NamespaceName = 134193758937311266 </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>50</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:28.337317800+06:59" />
+		<Correlation ActivityID="{5a7c5957-f9ba-4831-b254-8ea559777b54}" RelatedActivityID="{00000000-0000-0000-0000-000000000000}" />
+		<Execution ProcessID="3340" ThreadID="4280" ProcessorID="3" KernelTime="660" UserTime="825" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<EventData>
+	</EventData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>Activity Transfer </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>12</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:28.337319300+06:59" />
+		<Correlation ActivityID="{5a7c5957-f9ba-4831-b254-8ea559777b54}" />
+		<Execution ProcessID="3340" ThreadID="4280" ProcessorID="3" KernelTime="660" UserTime="825" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_Provider_Info_New xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><GroupOperationId>10513</GroupOperationId><Operation>Provider::CreateInstanceEnum - WMIProv : WmiMonitorBrightness</Operation><HostId>6224</HostId><ProviderName>WMIProv</ProviderName><ProviderGuid>{D2D588B5-D081-11d0-99E0-00C04FC2F8EC}</ProviderGuid><Path>%systemroot%\system32\wbem\wmiprov.dll</Path></Operation_Provider_Info_New>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>ProviderInfo for GroupOperationId = 10513; Operation = Provider::CreateInstanceEnum - WMIProv : WmiMonitorBrightness; HostID = 6224; ProviderName = WMIProv; ProviderGuid = {D2D588B5-D081-11d0-99E0-00C04FC2F8EC}; Path = %systemroot%\system32\wbem\wmiprov.dll </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>50</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:28.338950000+06:59" />
+		<Correlation ActivityID="{5365d839-5da8-41d5-bfcd-fa27b42995b5}" RelatedActivityID="{00000000-0000-0000-0000-000000000000}" />
+		<Execution ProcessID="3340" ThreadID="8328" ProcessorID="5" KernelTime="15465" UserTime="7950" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<EventData>
+	</EventData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>Activity Transfer </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>13</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:28.338951300+06:59" />
+		<Correlation ActivityID="{5365d839-5da8-41d5-bfcd-fa27b42995b5}" />
+		<Execution ProcessID="3340" ThreadID="8328" ProcessorID="5" KernelTime="15465" UserTime="7950" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_Stop_New xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><OperationId>10514</OperationId><ResultCode>0x0</ResultCode></Operation_Stop_New>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>Stop OperationId = 10514; ResultCode = 0x0 </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>24</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:29.334306300+06:59" />
+		<Correlation ActivityID="{395adfa7-c083-0015-1ae4-5a3983c0dc01}" />
+		<Execution ProcessID="3340" ThreadID="8328" ProcessorID="13" KernelTime="15465" UserTime="7950" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_PollingQuery xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><GroupOperationId>394</GroupOperationId><Query>select * from Win32_Process</Query><NamespaceName>//./root/CIMV2</NamespaceName></Operation_PollingQuery>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>GroupOperationId = 394; Executing polling query select * from Win32_Process in namespace //./root/CIMV2 </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>50</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:29.335896100+06:59" />
+		<Correlation ActivityID="{574d122e-62bb-497b-8696-30b962da6c1b}" RelatedActivityID="{00000000-0000-0000-0000-000000000000}" />
+		<Execution ProcessID="3340" ThreadID="4280" ProcessorID="3" KernelTime="660" UserTime="825" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<EventData>
+	</EventData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>Activity Transfer </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>12</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:29.335897800+06:59" />
+		<Correlation ActivityID="{574d122e-62bb-497b-8696-30b962da6c1b}" />
+		<Execution ProcessID="3340" ThreadID="4280" ProcessorID="3" KernelTime="660" UserTime="825" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_Provider_Info_New xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><GroupOperationId>440</GroupOperationId><Operation>Provider::CreateInstanceEnum - CIMWin32 : Win32_Process</Operation><HostId>6616</HostId><ProviderName>CIMWin32</ProviderName><ProviderGuid>{d63a5850-8f16-11cf-9f47-00aa00bf345c}</ProviderGuid><Path>%systemroot%\system32\wbem\cimwin32.dll</Path></Operation_Provider_Info_New>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>ProviderInfo for GroupOperationId = 440; Operation = Provider::CreateInstanceEnum - CIMWin32 : Win32_Process; HostID = 6616; ProviderName = CIMWin32; ProviderGuid = {d63a5850-8f16-11cf-9f47-00aa00bf345c}; Path = %systemroot%\system32\wbem\cimwin32.dll </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>24</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:31.420528900+06:59" />
+		<Correlation ActivityID="{395adfa7-c083-0015-1ae4-5a3983c0dc01}" />
+		<Execution ProcessID="3340" ThreadID="8328" ProcessorID="1" KernelTime="15480" UserTime="7950" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_PollingQuery xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><GroupOperationId>394</GroupOperationId><Query>select * from Win32_Process</Query><NamespaceName>//./root/CIMV2</NamespaceName></Operation_PollingQuery>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>GroupOperationId = 394; Executing polling query select * from Win32_Process in namespace //./root/CIMV2 </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>50</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:31.421863500+06:59" />
+		<Correlation ActivityID="{78ba73be-9aa3-4d55-af63-d1af36685747}" RelatedActivityID="{00000000-0000-0000-0000-000000000000}" />
+		<Execution ProcessID="3340" ThreadID="4280" ProcessorID="4" KernelTime="660" UserTime="825" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<EventData>
+	</EventData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>Activity Transfer </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>12</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:31.421865300+06:59" />
+		<Correlation ActivityID="{78ba73be-9aa3-4d55-af63-d1af36685747}" />
+		<Execution ProcessID="3340" ThreadID="4280" ProcessorID="4" KernelTime="660" UserTime="825" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_Provider_Info_New xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><GroupOperationId>440</GroupOperationId><Operation>Provider::CreateInstanceEnum - CIMWin32 : Win32_Process</Operation><HostId>6616</HostId><ProviderName>CIMWin32</ProviderName><ProviderGuid>{d63a5850-8f16-11cf-9f47-00aa00bf345c}</ProviderGuid><Path>%systemroot%\system32\wbem\cimwin32.dll</Path></Operation_Provider_Info_New>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>ProviderInfo for GroupOperationId = 440; Operation = Provider::CreateInstanceEnum - CIMWin32 : Win32_Process; HostID = 6616; ProviderName = CIMWin32; ProviderGuid = {d63a5850-8f16-11cf-9f47-00aa00bf345c}; Path = %systemroot%\system32\wbem\cimwin32.dll </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>24</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:33.507050700+06:59" />
+		<Correlation ActivityID="{395adfa7-c083-0015-1ae4-5a3983c0dc01}" />
+		<Execution ProcessID="3340" ThreadID="8328" ProcessorID="4" KernelTime="15480" UserTime="7965" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_PollingQuery xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><GroupOperationId>394</GroupOperationId><Query>select * from Win32_Process</Query><NamespaceName>//./root/CIMV2</NamespaceName></Operation_PollingQuery>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>GroupOperationId = 394; Executing polling query select * from Win32_Process in namespace //./root/CIMV2 </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>50</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:33.508433700+06:59" />
+		<Correlation ActivityID="{2e828bdc-900e-411b-8f54-e21403a64bca}" RelatedActivityID="{00000000-0000-0000-0000-000000000000}" />
+		<Execution ProcessID="3340" ThreadID="4280" ProcessorID="5" KernelTime="660" UserTime="825" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<EventData>
+	</EventData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>Activity Transfer </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>12</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:33.508435300+06:59" />
+		<Correlation ActivityID="{2e828bdc-900e-411b-8f54-e21403a64bca}" />
+		<Execution ProcessID="3340" ThreadID="4280" ProcessorID="5" KernelTime="660" UserTime="825" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_Provider_Info_New xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><GroupOperationId>440</GroupOperationId><Operation>Provider::CreateInstanceEnum - CIMWin32 : Win32_Process</Operation><HostId>6616</HostId><ProviderName>CIMWin32</ProviderName><ProviderGuid>{d63a5850-8f16-11cf-9f47-00aa00bf345c}</ProviderGuid><Path>%systemroot%\system32\wbem\cimwin32.dll</Path></Operation_Provider_Info_New>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>ProviderInfo for GroupOperationId = 440; Operation = Provider::CreateInstanceEnum - CIMWin32 : Win32_Process; HostID = 6616; ProviderName = CIMWin32; ProviderGuid = {d63a5850-8f16-11cf-9f47-00aa00bf345c}; Path = %systemroot%\system32\wbem\cimwin32.dll </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>24</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:35.579520400+06:59" />
+		<Correlation ActivityID="{395adfa7-c083-0015-1ae4-5a3983c0dc01}" />
+		<Execution ProcessID="3340" ThreadID="8328" ProcessorID="8" KernelTime="15495" UserTime="7965" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_PollingQuery xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><GroupOperationId>394</GroupOperationId><Query>select * from Win32_Process</Query><NamespaceName>//./root/CIMV2</NamespaceName></Operation_PollingQuery>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>GroupOperationId = 394; Executing polling query select * from Win32_Process in namespace //./root/CIMV2 </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>50</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:35.580438500+06:59" />
+		<Correlation ActivityID="{d3a91bd5-8b34-4a3b-ba6e-462331b2ce7f}" RelatedActivityID="{00000000-0000-0000-0000-000000000000}" />
+		<Execution ProcessID="3340" ThreadID="4280" ProcessorID="8" KernelTime="660" UserTime="825" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<EventData>
+	</EventData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>Activity Transfer </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>12</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:35.580439300+06:59" />
+		<Correlation ActivityID="{d3a91bd5-8b34-4a3b-ba6e-462331b2ce7f}" />
+		<Execution ProcessID="3340" ThreadID="4280" ProcessorID="8" KernelTime="660" UserTime="825" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_Provider_Info_New xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><GroupOperationId>440</GroupOperationId><Operation>Provider::CreateInstanceEnum - CIMWin32 : Win32_Process</Operation><HostId>6616</HostId><ProviderName>CIMWin32</ProviderName><ProviderGuid>{d63a5850-8f16-11cf-9f47-00aa00bf345c}</ProviderGuid><Path>%systemroot%\system32\wbem\cimwin32.dll</Path></Operation_Provider_Info_New>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>ProviderInfo for GroupOperationId = 440; Operation = Provider::CreateInstanceEnum - CIMWin32 : Win32_Process; HostID = 6616; ProviderName = CIMWin32; ProviderGuid = {d63a5850-8f16-11cf-9f47-00aa00bf345c}; Path = %systemroot%\system32\wbem\cimwin32.dll </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>24</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:37.651365900+06:59" />
+		<Correlation ActivityID="{395adfa7-c083-0015-1ae4-5a3983c0dc01}" />
+		<Execution ProcessID="3340" ThreadID="8328" ProcessorID="1" KernelTime="15495" UserTime="7965" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_PollingQuery xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><GroupOperationId>394</GroupOperationId><Query>select * from Win32_Process</Query><NamespaceName>//./root/CIMV2</NamespaceName></Operation_PollingQuery>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>GroupOperationId = 394; Executing polling query select * from Win32_Process in namespace //./root/CIMV2 </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>50</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:37.652569600+06:59" />
+		<Correlation ActivityID="{55071f8f-511d-4737-9185-e5f381fc93f2}" RelatedActivityID="{00000000-0000-0000-0000-000000000000}" />
+		<Execution ProcessID="3340" ThreadID="4280" ProcessorID="7" KernelTime="660" UserTime="825" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<EventData>
+	</EventData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>Activity Transfer </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>12</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:37.652570600+06:59" />
+		<Correlation ActivityID="{55071f8f-511d-4737-9185-e5f381fc93f2}" />
+		<Execution ProcessID="3340" ThreadID="4280" ProcessorID="7" KernelTime="660" UserTime="825" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_Provider_Info_New xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><GroupOperationId>440</GroupOperationId><Operation>Provider::CreateInstanceEnum - CIMWin32 : Win32_Process</Operation><HostId>6616</HostId><ProviderName>CIMWin32</ProviderName><ProviderGuid>{d63a5850-8f16-11cf-9f47-00aa00bf345c}</ProviderGuid><Path>%systemroot%\system32\wbem\cimwin32.dll</Path></Operation_Provider_Info_New>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>ProviderInfo for GroupOperationId = 440; Operation = Provider::CreateInstanceEnum - CIMWin32 : Win32_Process; HostID = 6616; ProviderName = CIMWin32; ProviderGuid = {d63a5850-8f16-11cf-9f47-00aa00bf345c}; Path = %systemroot%\system32\wbem\cimwin32.dll </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>24</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:39.715880500+06:59" />
+		<Correlation ActivityID="{395adfa7-c083-0015-1ae4-5a3983c0dc01}" />
+		<Execution ProcessID="3340" ThreadID="8328" ProcessorID="10" KernelTime="15510" UserTime="7965" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_PollingQuery xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><GroupOperationId>394</GroupOperationId><Query>select * from Win32_Process</Query><NamespaceName>//./root/CIMV2</NamespaceName></Operation_PollingQuery>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>GroupOperationId = 394; Executing polling query select * from Win32_Process in namespace //./root/CIMV2 </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>50</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:39.717186100+06:59" />
+		<Correlation ActivityID="{a04ce95a-fd5f-4316-b329-b8dd7c45a198}" RelatedActivityID="{00000000-0000-0000-0000-000000000000}" />
+		<Execution ProcessID="3340" ThreadID="4280" ProcessorID="6" KernelTime="660" UserTime="825" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<EventData>
+	</EventData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>Activity Transfer </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Name="Microsoft-Windows-WMI-Activity" Guid="{1418ef04-b0b4-4623-bf7e-d74ab47bbdaa}" />
+		<EventID>12</EventID>
+		<Version>0</Version>
+		<Level>4</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x8000000000000000</Keywords>
+		<TimeCreated SystemTime="2026-03-31T05:42:39.717187700+06:59" />
+		<Correlation ActivityID="{a04ce95a-fd5f-4316-b329-b8dd7c45a198}" />
+		<Execution ProcessID="3340" ThreadID="4280" ProcessorID="6" KernelTime="660" UserTime="825" />
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Computer />
+	</System>
+	<UserData>
+		<Operation_Provider_Info_New xmlns='http://manifests.microsoft.com/win/2006/windows/WMI'><GroupOperationId>440</GroupOperationId><Operation>Provider::CreateInstanceEnum - CIMWin32 : Win32_Process</Operation><HostId>6616</HostId><ProviderName>CIMWin32</ProviderName><ProviderGuid>{d63a5850-8f16-11cf-9f47-00aa00bf345c}</ProviderGuid><Path>%systemroot%\system32\wbem\cimwin32.dll</Path></Operation_Provider_Info_New>
+	</UserData>
+	<RenderingInfo Culture="en-US">
+		<Level>Information </Level>
+		<Message>ProviderInfo for GroupOperationId = 440; Operation = Provider::CreateInstanceEnum - CIMWin32 : Win32_Process; HostID = 6616; ProviderName = CIMWin32; ProviderGuid = {d63a5850-8f16-11cf-9f47-00aa00bf345c}; Path = %systemroot%\system32\wbem\cimwin32.dll </Message>
+		<Channel>Microsoft-Windows-WMI-Activity/Trace</Channel>
+		<Provider>Microsoft-Windows-WMI-Activity </Provider>
+	</RenderingInfo>
+</Event>
+</Events>

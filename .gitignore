@@ -1,0 +1,35 @@
+# Build artifacts
+bin/
+obj/
+*.pdb
+*.exe
+
+# Claude local state
+.claude/
+.claude-trace/
+
+# Unrelated side projects
+browser-use/
+tuxedo/
+tuxedo-kernel/
+syncthing-backup/
+
+# Build backup zips at repo root
+/MechControl-*.zip
+
+# Log files
+*.log
+
+# Misc scratch
+*.webp
+
+# Editor / IDE
+.vs/
+.idea/
+*.suo
+*.user
+
+# OS
+Thumbs.db
+.DS_Store
+desktop.ini
