@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<linker>
+  <!-- WinForms COM interop needs this type for UIA cleanup (ReleaseUiaProvider) -->
+  <assembly fullname="System.Private.CoreLib">
+    <type fullname="System.StubHelpers.InterfaceMarshaler" />
+  </assembly>
+</linker>

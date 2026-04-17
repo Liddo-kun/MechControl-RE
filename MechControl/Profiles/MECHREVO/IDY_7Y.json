@@ -1,0 +1,66 @@
+{
+  "projectId": "IDY_7Y",
+  "projectIdValue": 13,
+  "verified": false,
+  "driver": { "devicePath": "\\\\.\\ACPIDriver" },
+  "registers": {
+    "PL1": "0x783", "PL2": "0x784", "PL4": "0x785",
+    "cpuTempLimitRead": "0x463", "cpuTempLimitWrite": "0x786",
+    "tgpDbCtrl": "0x743", "tgp": "0x744", "dbTotalPower": "0x745", "dbMaxTgp": "0x746",
+    "fanControlMode": "0x751", "fanCurveEnable": "0x7C5",
+    "cpuFanDuty": "0x75B", "gpuFanDuty": "0x75C",
+    "cpuTemp": "0x43E", "gpuTemp": "0x44F",
+    "cpuFanRpmLo": "0x464", "cpuFanRpmHi": "0x465",
+    "gpuFanRpmLo": "0x46B", "gpuFanRpmHi": "0x46C",
+    "statusByte": "0x768",
+    "batteryMode": "0x7A6", "batterySoc": "0x4AB",
+    "logoOnOff": "0x7AB", "logoR": "0x769", "logoG": "0x76A", "logoB": "0x76B",
+    "logoTrigger": "0x767", "logoCommit": "0x78C",
+    "projectId": "0x740",
+    "fanSwitchSpeed": "0x787"
+  },
+  "fanTable": {
+    "format": "RamFan1",
+    "cpuTempUpBase": "0xF00", "cpuTempDownBase": "0xF10", "cpuDutyBase": "0xF20",
+    "gpuTempUpBase": "0xF30", "gpuTempDownBase": "0xF40", "gpuDutyBase": "0xF50",
+    "entriesPerArray": 16, "activeEntries": 10,
+    "paddingTemp": 255, "paddingDuty": 200
+  },
+  "limits": {
+    "PL1":  { "min": 10, "max": 210, "encoding": "direct" },
+    "PL2":  { "min": 10, "max": 210, "encoding": "direct" },
+    "PL4":  { "min": 10, "max": 420 },
+    "cpuTempLimit": { "min": 80, "max": 95, "encoding": "inverted_offset", "tjMax": 105 },
+    "TGP":  { "min": 95, "max": 150, "encoding": "offset", "offset": 95 },
+    "dynamicBoost": { "min": 5, "max": 25, "encoding": "direct" },
+    "fanDuty": { "min": 0, "max": 200, "encoding": "raw_div_2_percent" },
+    "fanTemp": { "min": 0, "max": 105, "encoding": "direct" },
+    "fanSwitchSpeed": { "min": 100, "max": 12700, "encoding": "fan_switch_speed" }
+  },
+  "bitfields": {
+    "fanCurveEnable":  { "register": "0x7C5", "bit": 7 },
+    "batteryMode":     { "register": "0x7A6", "mask": "0x38" },
+    "logoOnOff":       { "register": "0x7AB", "bit": 7 },
+    "dynamicBoostEn":  { "register": "0x743", "mask": "0x07" }
+  },
+  "batteryModes": [
+    { "name": "High Capacity", "value": "0x08" },
+    { "name": "Balanced",      "value": "0x18" },
+    { "name": "Stationary",    "value": "0x28" }
+  ],
+  "defaultLogo": { "r": 0, "g": 0, "b": 50, "onOff": 0 },
+  "skipVerify": ["0x767", "0x78C", "0x741", "0x7C6", "0x708", "0x709", "0x748", "0x706", "0x7C7"],
+  "verifyRedirect": {
+    "0x786": { "readAddr": "0x463", "transform": "inverted_offset", "tjMax": 105 }
+  },
+  "writeAllowlist": [
+    "0x783", "0x784", "0x785", "0x786",
+    "0x743", "0x744", "0x745", "0x746",
+    "0x751", "0x7C5", "0x7A6",
+    "0x767", "0x769", "0x76A", "0x76B", "0x7AB", "0x78C",
+    "0x787",
+    "0x741", "0x7C6",
+    "0x708", "0x709", "0x748", "0x706", "0x7C7",
+    "0xF00-0xF5F"
+  ]
+}
