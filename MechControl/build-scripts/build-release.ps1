@@ -183,11 +183,17 @@ Copy-Item (Join-Path $trimHelper 'Microsoft.Windows.SDK.NET.dll') $releaseDir -F
 Copy-Item (Join-Path $trimHelper 'WinRT.Runtime.dll') $releaseDir -Force
 Remove-Item $trimHelper -Recurse -Force
 
-# Clean up win-x64 intermediate that publish leaves behind
+# Clean up win-x64 intermediate that publish leaves behind.
 $winx64 = Join-Path $releaseDir 'win-x64'
 if (Test-Path $winx64) { Remove-Item $winx64 -Recurse -Force }
-$runtimes = Join-Path $releaseDir 'runtimes'
-if (Test-Path $runtimes) { Remove-Item $runtimes -Recurse -Force }
+
+# Drop the RID-neutral System.Management.dll stub at the root. deps.json has a
+# runtimeTargets override for rid=win pointing to runtimes/win/lib/net8.0/, so
+# CoreCLR loads the real 312 KB Windows impl and the 73 KB root stub is never
+# used. Keep runtimes/win/ — deleting it breaks LocalDimmingControl with
+# "Could not load file or assembly 'System.Management'".
+$rootStub = Join-Path $releaseDir 'System.Management.dll'
+if (Test-Path $rootStub) { Remove-Item $rootStub -Force }
 
 $regSize = Get-DirSizeMB $releaseDir
 Write-Host "Framework-dependent build: ${regSize} MB" -ForegroundColor Green
@@ -284,6 +290,10 @@ $staging = Join-Path $binDir '_staging'
 New-Item $staging -ItemType Directory -Force | Out-Null
 Get-ChildItem $releaseDir -File | Copy-Item -Destination $staging
 Copy-Item (Join-Path $releaseDir 'Profiles') (Join-Path $staging 'Profiles') -Recurse
+$runtimes = Join-Path $releaseDir 'runtimes'
+if (Test-Path $runtimes) {
+    Copy-Item $runtimes (Join-Path $staging 'runtimes') -Recurse
+}
 
 $fwZip = Join-Path $outDir 'MechControl-release.zip'
 Compress-Archive -Path "$staging\*" -DestinationPath $fwZip -Force

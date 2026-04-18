@@ -31,122 +31,84 @@ class BatteryTab : UserControl
         _addrBatteryMode = profile.GetRegister("batteryMode");
 
         Dock = DockStyle.Fill;
-        AutoScroll = true;
 
-        int y = 16;
+        var stack = UiHelpers.BuildSectionStack();
 
-        var lblTitle = new Label
+        // ── Charging Mode section ────────────────────────────────
+        var grpMode = UiHelpers.BuildSection("Battery Charging Mode", fitContent: true);
+        var modeLayout = new TableLayoutPanel
         {
-            Text = "Battery Charging Mode",
-            Location = new System.Drawing.Point(16, y),
             AutoSize = true,
-            Font = UiHelpers.FontHeader
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ColumnCount = 1,
         };
-        Controls.Add(lblTitle);
-        y += 32;
+        modeLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 
-        // High Capacity
         _radioHighCapacity = new RadioButton
         {
             Text = "High Capacity (Performance)",
-            Location = new System.Drawing.Point(16, y),
             AutoSize = true,
-            Checked = true
+            Checked = true,
+            Margin = new Padding(0, 0, 0, 0),
         };
-        Controls.Add(_radioHighCapacity);
-        y += 22;
+        modeLayout.Controls.Add(_radioHighCapacity);
+        modeLayout.Controls.Add(MakeHint(
+            "Charges to 100%. Best for maximum runtime per charge."));
 
-        Controls.Add(new Label
-        {
-            Text = "Charges to 100%. Best for maximum runtime per charge.",
-            Location = new System.Drawing.Point(36, y),
-            AutoSize = true,
-            ForeColor = System.Drawing.SystemColors.GrayText
-        });
-        y += 30;
-
-        // Balanced
         _radioBalanced = new RadioButton
         {
             Text = "Balanced",
-            Location = new System.Drawing.Point(16, y),
-            AutoSize = true
-        };
-        Controls.Add(_radioBalanced);
-        y += 22;
-
-        Controls.Add(new Label
-        {
-            Text = "Charges to ~80%. Good balance between longevity and capacity.",
-            Location = new System.Drawing.Point(36, y),
             AutoSize = true,
-            ForeColor = System.Drawing.SystemColors.GrayText
-        });
-        y += 30;
+            Margin = new Padding(0, UiMetrics.RowGap, 0, 0),
+        };
+        modeLayout.Controls.Add(_radioBalanced);
+        modeLayout.Controls.Add(MakeHint(
+            "Charges to ~80%. Good balance between longevity and capacity."));
 
-        // Stationary
         _radioStationary = new RadioButton
         {
             Text = "Stationary (Health)",
-            Location = new System.Drawing.Point(16, y),
-            AutoSize = true
-        };
-        Controls.Add(_radioStationary);
-        y += 22;
-
-        Controls.Add(new Label
-        {
-            Text = "Charges to ~60%. Best for battery longevity when always plugged in.",
-            Location = new System.Drawing.Point(36, y),
             AutoSize = true,
-            ForeColor = System.Drawing.SystemColors.GrayText
-        });
-        y += 40;
-
-        // Buttons
-        var btnApply = new Button
-        {
-            Text = "Apply",
-            Location = new System.Drawing.Point(16, y),
-            Size = new System.Drawing.Size(100, 32)
+            Margin = new Padding(0, UiMetrics.RowGap, 0, 0),
         };
-        btnApply.Click += BtnApply_Click;
-        Controls.Add(btnApply);
+        modeLayout.Controls.Add(_radioStationary);
+        modeLayout.Controls.Add(MakeHint(
+            "Charges to ~60%. Best for battery longevity when always plugged in."));
 
-        var btnRead = new Button
+        var (btnApply, btnRead) = UiHelpers.BuildApplyReadRow(BtnApply_Click, BtnRead_Click);
+        var buttonRow = new FlowLayoutPanel
         {
-            Text = "Read from EC",
-            Location = new System.Drawing.Point(126, y),
-            Size = new System.Drawing.Size(140, 32)
-        };
-        btnRead.Click += BtnRead_Click;
-        Controls.Add(btnRead);
-        y += 52;
-
-        // ── Battery Telemetry Section ────────────────────────────
-        var lblTelemetryTitle = new Label
-        {
-            Text = "Battery Telemetry",
-            Location = new System.Drawing.Point(16, y),
             AutoSize = true,
-            Font = UiHelpers.FontHeader
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            FlowDirection = FlowDirection.LeftToRight,
+            Margin = new Padding(0, UiMetrics.RowGap, 0, 0),
         };
-        Controls.Add(lblTelemetryTitle);
-        y += 32;
+        buttonRow.Controls.Add(btnApply);
+        buttonRow.Controls.Add(btnRead!);
+        modeLayout.Controls.Add(buttonRow);
 
-        int labelX = 16;
-        int valueX = 280;
+        grpMode.Controls.Add(modeLayout);
+        stack.Controls.Add(grpMode);
 
-        _lblPowerSource   = UiHelpers.AddLabeledRow(this, ref y, labelX, valueX, "Power Source [0x490]:");
-        _lblCharge        = UiHelpers.AddLabeledRow(this, ref y, labelX, valueX, "State of Charge [0x4AB]:");
-        _lblHealth        = UiHelpers.AddLabeledRow(this, ref y, labelX, valueX, "Battery Health (SOH) [0x404/402]:");
-        _lblCycleCount    = UiHelpers.AddLabeledRow(this, ref y, labelX, valueX, "Cycle Count [0x4A6-0x4A7]:");
-        _lblTemperature   = UiHelpers.AddLabeledRow(this, ref y, labelX, valueX, "Temperature [0x4A2-0x4A3]:");
-        _lblDesignCap     = UiHelpers.AddLabeledRow(this, ref y, labelX, valueX, "Design Capacity [0x402-0x403]:");
-        _lblFullChargeCap = UiHelpers.AddLabeledRow(this, ref y, labelX, valueX, "Full Charge Cap [0x404-0x405]:");
-        _lblRemainingCap  = UiHelpers.AddLabeledRow(this, ref y, labelX, valueX, "Remaining Cap [0x436-0x437]:");
-        _lblVoltage       = UiHelpers.AddLabeledRow(this, ref y, labelX, valueX, "Voltage [0x438/0x408]:");
-        _lblChargeRate    = UiHelpers.AddLabeledRow(this, ref y, labelX, valueX, "Charge Rate [0x434-0x435]:");
+        // ── Battery Telemetry section ───────────────────────────
+        var grpTelemetry = UiHelpers.BuildSection("Battery Telemetry", fitContent: true);
+        var telemetryLayout = UiHelpers.BuildKeyValueTable();
+
+        _lblPowerSource   = UiHelpers.AddKeyValueRow(telemetryLayout, "Power Source [0x490]:");
+        _lblCharge        = UiHelpers.AddKeyValueRow(telemetryLayout, "State of Charge [0x4AB]:");
+        _lblHealth        = UiHelpers.AddKeyValueRow(telemetryLayout, "Battery Health (SOH) [0x404/402]:");
+        _lblCycleCount    = UiHelpers.AddKeyValueRow(telemetryLayout, "Cycle Count [0x4A6-0x4A7]:");
+        _lblTemperature   = UiHelpers.AddKeyValueRow(telemetryLayout, "Temperature [0x4A2-0x4A3]:");
+        _lblDesignCap     = UiHelpers.AddKeyValueRow(telemetryLayout, "Design Capacity [0x402-0x403]:");
+        _lblFullChargeCap = UiHelpers.AddKeyValueRow(telemetryLayout, "Full Charge Cap [0x404-0x405]:");
+        _lblRemainingCap  = UiHelpers.AddKeyValueRow(telemetryLayout, "Remaining Cap [0x436-0x437]:");
+        _lblVoltage       = UiHelpers.AddKeyValueRow(telemetryLayout, "Voltage [0x438/0x408]:");
+        _lblChargeRate    = UiHelpers.AddKeyValueRow(telemetryLayout, "Charge Rate [0x434-0x435]:");
+
+        grpTelemetry.Controls.Add(telemetryLayout);
+        stack.Controls.Add(grpTelemetry);
+
+        Controls.Add(stack);
 
         // Tooltips for mode radio buttons
         _tooltip.SetToolTip(_radioHighCapacity, $"Register 0x{_addrBatteryMode:X3} | Value: 0x{control.GetModeValue(0):X2}");
@@ -156,9 +118,15 @@ class BatteryTab : UserControl
         // Auto-refresh telemetry every 2 seconds
         _telemetryTimer = new System.Windows.Forms.Timer { Interval = 2000 };
         _telemetryTimer.Tick += (_, _) => RefreshTelemetry();
-
-        UiHelpers.FixZOrder(Controls);
     }
+
+    private static Label MakeHint(string text) => new()
+    {
+        Text = text,
+        AutoSize = true,
+        ForeColor = UiColors.Hint,
+        Margin = new Padding(20, 0, 0, UiMetrics.RowGap),
+    };
 
     private int SelectedMode =>
         _radioHighCapacity.Checked ? 0 :
@@ -177,18 +145,8 @@ class BatteryTab : UserControl
 
     public void RefreshFromEc()
     {
-        try
-        {
-            int mode = _control.ReadBatteryMode();
-            SelectMode(mode);
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(
-                $"Failed to read battery mode:\n{ex.Message}",
-                "EC Read Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-        }
-
+        UiHelpers.TryUi(() => SelectMode(_control.ReadBatteryMode()),
+            "read battery mode", "EC Read Error");
         RefreshTelemetry();
     }
 
@@ -225,22 +183,22 @@ class BatteryTab : UserControl
         }
     }
 
-    private void BtnApply_Click(object? sender, EventArgs e)
-    {
-        try
-        {
-            _control.SetBatteryMode(SelectedMode);
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(
-                $"Failed to set battery mode:\n{ex.Message}",
-                "EC Write Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-        }
-    }
+    private void BtnApply_Click(object? sender, EventArgs e) =>
+        UiHelpers.TryUi(() => _control.SetBatteryMode(SelectedMode),
+            "set battery mode", "EC Write Error");
 
     private void BtnRead_Click(object? sender, EventArgs e)
     {
         RefreshFromEc();
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _telemetryTimer.Dispose();
+            _tooltip.Dispose();
+        }
+        base.Dispose(disposing);
     }
 }

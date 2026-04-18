@@ -15,11 +15,10 @@ class FanTab : UserControl
     private readonly CheckBox? _chkLinkFans;
     private readonly FanCurvePanel _cpuCurvePanel;
     private readonly FanCurvePanel _gpuCurvePanel;
-    private readonly Panel? _linkedStatusPanel;
+    private readonly LinkedFanStatusBar? _linkedStatusBar;
     private readonly Label _lblValidation;
     private readonly CheckBox? _chkSwitchSpeed;
     private readonly TrackBar? _sliderSwitchSpeed;
-    private readonly Label? _lblSwitchSpeedValue;
     private Button? _btnApplySwitchSpeed;
     private readonly Button _btnApply;
     private readonly Button _btnRead;
@@ -39,77 +38,221 @@ class FanTab : UserControl
         _hasGpuFan = profile.FanTable.HasGpuFan;
         _curveEditingEnabled = profile.FanTable.Format == "RamFan1";
         Dock = DockStyle.Fill;
-        AutoScroll = true;
 
-        int y = 12;
+        var stack = UiHelpers.BuildSectionStack();
 
-        // --- Fan Boost toggle ---
+        // ── Fan Boost section ────────────────────────────────────
+        var grpBoost = UiHelpers.BuildSection("Fan Boost", fitContent: true);
         _chkFanBoost = new CheckBox
         {
-            Text = "Fan Boost",
-            Location = new System.Drawing.Point(16, y),
+            Text = "Enable Fan Boost",
             AutoSize = true,
-            Font = UiHelpers.FontBold
+            Font = UiHelpers.FontBold,
+            Anchor = AnchorStyles.Left,
+            Margin = new Padding(0, 6, 16, 0),
         };
-        Controls.Add(_chkFanBoost);
+        var btnApplyBoost = UiHelpers.BuildApplyButton(
+            "Apply Boost", BtnApplyBoost_Click, margin: new Padding(0));
+        btnApplyBoost.Anchor = AnchorStyles.Left;
 
-        var btnApplyBoost = new Button
+        var boostLayout = new FlowLayoutPanel
         {
-            Text = "Apply Boost",
-            Location = new System.Drawing.Point(160, y),
-            Size = new System.Drawing.Size(110, 32)
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            FlowDirection = FlowDirection.LeftToRight,
         };
-        btnApplyBoost.Click += BtnApplyBoost_Click;
-        Controls.Add(btnApplyBoost);
+        boostLayout.Controls.Add(_chkFanBoost);
+        boostLayout.Controls.Add(btnApplyBoost);
+        grpBoost.Controls.Add(boostLayout);
+        stack.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        stack.Controls.Add(grpBoost);
 
-        y += 32;
+        // ── Fan Switch Speed section (conditional) ───────────────
+        if (_switchSpeedControl != null)
+        {
+            var grpSwitch = UiHelpers.BuildSection("Fan Switch Speed");
+            var switchStack = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 1,
+            };
+            switchStack.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
 
-        // --- Fan Curve Enable toggle ---
+            _chkSwitchSpeed = new CheckBox
+            {
+                Text = "Enable Fan Switch Speed",
+                AutoSize = true,
+                Font = UiHelpers.FontBold,
+                Margin = new Padding(0, 4, 0, 0),
+            };
+            switchStack.Controls.Add(_chkSwitchSpeed);
+
+            var ssSliderRow = UiHelpers.BuildSliderTable();
+            var ssRow = UiHelpers.BuildSliderRow(
+                "Switch Speed", 1, 127, "", initial: 3,
+                formatter: v => $"{v * 100} ms");
+            _sliderSwitchSpeed = ssRow.Slider;
+            _sliderSwitchSpeed.Enabled = false;
+            UiHelpers.AddSliderRow(ssSliderRow, ssRow);
+            switchStack.Controls.Add(ssSliderRow);
+
+            _chkSwitchSpeed.CheckedChanged += (s, e) =>
+                _sliderSwitchSpeed.Enabled = _chkSwitchSpeed.Checked;
+
+            _btnApplySwitchSpeed = UiHelpers.BuildApplyButton("Apply", BtnApplySwitchSpeed_Click);
+            switchStack.Controls.Add(_btnApplySwitchSpeed);
+
+            grpSwitch.Controls.Add(switchStack);
+            stack.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            stack.Controls.Add(grpSwitch);
+        }
+
+        // ── Custom Fan Curve section ─────────────────────────────
+        // Dock.Fill + Percent 100 row (added to stack below) so the section
+        // grows with the window. MinimumSize prevents collapse below what the
+        // FanCurvePanel (Dock.Fill, no preferred size) needs: panel MinHeight +
+        // chrome (header row + footer row + group padding).
+        var grpCurve = UiHelpers.BuildSection("Custom Fan Curve");
+        grpCurve.AutoSize = false;
+        grpCurve.Dock = DockStyle.Fill;
+        const int headerRowHeight = 28;      // enable checkbox + link fans row
+        const int footerRowHeight = UiMetrics.ButtonHeight + UiMetrics.RowGap * 2;
+        const int groupChrome = UiMetrics.GroupPadTop + UiMetrics.GroupPadBottom;
+        int minCurveHeight = _curveEditingEnabled
+            ? FanCurvePanel.MinHeight + headerRowHeight + footerRowHeight + groupChrome
+            : 100;
+        grpCurve.MinimumSize = new System.Drawing.Size(0, minCurveHeight);
+
+        var curveInner = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 3,
+        };
+        curveInner.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+        curveInner.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        curveInner.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+        curveInner.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+        // Header row: [Custom Fan Curve chk] [Link Fans chk] [status panel fill]
+        var headerLayout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ColumnCount = 3,
+            Margin = new Padding(0),
+        };
+        headerLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        headerLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        headerLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+
         _chkFanCurve = new CheckBox
         {
             Text = "Custom Fan Curve",
-            Location = new System.Drawing.Point(16, y),
             AutoSize = true,
-            Font = UiHelpers.FontBold
+            Font = UiHelpers.FontBold,
+            Anchor = AnchorStyles.Left,
+            Margin = new Padding(0, 4, 24, 0),
         };
-        Controls.Add(_chkFanCurve);
+        headerLayout.Controls.Add(_chkFanCurve);
 
-        int curveEnableY = y; // capture for Link Fans checkbox placement
+        // Curves row
+        var curvesLayout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = _hasGpuFan && _curveEditingEnabled ? 2 : 1,
+            RowCount = 1,
+            Margin = new Padding(0, UiMetrics.RowGap, 0, UiMetrics.RowGap),
+        };
+        if (_hasGpuFan && _curveEditingEnabled)
+        {
+            curvesLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
+            curvesLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
+        }
+        else
+        {
+            curvesLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+        }
+        curvesLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
 
-        // --- Curve editors side by side ---
         _cpuCurvePanel = new FanCurvePanel
         {
             Title = "CPU Fan Curve",
-            DutyBaseAddress = profile.FanTable.CpuDutyAddr
+            DutyBaseAddress = profile.FanTable.CpuDutyAddr,
+            Dock = DockStyle.Fill,
+            Margin = new Padding(0, 0, 4, 0),
+            Visible = _curveEditingEnabled,
         };
         _cpuCurvePanel.CurveChanged += OnCurveChanged;
-        Controls.Add(_cpuCurvePanel);
 
         _gpuCurvePanel = new FanCurvePanel
         {
             Title = "GPU Fan Curve",
             DutyBaseAddress = profile.FanTable.GpuDutyAddr,
-            Visible = _hasGpuFan && _curveEditingEnabled
+            Dock = DockStyle.Fill,
+            Margin = new Padding(4, 0, 0, 0),
+            Visible = _hasGpuFan && _curveEditingEnabled,
         };
         _gpuCurvePanel.CurveChanged += OnCurveChanged;
-        Controls.Add(_gpuCurvePanel);
 
-        // Format warning when curve editing is not supported
+        curvesLayout.Controls.Add(_cpuCurvePanel);
+        if (_hasGpuFan && _curveEditingEnabled)
+            curvesLayout.Controls.Add(_gpuCurvePanel);
+
+        // Footer row: [Apply] [Read] [Validation]
+        var footerLayout = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            FlowDirection = FlowDirection.LeftToRight,
+        };
+
+        var (applyBtn, readBtn) = UiHelpers.BuildApplyReadRow(BtnApply_Click, BtnRead_Click);
+        _btnApply = applyBtn;
+        _btnRead = readBtn!;
+        _btnApply.Visible = _curveEditingEnabled;
+        _btnRead.Visible = _curveEditingEnabled;
+        _btnRead.Margin = new Padding(0, UiMetrics.RowGap, UiMetrics.ButtonGap, 0);
+
+        _lblValidation = new Label
+        {
+            AutoSize = true,
+            Font = UiHelpers.FontNormal,
+            ForeColor = UiColors.StatusOk,
+            Text = "",
+            Visible = _curveEditingEnabled,
+            Margin = new Padding(0, 14, 0, 0),
+        };
+
+        footerLayout.Controls.Add(_btnApply);
+        footerLayout.Controls.Add(_btnRead);
+        footerLayout.Controls.Add(_lblValidation);
+
+        curveInner.Controls.Add(headerLayout, 0, 0);
+        curveInner.Controls.Add(curvesLayout, 0, 1);
+        curveInner.Controls.Add(footerLayout, 0, 2);
+
         if (!_curveEditingEnabled)
         {
-            _cpuCurvePanel.Visible = false;
+            // Replace curves row with a format-unsupported warning
             var lblFormatWarn = new Label
             {
                 Text = $"Fan curve editing is not available (format: {profile.FanTable.Format}). Only fan boost and curve enable are supported.",
-                Location = new System.Drawing.Point(16, y + 20),
                 AutoSize = true,
-                ForeColor = System.Drawing.Color.OrangeRed,
-                Font = UiHelpers.FontBold
+                ForeColor = UiColors.StatusWarn,
+                Font = UiHelpers.FontBold,
+                Dock = DockStyle.Fill,
+                Margin = new Padding(0, UiMetrics.RowGap, 0, 0),
             };
-            Controls.Add(lblFormatWarn);
+            curvesLayout.Controls.Clear();
+            curvesLayout.Controls.Add(lblFormatWarn);
         }
 
-        // --- Link Fans toggle (only if GPU fan present and temp registers available) ---
+        // Link Fans (conditional)
         if (_hasGpuFan && _curveEditingEnabled
             && profile.Registers.ContainsKey("cpuTemp") && profile.Registers.ContainsKey("gpuTemp"))
         {
@@ -119,160 +262,27 @@ class FanTab : UserControl
             _chkLinkFans = new CheckBox
             {
                 Text = "Link Fans",
-                Location = new System.Drawing.Point(340, curveEnableY),
                 AutoSize = true,
-                Font = UiHelpers.FontBold
+                Font = UiHelpers.FontBold,
+                Anchor = AnchorStyles.Left,
+                Margin = new Padding(0, 4, 24, 0),
             };
             _chkLinkFans.CheckedChanged += OnLinkFansChanged;
-            Controls.Add(_chkLinkFans);
+            headerLayout.Controls.Add(_chkLinkFans);
 
-            _linkedStatusPanel = new Panel
+            _linkedStatusBar = new LinkedFanStatusBar(_linkedController)
             {
-                Location = new System.Drawing.Point(450, curveEnableY),
-                Size = new System.Drawing.Size(420, 26),
-                Visible = false,
-                BorderStyle = BorderStyle.FixedSingle
+                Dock = DockStyle.Fill,
+                Margin = new Padding(0, 2, 0, 2),
             };
-            _linkedStatusPanel.Paint += PaintLinkedStatus;
-            Controls.Add(_linkedStatusPanel);
-
-            _linkedController.Updated += () => { if (_linkedStatusPanel?.Visible == true) _linkedStatusPanel.Invalidate(); };
+            headerLayout.Controls.Add(_linkedStatusBar);
         }
 
-        y += 36;
+        grpCurve.Controls.Add(curveInner);
+        stack.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+        stack.Controls.Add(grpCurve);
 
-        int btnY = y + 260;
-
-        _btnApply = new Button
-        {
-            Text = "Apply",
-            Location = new System.Drawing.Point(8, btnY),
-            Size = new System.Drawing.Size(130, 32)
-        };
-        _btnApply.Click += BtnApply_Click;
-        Controls.Add(_btnApply);
-
-        _btnRead = new Button
-        {
-            Text = "Read from EC",
-            Location = new System.Drawing.Point(8, btnY + 36),
-            Size = new System.Drawing.Size(140, 32),
-            Visible = _curveEditingEnabled
-        };
-        _btnRead.Click += BtnRead_Click;
-        Controls.Add(_btnRead);
-
-        _btnApply.Visible = _curveEditingEnabled;
-
-        _lblValidation = new Label
-        {
-            Location = new System.Drawing.Point(140, btnY + 38),
-            AutoSize = true,
-            Font = UiHelpers.FontSmall,
-            ForeColor = System.Drawing.Color.Green,
-            Text = "",
-            Visible = _curveEditingEnabled
-        };
-        Controls.Add(_lblValidation);
-
-        // --- Fan Switch Speed ---
-        if (_switchSpeedControl != null)
-        {
-            int ssY = btnY + 72;
-
-            _chkSwitchSpeed = new CheckBox
-            {
-                Text = "Fan Switch Speed",
-                Location = new System.Drawing.Point(16, ssY),
-                AutoSize = true,
-                Font = UiHelpers.FontBold
-            };
-            _chkSwitchSpeed.CheckedChanged += (s, e) =>
-            {
-                if (_sliderSwitchSpeed != null)
-                    _sliderSwitchSpeed.Enabled = _chkSwitchSpeed.Checked;
-            };
-            Controls.Add(_chkSwitchSpeed);
-
-            ssY += 28;
-
-            _sliderSwitchSpeed = new TrackBar
-            {
-                Minimum = 1,
-                Maximum = 127,
-                Value = 3,
-                TickFrequency = 10,
-                LargeChange = 10,
-                SmallChange = 1,
-                AutoSize = false,
-                Location = new System.Drawing.Point(16, ssY),
-                Size = new System.Drawing.Size(400, 45),
-                Enabled = false
-            };
-            Controls.Add(_sliderSwitchSpeed);
-
-            _lblSwitchSpeedValue = new Label
-            {
-                Text = "300 ms",
-                Location = new System.Drawing.Point(426, ssY + 8),
-                AutoSize = true,
-                Font = UiHelpers.FontMedium
-            };
-            Controls.Add(_lblSwitchSpeedValue);
-
-            _sliderSwitchSpeed.ValueChanged += (s, e) =>
-                _lblSwitchSpeedValue!.Text = $"{_sliderSwitchSpeed.Value * 100} ms";
-
-            ssY += 48;
-
-            _btnApplySwitchSpeed = new Button
-            {
-                Text = "Apply",
-                Location = new System.Drawing.Point(16, ssY),
-                Size = new System.Drawing.Size(110, 32)
-            };
-            _btnApplySwitchSpeed.Click += BtnApplySwitchSpeed_Click;
-            Controls.Add(_btnApplySwitchSpeed);
-        }
-
-        // Single resize handler for all layout
-        int curveStartY = y;
-        Resize += (s, e) =>
-        {
-            if (!_curveEditingEnabled) return; // no curve panels to layout
-
-            int panels = _hasGpuFan ? 2 : 1;
-            int panelW = Math.Max(200, (ClientSize.Width - 8 * (panels + 1)) / panels);
-            int bottomH = _switchSpeedControl != null ? 200 : 80;
-            int curveH = Math.Max(250, ClientSize.Height - curveStartY - bottomH);
-
-            _cpuCurvePanel.SetBounds(8, curveStartY, panelW, curveH);
-            if (_hasGpuFan)
-                _gpuCurvePanel.SetBounds(8 + (panelW + 4), curveStartY, panelW, curveH);
-            if (_linkedStatusPanel != null)
-                _linkedStatusPanel.Width = Math.Max(200, ClientSize.Width - 450 - 8);
-
-            int dynBtnY = curveStartY + curveH + 8;
-            _btnApply.Location = new System.Drawing.Point(8, dynBtnY);
-            _btnRead.Location = new System.Drawing.Point(8, dynBtnY + 36);
-            _lblValidation.Location = new System.Drawing.Point(140, dynBtnY + 38);
-
-            if (_chkSwitchSpeed != null)
-            {
-                int ssY = dynBtnY + 72;
-                _chkSwitchSpeed.Location = new System.Drawing.Point(16, ssY);
-                if (_sliderSwitchSpeed != null)
-                    _sliderSwitchSpeed.Location = new System.Drawing.Point(16, ssY + 28);
-                if (_lblSwitchSpeedValue != null)
-                    _lblSwitchSpeedValue.Location = new System.Drawing.Point(426, ssY + 36);
-                if (_btnApplySwitchSpeed != null)
-                    _btnApplySwitchSpeed.Location = new System.Drawing.Point(16, ssY + 76);
-            }
-        };
-        // Trigger initial layout
-        OnResize(EventArgs.Empty);
-
-        UiHelpers.FixZOrder(Controls);
+        Controls.Add(stack);
     }
 
     /// <summary>
@@ -316,7 +326,7 @@ class FanTab : UserControl
     /// </summary>
     public void RefreshFromEc()
     {
-        try
+        UiHelpers.TryUi(() =>
         {
             _chkFanBoost.Checked = _control.ReadFanBoost();
             _chkFanCurve.Checked = _control.ReadCustomFanCurveMode();
@@ -329,13 +339,7 @@ class FanTab : UserControl
                 int ticks = Math.Clamp(ms / 100, 1, 127);
                 _sliderSwitchSpeed.Value = ticks;
             }
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(
-                $"Failed to read fan settings:\n{ex.Message}",
-                "EC Read Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-        }
+        }, "read fan settings", "EC Read Error");
     }
 
     /// <summary>
@@ -383,19 +387,13 @@ class FanTab : UserControl
     public void ReadCurvesFromEc()
     {
         if (!_curveEditingEnabled) return;
-        try
+        UiHelpers.TryUi(() =>
         {
             _cpuCurvePanel.Curve = _control.ReadCpuCurve();
             if (_hasGpuFan)
                 _gpuCurvePanel.Curve = _control.ReadGpuCurve();
             UpdateValidation();
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(
-                $"Failed to read fan curves:\n{ex.Message}",
-                "EC Read Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-        }
+        }, "read fan curves", "EC Read Error");
     }
 
     private void OnCurveChanged()
@@ -421,12 +419,12 @@ class FanTab : UserControl
 
         if (errors.Count == 0)
         {
-            _lblValidation.ForeColor = System.Drawing.Color.Green;
+            _lblValidation.ForeColor = UiColors.StatusOk;
             _lblValidation.Text = "Valid";
         }
         else
         {
-            _lblValidation.ForeColor = System.Drawing.Color.Red;
+            _lblValidation.ForeColor = UiColors.StatusError;
             _lblValidation.Text = string.Join("\n", errors);
         }
     }
@@ -454,7 +452,7 @@ class FanTab : UserControl
 
             _chkFanCurve.Checked = true;
             SetLinkedControlsEnabled(true);
-            if (_linkedStatusPanel != null) _linkedStatusPanel.Visible = true;
+            if (_linkedStatusBar != null) _linkedStatusBar.Visible = true;
 
             try
             {
@@ -466,7 +464,7 @@ class FanTab : UserControl
                     "EC Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 _chkLinkFans.Checked = false;
                 SetLinkedControlsEnabled(false);
-                if (_linkedStatusPanel != null) _linkedStatusPanel.Visible = false;
+                if (_linkedStatusBar != null) _linkedStatusBar.Visible = false;
                 return;
             }
         }
@@ -482,64 +480,19 @@ class FanTab : UserControl
                     "EC Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
             SetLinkedControlsEnabled(false);
-            if (_linkedStatusPanel != null) _linkedStatusPanel.Visible = false;
+            if (_linkedStatusBar != null) _linkedStatusBar.Visible = false;
         }
     }
 
-    private void PaintLinkedStatus(object? sender, PaintEventArgs e)
-    {
-        if (_linkedController == null || !_linkedController.IsEnabled) return;
-        var g = e.Graphics;
-        var panel = (Panel)sender!;
-        int w = panel.ClientSize.Width;
-        int h = panel.ClientSize.Height;
-
-        // Duty fill bar
-        g.Clear(System.Drawing.Color.FromArgb(245, 245, 245));
-        float fillW = w * _linkedController.LinkedDuty / 100f;
-        using var fillBrush = new System.Drawing.SolidBrush(
-            System.Drawing.Color.FromArgb(80, 65, 105, 225));
-        g.FillRectangle(fillBrush, 0, 0, fillW, h);
-
-        // Status text — draw segments to mix font sizes
-        var font = UiHelpers.FontSmall;
-        var fontRamp = UiHelpers.FontTiny;
-        var black = System.Drawing.Brushes.Black;
-        var gray = System.Drawing.Brushes.DimGray;
-        float mainY = (h - g.MeasureString("X", font).Height) / 2f;
-        float rampY = (h - g.MeasureString("X", fontRamp).Height) / 2f;
-        float x = 4;
-
-        string cpuRamp = _linkedController.CpuRampTemp > 0 ? $"(safety ramp {_linkedController.CpuRampTemp}\u00B0C)" : "";
-        string gpuRamp = _linkedController.GpuRampTemp > 0 ? $"(safety ramp {_linkedController.GpuRampTemp}\u00B0C)" : "";
-
-        void DrawMain(string s) { g.DrawString(s, font, black, x, mainY); x += g.MeasureString(s, font).Width - 4; }
-        void DrawRamp(string s) { g.DrawString(s, fontRamp, gray, x, rampY); x += g.MeasureString(s, fontRamp).Width - 2; }
-
-        DrawMain($"{_linkedController.LinkedDuty}%  \u2502  CPU {_linkedController.CpuTemp}\u00B0\u2192{_linkedController.CpuDuty}% ");
-        if (cpuRamp.Length > 0) DrawRamp(cpuRamp);
-        DrawMain($"  \u2502  GPU {_linkedController.GpuTemp}\u00B0\u2192{_linkedController.GpuDuty}% ");
-        if (gpuRamp.Length > 0) DrawRamp(gpuRamp);
-    }
-
-    private void BtnApplyBoost_Click(object? sender, EventArgs e)
-    {
-        try
-        {
-            _control.SetFanBoost(_chkFanBoost.Checked);
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show($"Failed to set fan boost:\n{ex.Message}",
-                "EC Write Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-        }
-    }
+    private void BtnApplyBoost_Click(object? sender, EventArgs e) =>
+        UiHelpers.TryUi(() => _control.SetFanBoost(_chkFanBoost.Checked),
+            "set fan boost", "EC Write Error");
 
     private void BtnApply_Click(object? sender, EventArgs e)
     {
         if (_cpuCurvePanel.Curve == null) return;
 
-        try
+        UiHelpers.TryUi(() =>
         {
             // Validate both curves before writing anything
             var errors = _cpuCurvePanel.Curve.Validate();
@@ -562,26 +515,15 @@ class FanTab : UserControl
 
             // Write both fan tables, then set latch + master enable
             _control.ApplyCurves(_cpuCurvePanel.Curve, _gpuCurvePanel.Curve, _chkFanCurve.Checked);
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show($"Failed to apply fan settings:\n{ex.Message}",
-                "EC Write Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-        }
+        }, "apply fan settings", "EC Write Error");
     }
 
     private void BtnApplySwitchSpeed_Click(object? sender, EventArgs e)
     {
         if (_switchSpeedControl == null || _chkSwitchSpeed == null || _sliderSwitchSpeed == null) return;
-        try
-        {
-            _switchSpeedControl.Apply(_chkSwitchSpeed.Checked, _sliderSwitchSpeed.Value * 100);
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show($"Failed to set fan switch speed:\n{ex.Message}",
-                "EC Write Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-        }
+        UiHelpers.TryUi(() =>
+            _switchSpeedControl.Apply(_chkSwitchSpeed.Checked, _sliderSwitchSpeed.Value * 100),
+            "set fan switch speed", "EC Write Error");
     }
 
     private void BtnRead_Click(object? sender, EventArgs e)
