@@ -25,6 +25,7 @@ sealed class BleDevice : IDisposable
     GattCharacteristic? _rx;
     GattWriteOption _writeOption;
     bool _disposed;
+    readonly SemaphoreSlim _connectLock = new(1, 1);
 
     /// <summary>True when connected to a cooler with UART TX characteristic resolved.</summary>
     public bool IsConnected => _device != null && _tx != null;
@@ -101,6 +102,42 @@ sealed class BleDevice : IDisposable
     public static string FormatAddress(ulong address) =>
         string.Join(":", BitConverter.GetBytes(address).Take(6).Reverse().Select(b => b.ToString("X2")));
 
+    /// <summary>
+    /// Wait up to <paramref name="timeoutMs"/> for a specific address to appear
+    /// in BLE advertisements. FromBluetoothAddressAsync is a cache lookup that
+    /// returns null until Windows has processed an advertisement from the device
+    /// — on Task Scheduler startup the cache is empty, so scan actively to
+    /// populate it before attempting to resolve the device.
+    /// </summary>
+    static async Task<bool> WaitForAdvertisementAsync(ulong address, int timeoutMs, CancellationToken ct)
+    {
+        var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var watcher = new BluetoothLEAdvertisementWatcher
+        {
+            ScanningMode = BluetoothLEScanningMode.Active
+        };
+        watcher.Received += (_, args) =>
+        {
+            if (args.BluetoothAddress == address)
+                tcs.TrySetResult(true);
+        };
+
+        try { watcher.Start(); }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[BLE] Advertisement watcher start failed: {ex.Message}");
+            return false;
+        }
+
+        try
+        {
+            var completed = await Task.WhenAny(tcs.Task, Task.Delay(timeoutMs, ct));
+            return completed == tcs.Task && await tcs.Task;
+        }
+        catch (TaskCanceledException) { return false; }
+        finally { watcher.Stop(); }
+    }
+
     // ── Connection ───────────────────────────────────────────────────
 
     /// <summary>
@@ -109,7 +146,17 @@ sealed class BleDevice : IDisposable
     /// </summary>
     public async Task ConnectAsync(ulong bluetoothAddress, CancellationToken ct = default)
     {
+        // Serialize concurrent connect attempts (manual click vs reconnect timer)
+        // to prevent _device/_service state corruption.
+        await _connectLock.WaitAsync(ct);
+        try
+        {
         if (_device != null) Disconnect();
+
+        // Prime Windows' BLE device cache with a short advertisement scan.
+        // Required on Task Scheduler startup when the cache is empty.
+        if (!await WaitForAdvertisementAsync(bluetoothAddress, 5000, ct))
+            throw new InvalidOperationException("BLE device not found or unavailable");
 
         // Retry loop: the cooler's GATT server may not be fully ready immediately
         // after a previous session, especially on app restart.
@@ -186,6 +233,11 @@ sealed class BleDevice : IDisposable
             ConnectedAddress = bluetoothAddress;
             Console.WriteLine($"[BLE] Connected to {DeviceName} ({FormatAddress(bluetoothAddress)})");
             return;
+        }
+        }
+        finally
+        {
+            _connectLock.Release();
         }
     }
 
@@ -280,6 +332,7 @@ sealed class BleDevice : IDisposable
         {
             _disposed = true;
             Disconnect();
+            _connectLock.Dispose();
         }
     }
 }
