@@ -56,13 +56,20 @@ BleDevice : IDisposable
   ConnectedAddress -> ulong                 Bluetooth address (persist for auto-reconnect)
   ConnectionLost : event Action             Fires on thread-pool thread when link drops
 
-  ConnectAsync(ulong address, ct)            FromBluetoothAddressAsync -> resolve NUS service
-                                            -> resolve TX/RX characteristics. Auto-selects
-                                            WriteWithResponse or WriteWithoutResponse based
-                                            on characteristic properties. Enables RX
-                                            notifications persistently (CCCD). Retries up
-                                            to 3 times with 1.5s delay (GATT may not be
-                                            ready immediately after app restart).
+  ConnectAsync(ulong address, ct)            Primes Windows' BLE device cache with a 5s
+                                            advertisement scan for the target address —
+                                            FromBluetoothAddressAsync is a cache lookup and
+                                            returns null on Task Scheduler cold boot before
+                                            an advertisement has been processed. Then
+                                            resolves NUS service + TX/RX characteristics.
+                                            Auto-selects WriteWithResponse or WriteWithoutResponse
+                                            based on characteristic properties. Enables RX
+                                            notifications persistently (CCCD). Retries GATT
+                                            resolution up to 3 times with 1.5s delay (GATT
+                                            server may not be ready immediately after app
+                                            restart). Concurrent calls serialized via
+                                            SemaphoreSlim to prevent manual-click vs
+                                            reconnect-timer state corruption.
                                             CancellationToken checked between each GATT
                                             operation — callers use Task.WhenAny to enforce
                                             a 15s hard timeout (WinRT BLE ops can hang
@@ -188,14 +195,16 @@ On restart, the combo box is pre-populated with the saved device (name + address
 
 When `AutoConnect` is enabled and a saved address exists:
 - On startup: `MainForm.Load` calls `LiquidCoolerTab.InitAsync()` (not tab Load, which only fires when the tab is first shown)
-- InitAsync retries BT availability check up to 4 times with 3s delays (handles Task Scheduler startup after reboot where the BT radio is still initializing), then calls `TryConnectAsync(savedAddress)`
+- InitAsync does a single BT availability check, then calls `TryConnectAsync(savedAddress)` if BT is up.
+- If BT is down (e.g. Task Scheduler cold boot, slow BT stack init — some machines take 30s+), InitAsync starts the reconnect timer. The callback gates each attempt on `IsBluetoothAvailableAsync` so it silently backs off until the radio comes up, then connects and hides the "Bluetooth not available" overlay.
 - All connect attempts use `ConnectWithTimeoutAsync` — 15s hard timeout via `Task.WhenAny` + `CancellationToken` (WinRT BLE GATT operations can hang indefinitely when the device is unreachable)
 - On connect success: `ApplyCurrentAsync()` sends saved settings to cooler
-- On unexpected disconnect (`ConnectionLost` event): start 10-second `System.Threading.Timer`
-- Timer calls `ConnectWithTimeoutAsync(savedAddress)`, marshals `OnConnected()` + `ApplyCurrentAsync()` to UI thread via `BeginInvoke`
-- Manual connect (`BtnConnect_Click`) stops the reconnect timer first to prevent concurrent `ConnectAsync` calls
+- On unexpected disconnect (`ConnectionLost` event): start the reconnect timer (single-fire, backoff)
+- **Backoff schedule:** 8s × 4, then 20s, 40s, then 5 min capped. Avoids hammering the BLE radio for hours when the cooler is absent (battery + airspace cost). Counter resets to 0 on any successful connection, on `StartReconnectTimer`, and on `StopReconnectTimer`.
+- Timer callback calls `ConnectWithTimeoutAsync(savedAddress)`, marshals `OnConnected()` + `ApplyCurrentAsync()` to UI thread via `BeginInvoke`. On failure, reschedules the next tick with the next backoff delay.
+- Manual connect (`BtnConnect_Click`) and Scan (`BtnScan_Click`) both stop the reconnect timer first so a pending tick doesn't flip UI state mid-interaction. Concurrent `ConnectAsync` calls are additionally serialized inside `BleDevice` via a SemaphoreSlim so timer/click races can't corrupt `_device`/`_service` state mid-resolve.
 - Stops on successful connect or explicit disconnect
-- `ConnectAsync` retries up to 3 times with 1.5s delay (GATT server may not be ready after restart)
+- `ConnectAsync` primes the BLE device cache with a 5s advertisement scan before resolving the device, then retries GATT resolution up to 3 times with 1.5s delay (GATT server may not be ready after restart)
 
 ### Disconnect
 
@@ -207,12 +216,24 @@ User clicks Disconnect (or app shuts down):
 ### Shutdown order (MainForm.Dispose)
 
 ```
-1. Tray icon + menu disposed
-2. base.Dispose() -- child controls (FanTab restores EC curves, LiquidCoolerTab.Dispose unsubscribes ConnectionLost + stops timer)
-3. Task.Run(() => LiquidCoolerTab.ShutdownAsync()).Wait(3000)
-     -- send reset, stop timer. Task.Run avoids deadlock by running
-        async BLE work off the UI SynchronizationContext. 3s timeout
-        prevents hang if BLE is stuck.
+1. Task.Run(() => LiquidCoolerTab.ShutdownAsync()).Wait(3000)
+     -- stop timer, send reset (0x19), cooler returns to factory defaults.
+        MUST run before base.Dispose because base.Dispose disposes the
+        LiquidCoolerTab (and its reconnect timer) -- if this ran after,
+        StopReconnectTimer would throw ObjectDisposedException and
+        SendResetAsync would never fire. Task.Run avoids deadlock by
+        running async BLE work off the UI SynchronizationContext.
+        3s timeout prevents hang if BLE is stuck.
+2. Tray icon + menu disposed
+3. base.Dispose() -- child controls:
+     - FanTab restores EC curves via LinkedFanController.Dispose
+     - LiquidCoolerTab.Dispose unsubscribes ConnectionLost and waits up
+       to 3s (via Timer.Dispose(WaitHandle)) for any in-flight reconnect
+       callback to return before the timer is actually disposed. This
+       prevents the callback's ScheduleNextReconnect from throwing
+       ObjectDisposedException on a disposed timer, and prevents
+       BleDevice.Disconnect from racing with the callback's in-flight
+       ConnectAsync.
 4. BleDevice.Dispose() -- disconnect
 5. HidDevice.Dispose()
 6. EcDevice.Dispose() -- last (child controls may write during disposal)
