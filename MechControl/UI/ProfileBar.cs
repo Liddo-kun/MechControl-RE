@@ -69,7 +69,7 @@ class ProfileBar : UserControl
         _fanTab = fanTab;
         _liquidCoolerTab = liquidCoolerTab;
 
-        Height = 36;
+        Height = 40;
         Dock = DockStyle.Top;
 
         // Right-aligned Defaults dropdown button
@@ -87,7 +87,7 @@ class ProfileBar : UserControl
             FlatStyle = FlatStyle.Flat,
             Dock = DockStyle.Right,
             Margin = new Padding(4, 2, 4, 2),
-            Font = UiHelpers.FontSmall
+            Font = UiHelpers.FontNormal
         };
         defaultsButton.Click += (s, e) => defaultsMenu.Show(defaultsButton, 0, defaultsButton.Height);
         Controls.Add(defaultsButton);
@@ -109,13 +109,13 @@ class ProfileBar : UserControl
             var btn = new Button
             {
                 Text = names[i],
-                Size = new System.Drawing.Size(120, 28),
+                Size = new System.Drawing.Size(120, 32),
                 FlatStyle = FlatStyle.Flat,
-                Font = UiHelpers.FontSmall
+                Font = UiHelpers.FontNormal
             };
 
             if (!_manager.SlotExists(slot))
-                btn.ForeColor = System.Drawing.SystemColors.GrayText;
+                btn.ForeColor = UiColors.Disabled;
 
             btn.Click += (s, e) => OnSlotClick(slot);
             btn.MouseUp += (s, e) =>
@@ -131,9 +131,9 @@ class ProfileBar : UserControl
         _saveButton = new Button
         {
             Text = "Save",
-            Size = new System.Drawing.Size(80, 28),
+            Size = new System.Drawing.Size(80, 32),
             FlatStyle = FlatStyle.Flat,
-            Font = UiHelpers.FontSmallBold
+            Font = UiHelpers.FontBold
         };
         _saveButton.Click += (s, e) => OnSaveClick();
         flow.Controls.Add(_saveButton);
@@ -247,7 +247,7 @@ class ProfileBar : UserControl
         for (int i = 0; i < 5; i++)
         {
             bool isActive = (i + 1) == slot;
-            _slotButtons[i].Font = isActive ? UiHelpers.FontSmallBold : UiHelpers.FontSmall;
+            _slotButtons[i].Font = isActive ? UiHelpers.FontBold : UiHelpers.FontNormal;
             _slotButtons[i].BackColor = isActive
                 ? System.Drawing.SystemColors.Highlight
                 : System.Drawing.SystemColors.Control;
@@ -255,7 +255,7 @@ class ProfileBar : UserControl
                 ? System.Drawing.SystemColors.HighlightText
                 : (_manager.SlotExists(i + 1)
                     ? System.Drawing.SystemColors.ControlText
-                    : System.Drawing.SystemColors.GrayText);
+                    : UiColors.Disabled);
         }
     }
 

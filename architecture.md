@@ -56,15 +56,24 @@ MechControl/
   UI/
     MainForm.cs                   TabControl + monitor panel + profile bar + system tray + EC enrichment orchestration
     PowerTab.cs                   CPU (PL1/PL2/PL4/temp limit) + GPU (TGP/DB) sliders
-    FanTab.cs                     Boost/curve checkboxes + single Apply button + FanCurvePanel + fan switch speed + linked mode + status panel
+    FanTab.cs                     Boost/curve checkboxes + single Apply button + FanCurvePanel + fan switch speed + linked mode
     FanCurvePanel.cs              GDI+ chart, draggable points (point 0 locked to 0% duty), mouse interaction, ReadOnly mode
+    LinkedFanStatusBar.cs         Custom-painted status bar for linked fan mode (fill bar + mixed-font text)
     BatteryTab.cs                 3 radio buttons + battery telemetry (live, 2s poll)
-    LightingTab.cs                3 GroupBoxes: keyboard, light bar, logo (color + brightness + on/off)
+    LightingTab.cs                3 LightingZonePanels (keyboard, light bar, logo) + idle timer + mini-LED dimming
+    LightingZonePanel.cs          Per-zone control: enable + brightness + RGB + Apply/Pick Color/Save.
+                                  Extends Section. Rows added directly to Section (no inner wrapper TLP).
+                                  Button row is a plain Panel with fixed Height + Width and manually
+                                  positioned buttons — see "UI layout pattern" below.
     ProfileBar.cs                 5 profile slots + Save + Restore/Gaming/Office Defaults, docked at top
                                   Exposes ActiveSlot, ProfileApplied, ProfileListChanged for tray menu sync
     MonitorPanel.cs               Read-only status: fan speeds, temps, battery SOC
     LiquidCoolerTab.cs            BLE cooler: scan/connect (15s timeout), fan/pump/RGB, auto-reconnect with BT retry
-    UiHelpers.cs                  Shared fonts + z-order fix utility
+    Section.cs                    Custom labeled panel (title intersecting thin border); replaces GroupBox
+    UiHelpers.cs                  Shared fonts + builders: BuildSection/SliderTable/KeyValueTable/RgbFlow/
+                                  ApplyButton/ApplyReadRow, TryUi/TryUiAsync error wrappers
+    UiMetrics.cs                  Design tokens: MarginLeft, SectionGap, RowGap, GroupPad*, Button* widths
+    UiColors.cs                   Semantic colors: StatusOk/Warn/Error/Neutral, Hint, Disabled
 
   Profiles/MECHREVO/
     IDY_7Y.json                   Verified profile (this machine)
@@ -80,6 +89,38 @@ MechControl/
   build-scripts/
     build-release.ps1             Release build: dev exe + framework-dependent zip + self-contained zip
 ```
+
+### UI layout pattern
+
+Tabs use layout-manager containers, not absolute positioning. A typical tab:
+
+1. `UiHelpers.BuildSectionStack()` — outer 1-col TableLayoutPanel (`Dock.Fill`,
+   `AutoScroll`, column `Percent 100`). One section per row.
+2. `UiHelpers.BuildSection(title, fitContent)` — returns a `Section`
+   (custom panel with a painted title intersecting its border).
+   `fitContent: true` makes the section wrap its content horizontally;
+   default stretches to the stack column width (sliders, wide rows).
+3. Inner layout: `BuildSliderTable()` (3-col label/slider/value),
+   `BuildKeyValueTable()` (2-col caption/value), or a `FlowLayoutPanel`
+   for short inline rows. Populate via `AddSliderRow` / `AddKeyValueRow`.
+4. Controls: `BuildSliderRow`, `BuildRgbFlow`, `BuildApplyButton`,
+   `BuildApplyReadRow`. Event handlers wrap writes in
+   `UiHelpers.TryUi` / `TryUiAsync` for uniform error surfaces.
+
+Shared sizes/colors live in `UiMetrics` and `UiColors`; fonts are statics
+on `UiHelpers`: `FontNormal` (9pt), `FontBold` (9pt bold), `FontHeader`
+(12pt bold, section titles), `FontTiny` (7pt, graph labels). No hand-coded
+pixel offsets in tab code — everything flows from `AutoSize` + `Dock` +
+margins.
+
+**Exception:** `LightingZonePanel`'s button row uses a plain `Panel` with
+explicit `Height` + `Width` and manually positioned buttons
+(`b.Location = new Point(x, 0); x += b.Width + ButtonGap`). A nested
+`TableLayoutPanel` or `FlowLayoutPanel` here caused the parent `Section`'s
+last row to be over-allocated vertically (~39px extra) when the button row
+was narrower than its siblings. The panel's `Width` is pinned to a
+constant (`BtnRowWidth = ButtonApplyWidth*2 + ButtonWideWidth +
+ButtonGap*2`) — making it narrower re-triggers the bug.
 
 ---
 

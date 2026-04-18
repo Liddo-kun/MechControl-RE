@@ -50,10 +50,13 @@ class FanCurvePanel : UserControl
         set { _curve = value; Invalidate(); }
     }
 
+    public const int MinWidth = 400;
+    public const int MinHeight = 250;
+
     public FanCurvePanel()
     {
         DoubleBuffered = true;
-        MinimumSize = new System.Drawing.Size(400, 250);
+        MinimumSize = new System.Drawing.Size(MinWidth, MinHeight);
         BackColor = System.Drawing.Color.White;
         BorderStyle = BorderStyle.FixedSingle;
     }
@@ -268,5 +271,12 @@ class FanCurvePanel : UserControl
     {
         base.OnResize(e);
         Invalidate();
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+            _tooltip.Dispose();
+        base.Dispose(disposing);
     }
 }

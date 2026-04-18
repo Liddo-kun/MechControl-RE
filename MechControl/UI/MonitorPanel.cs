@@ -60,14 +60,11 @@ class MonitorPanel : UserControl
         _lblFanCurve.Text = $"Fan Curve: {(data.FanCurveEnabled ? "ON" : "OFF")}";
     }
 
-    private static readonly System.Drawing.Font StatusFont =
-        new("Segoe UI", 9.5f, System.Drawing.FontStyle.Bold);
-
     private static Label MakeLabel(string text) => new Label
     {
         Text = text,
         AutoSize = true,
-        Font = StatusFont,
+        Font = UiHelpers.FontBold,
         Margin = new Padding(2, 2, 2, 0)
     };
 
@@ -75,8 +72,8 @@ class MonitorPanel : UserControl
     {
         Text = "|",
         AutoSize = true,
-        ForeColor = System.Drawing.SystemColors.GrayText,
-        Font = StatusFont,
+        ForeColor = UiColors.Hint,
+        Font = UiHelpers.FontBold,
         Margin = new Padding(0, 2, 0, 0)
     };
 }

@@ -62,93 +62,104 @@ class PowerTab : UserControl
         var tgpLimit = profile.Limits.TryGetValue("TGP", out var tgl) ? tgl : UniversalDefaults.ConservativeLimits["TGP"];
 
         Dock = DockStyle.Fill;
-        AutoScroll = true;
 
-        int y = 12;
+        var stack = UiHelpers.BuildSectionStack();
 
         // === CPU Power ===
+        var grpCpu = UiHelpers.BuildSection("CPU Power");
         if (_cpuEnabled)
         {
             var pl1Limit = profile.Limits.TryGetValue("PL1", out var p1) ? p1 : UniversalDefaults.ConservativeLimits["PL1"];
             var pl2Limit = profile.Limits.TryGetValue("PL2", out var p2) ? p2 : UniversalDefaults.ConservativeLimits["PL2"];
             var pl4Limit = profile.Limits.TryGetValue("PL4", out var p4) ? p4 : UniversalDefaults.ConservativeLimits["PL4"];
 
-            AddSectionHeader(ref y, "CPU Power");
-            AddLabel(ref y, "PL1 (Sustained)");
-            (_sliderPL1, _lblPL1) = AddSlider(ref y, pl1Limit.Min, pl1Limit.Max, "W");
-            AddLabel(ref y, "PL2 (Burst)");
-            (_sliderPL2, _lblPL2) = AddSlider(ref y, pl2Limit.Min, pl2Limit.Max, "W");
-            AddLabel(ref y, "PL4 (Peak)");
-            (_sliderPL4, _lblPL4) = AddSlider(ref y, pl4Limit.Min, pl4Limit.Max, "W");
-            AddLabel(ref y, "CPU Temp Limit");
-            (_sliderTemp, _lblTemp) = AddSlider(ref y, tempLimit.Min, tempLimit.Max, "\u00B0C");
+            var cpuLayout = UiHelpers.BuildSliderTable();
 
-            y += 8;
+            var pl1 = UiHelpers.BuildSliderRow("PL1 (Sustained)", pl1Limit.Min, pl1Limit.Max, "W");
+            var pl2 = UiHelpers.BuildSliderRow("PL2 (Burst)", pl2Limit.Min, pl2Limit.Max, "W");
+            var pl4 = UiHelpers.BuildSliderRow("PL4 (Peak)", pl4Limit.Min, pl4Limit.Max, "W");
+            var tmp = UiHelpers.BuildSliderRow("CPU Temp Limit", tempLimit.Min, tempLimit.Max, "\u00B0C");
+
+            UiHelpers.AddSliderRow(cpuLayout, pl1);
+            UiHelpers.AddSliderRow(cpuLayout, pl2);
+            UiHelpers.AddSliderRow(cpuLayout, pl4);
+            UiHelpers.AddSliderRow(cpuLayout, tmp);
+
+            _sliderPL1 = pl1.Slider; _lblPL1 = pl1.Value;
+            _sliderPL2 = pl2.Slider; _lblPL2 = pl2.Value;
+            _sliderPL4 = pl4.Slider; _lblPL4 = pl4.Value;
+            _sliderTemp = tmp.Slider; _lblTemp = tmp.Value;
+
+            grpCpu.Controls.Add(cpuLayout);
         }
         else
         {
-            AddSectionHeader(ref y, "CPU Power");
-            AddDisabledLabel(ref y, "CPU power controls disabled — register validation failed. See log for details.");
-            y += 8;
+            grpCpu.Controls.Add(MakeDisabledLabel(
+                "CPU power controls disabled — register validation failed. See log for details."));
         }
+        stack.Controls.Add(grpCpu);
 
         // === GPU Power ===
+        var grpGpu = UiHelpers.BuildSection("GPU Power");
         if (_gpuEnabled)
         {
             var dbLimit = profile.Limits.TryGetValue("dynamicBoost", out var db) ? db : UniversalDefaults.ConservativeLimits["dynamicBoost"];
 
-            AddSectionHeader(ref y, "GPU Power");
-            AddLabel(ref y, "GPU TGP (Total Graphics Power)");
-            (_sliderTgp, _lblTgp) = AddSlider(ref y, tgpLimit.Min, tgpLimit.Max, "W");
+            var gpuLayout = UiHelpers.BuildSliderTable();
+
+            var tgp = UiHelpers.BuildSliderRow("GPU TGP (Total Graphics Power)", tgpLimit.Min, tgpLimit.Max, "W");
+            UiHelpers.AddSliderRow(gpuLayout, tgp);
+            _sliderTgp = tgp.Slider; _lblTgp = tgp.Value;
 
             _chkDynamicBoost = new CheckBox
             {
                 Text = "Enable Dynamic Boost",
-                Location = new System.Drawing.Point(16, y),
                 AutoSize = true,
-                Font = UiHelpers.FontBold
+                Font = UiHelpers.FontBold,
+                Margin = new Padding(0, UiMetrics.RowGap, 0, 0),
             };
+            gpuLayout.Controls.Add(_chkDynamicBoost);
+            gpuLayout.SetColumnSpan(_chkDynamicBoost, 3);
+
+            var dbRow = UiHelpers.BuildSliderRow("Dynamic Boost Max", dbLimit.Min, dbLimit.Max, "W");
+            UiHelpers.AddSliderRow(gpuLayout, dbRow);
+            _sliderDb = dbRow.Slider; _lblDb = dbRow.Value;
+            _sliderDb.Enabled = false;
+
             _chkDynamicBoost.CheckedChanged += (s, e) =>
             {
                 if (_sliderDb != null)
                     _sliderDb.Enabled = _chkDynamicBoost.Checked;
             };
-            Controls.Add(_chkDynamicBoost);
-            y += _chkDynamicBoost.PreferredSize.Height + 6;
 
-            AddLabel(ref y, "Dynamic Boost Max");
-            (_sliderDb, _lblDb) = AddSlider(ref y, dbLimit.Min, dbLimit.Max, "W");
-            _sliderDb.Enabled = false;
+            grpGpu.Controls.Add(gpuLayout);
         }
         else
         {
-            AddSectionHeader(ref y, "GPU Power");
-            AddDisabledLabel(ref y, "GPU power controls disabled — register validation failed. See log for details.");
+            grpGpu.Controls.Add(MakeDisabledLabel(
+                "GPU power controls disabled — register validation failed. See log for details."));
         }
+        stack.Controls.Add(grpGpu);
 
-        // === Buttons ===
-        y += 8;
-        var btnApply = new Button
+        // === Global Apply / Read (atomic commit semantics) ===
+        var (btnApply, btnRead) = UiHelpers.BuildApplyReadRow(BtnApply_Click, BtnRead_Click);
+        btnApply.Enabled = _cpuEnabled || _gpuEnabled;
+        btnRead!.Enabled = _cpuEnabled || _gpuEnabled;
+
+        var buttonRow = new FlowLayoutPanel
         {
-            Text = "Apply",
-            Location = new System.Drawing.Point(16, y),
-            Size = new System.Drawing.Size(100, 32),
-            Enabled = _cpuEnabled || _gpuEnabled
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            FlowDirection = FlowDirection.LeftToRight,
+            Margin = new Padding(0, 0, 0, UiMetrics.SectionGap),
         };
-        btnApply.Click += BtnApply_Click;
-        Controls.Add(btnApply);
+        buttonRow.Controls.Add(btnApply);
+        buttonRow.Controls.Add(btnRead);
+        stack.Controls.Add(buttonRow);
 
-        var btnRead = new Button
-        {
-            Text = "Read from EC",
-            Location = new System.Drawing.Point(126, y),
-            Size = new System.Drawing.Size(140, 32),
-            Enabled = _cpuEnabled || _gpuEnabled
-        };
-        btnRead.Click += BtnRead_Click;
-        Controls.Add(btnRead);
+        Controls.Add(stack);
 
-        // Tooltips
+        // Tooltips (PL4 doubled-tooltip logic kept here, not in formatter)
         if (_sliderPL1 != null)
             _sliderPL1.ValueChanged += (s, e) =>
                 _tooltip.SetToolTip(_sliderPL1, $"Register 0x{_addrPL1:X3} | Encoding: direct | Raw: {_sliderPL1.Value}");
@@ -173,117 +184,40 @@ class PowerTab : UserControl
         if (_sliderDb != null)
             _sliderDb.ValueChanged += (s, e) =>
                 _tooltip.SetToolTip(_sliderDb, $"Register 0x{_addrDbMaxTgp:X3} | Encoding: direct | Raw: {_sliderDb.Value}");
-
-        UiHelpers.FixZOrder(Controls);
     }
 
-    private void AddSectionHeader(ref int y, string text)
+    private static Label MakeDisabledLabel(string text) => new()
     {
-        var lbl = new Label
-        {
-            Text = text,
-            Location = new System.Drawing.Point(16, y),
-            AutoSize = true,
-            Font = UiHelpers.FontHeader
-        };
-        Controls.Add(lbl);
-        y += lbl.PreferredHeight + 6;
-    }
-
-    private void AddLabel(ref int y, string text)
-    {
-        var lbl = new Label
-        {
-            Text = text,
-            Location = new System.Drawing.Point(16, y),
-            AutoSize = true,
-            Font = UiHelpers.FontBold
-        };
-        Controls.Add(lbl);
-        y += lbl.PreferredHeight + 1;
-    }
-
-    private void AddDisabledLabel(ref int y, string text)
-    {
-        var lbl = new Label
-        {
-            Text = text,
-            Location = new System.Drawing.Point(16, y),
-            AutoSize = true,
-            ForeColor = System.Drawing.Color.DarkRed
-        };
-        Controls.Add(lbl);
-        y += lbl.PreferredHeight + 8;
-    }
-
-    private (TrackBar slider, Label valueLabel) AddSlider(ref int y, int min, int max, string unit)
-    {
-        var slider = new TrackBar
-        {
-            Minimum = min,
-            Maximum = max,
-            Value = min,
-            TickFrequency = Math.Max(1, (max - min) / 10),
-            LargeChange = Math.Max(1, (max - min) / 10),
-            SmallChange = 1,
-            AutoSize = false,
-            Location = new System.Drawing.Point(16, y),
-            Size = new System.Drawing.Size(400, 30)
-        };
-
-        var valueLabel = new Label
-        {
-            Text = $"{min} {unit}",
-            Location = new System.Drawing.Point(426, y + 8),
-            AutoSize = true,
-            Font = UiHelpers.FontMedium
-        };
-
-        string u = unit;
-        slider.ValueChanged += (s, e) => valueLabel.Text = $"{slider.Value} {u}";
-
-        Controls.Add(slider);
-        Controls.Add(valueLabel);
-        y += slider.Height + 2;
-        return (slider, valueLabel);
-    }
+        Text = text,
+        AutoSize = true,
+        ForeColor = UiColors.StatusError,
+        Dock = DockStyle.Top,
+    };
 
     public void RefreshFromEc()
     {
         if (_cpuEnabled && _cpuControl != null && _sliderPL1 != null)
         {
-            try
+            UiHelpers.TryUi(() =>
             {
                 var cpu = _cpuControl.ReadCpuPower();
                 _sliderPL1.Value = Math.Clamp(cpu.PL1Watts, _sliderPL1.Minimum, _sliderPL1.Maximum);
                 _sliderPL2!.Value = Math.Clamp(cpu.PL2Watts, _sliderPL2.Minimum, _sliderPL2.Maximum);
                 _sliderPL4!.Value = Math.Clamp(cpu.PL4Watts, _sliderPL4.Minimum, _sliderPL4.Maximum);
                 _sliderTemp!.Value = Math.Clamp(cpu.TempLimitC, _sliderTemp.Minimum, _sliderTemp.Maximum);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(
-                    $"Failed to read CPU power values:\n{ex.Message}",
-                    "EC Read Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            }
+            }, "read CPU power values", "EC Read Error");
         }
 
         if (_gpuEnabled && _gpuControl != null && _sliderTgp != null)
         {
-            try
+            UiHelpers.TryUi(() =>
             {
                 var gpu = _gpuControl.ReadGpuPower();
                 _sliderTgp.Value = Math.Clamp(gpu.TgpWatts, _sliderTgp.Minimum, _sliderTgp.Maximum);
                 _chkDynamicBoost!.Checked = gpu.DynamicBoostEnabled;
                 _sliderDb!.Value = Math.Clamp(gpu.DbWatts, _sliderDb.Minimum, _sliderDb.Maximum);
                 _sliderDb.Enabled = gpu.DynamicBoostEnabled;
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(
-                    $"Failed to read GPU power values:\n{ex.Message}",
-                    "EC Read Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            }
+            }, "read GPU power values", "EC Read Error");
         }
     }
 
@@ -291,42 +225,33 @@ class PowerTab : UserControl
     {
         if (_cpuEnabled && _cpuControl != null && _sliderPL1 != null)
         {
-            try
-            {
-                _cpuControl.ApplyCpuPower(
-                    _sliderPL1.Value,
-                    _sliderPL2!.Value,
-                    _sliderPL4!.Value,
-                    _sliderTemp!.Value);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(
-                    $"Failed to apply CPU power settings:\n{ex.Message}",
-                    "EC Write Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
+            UiHelpers.TryUi(() => _cpuControl.ApplyCpuPower(
+                _sliderPL1.Value,
+                _sliderPL2!.Value,
+                _sliderPL4!.Value,
+                _sliderTemp!.Value),
+                "apply CPU power settings", "EC Write Error");
         }
 
         if (_gpuEnabled && _gpuControl != null && _sliderTgp != null)
         {
-            try
-            {
-                _gpuControl.ApplyGpuPower(
-                    _sliderTgp.Value,
-                    _chkDynamicBoost!.Checked,
-                    _sliderDb!.Value);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(
-                    $"Failed to apply GPU power settings:\n{ex.Message}",
-                    "EC Write Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
+            UiHelpers.TryUi(() => _gpuControl.ApplyGpuPower(
+                _sliderTgp.Value,
+                _chkDynamicBoost!.Checked,
+                _sliderDb!.Value),
+                "apply GPU power settings", "EC Write Error");
         }
     }
 
     private void BtnRead_Click(object? sender, EventArgs e)
     {
         RefreshFromEc();
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+            _tooltip.Dispose();
+        base.Dispose(disposing);
     }
 }

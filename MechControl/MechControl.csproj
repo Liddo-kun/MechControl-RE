@@ -14,6 +14,9 @@
     <EventSourceSupport>false</EventSourceSupport>
     <MetadataUpdaterSupport>false</MetadataUpdaterSupport>
     <HttpActivityPropagationSupport>false</HttpActivityPropagationSupport>
+    <!-- WMI (System.Management) is built on COM interop; trimming disables
+         built-in COM by default, which breaks LocalDimmingControl. -->
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
   </PropertyGroup>
 
   <ItemGroup>
@@ -33,6 +36,11 @@
 
   <ItemGroup>
     <TrimmerRootDescriptor Include="ILLink.Descriptors.xml" />
+    <!-- System.Management uses Activator.CreateInstance on internal types like
+         WbemDefPath; trimming strips their constructors and WMI calls fail at
+         runtime. Root the whole assembly (it's small) instead of chasing each
+         reflected type individually. -->
+    <TrimmerRootAssembly Include="System.Management" />
   </ItemGroup>
 
 </Project>

@@ -17,78 +17,71 @@ class SystemInfoTab : UserControl
     public SystemInfoTab(string? systemName, string? cpuName)
     {
         Dock = DockStyle.Fill;
-        AutoScroll = true;
 
-        int y = 16;
-        int labelX = 16;
-        int valueX = 275;
+        var stack = UiHelpers.BuildSectionStack();
 
         // ── System Identity ─────────────────────────────
         if (systemName != null || cpuName != null)
         {
+            var grpIdentity = UiHelpers.BuildSection("System Identity", fitContent: true);
+            var identityLayout = new TableLayoutPanel
+            {
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 1,
+            };
+            identityLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+
             if (systemName != null)
             {
-                var lblSystemName = new Label
+                identityLayout.Controls.Add(new Label
                 {
                     Text = systemName,
-                    Location = new System.Drawing.Point(16, y),
                     AutoSize = true,
-                    Font = UiHelpers.FontHeader
-                };
-                Controls.Add(lblSystemName);
-                y += 24;
+                    Font = UiHelpers.FontHeader,
+                    Margin = new Padding(0, 0, 0, 4),
+                });
             }
             if (cpuName != null)
             {
-                var lblCpuName = new Label
+                identityLayout.Controls.Add(new Label
                 {
                     Text = cpuName,
-                    Location = new System.Drawing.Point(16, y),
                     AutoSize = true,
-                    Font = UiHelpers.FontNormal
-                };
-                Controls.Add(lblCpuName);
-                y += 24;
+                    Font = UiHelpers.FontNormal,
+                });
             }
-            y += 12;
+            grpIdentity.Controls.Add(identityLayout);
+            stack.Controls.Add(grpIdentity);
         }
 
         // ── Temperatures ────────────────────────────────
-        var lblTempTitle = new Label
-        {
-            Text = "Temperatures",
-            Location = new System.Drawing.Point(16, y),
-            AutoSize = true,
-            Font = UiHelpers.FontHeader
-        };
-        Controls.Add(lblTempTitle);
-        y += 32;
-
-        _lblCpuTemp = UiHelpers.AddLabeledRow(this, ref y, labelX, valueX, "CPU Temperature [0x43E]:");
-        _lblGpuTemp = UiHelpers.AddLabeledRow(this, ref y, labelX, valueX, "GPU Temperature [0x44F]:");
-        y += 12;
+        var grpTemp = UiHelpers.BuildSection("Temperatures", fitContent: true);
+        var tempLayout = UiHelpers.BuildKeyValueTable();
+        _lblCpuTemp = UiHelpers.AddKeyValueRow(tempLayout, "CPU Temperature [0x43E]:");
+        _lblGpuTemp = UiHelpers.AddKeyValueRow(tempLayout, "GPU Temperature [0x44F]:");
+        grpTemp.Controls.Add(tempLayout);
+        stack.Controls.Add(grpTemp);
 
         // ── Power Delivery ──────────────────────────────
-        var lblPowerTitle = new Label
-        {
-            Text = "Power Delivery",
-            Location = new System.Drawing.Point(16, y),
-            AutoSize = true,
-            Font = UiHelpers.FontHeader
-        };
-        Controls.Add(lblPowerTitle);
-        y += 32;
+        var grpPower = UiHelpers.BuildSection("Power Delivery", fitContent: true);
+        var powerLayout = UiHelpers.BuildKeyValueTable();
+        _lblAdapterCurrent = UiHelpers.AddKeyValueRow(powerLayout, "Adapter Current [0x449]:");
+        _lblSystemPower    = UiHelpers.AddKeyValueRow(powerLayout, "System Power [0x60C-0x60D]:");
+        _lblGpuPowerAlloc  = UiHelpers.AddKeyValueRow(powerLayout, "GPU Power Alloc / NPCF [0x7D5]:");
+        _lblThermalBudget  = UiHelpers.AddKeyValueRow(powerLayout, "Thermal Budget / CTWA [0x788]:");
+        grpPower.Controls.Add(powerLayout);
+        stack.Controls.Add(grpPower);
 
-        _lblAdapterCurrent = UiHelpers.AddLabeledRow(this, ref y, labelX, valueX, "Adapter Current [0x449]:");
-        _lblSystemPower    = UiHelpers.AddLabeledRow(this, ref y, labelX, valueX, "System Power [0x60C-0x60D]:");
-        _lblGpuPowerAlloc  = UiHelpers.AddLabeledRow(this, ref y, labelX, valueX, "GPU Power Alloc / NPCF [0x7D5]:");
-        _lblThermalBudget  = UiHelpers.AddLabeledRow(this, ref y, labelX, valueX, "Thermal Budget / CTWA [0x788]:");
-
-        UiHelpers.FixZOrder(Controls);
+        Controls.Add(stack);
     }
 
     public void OnMonitorUpdated(MonitorData data)
     {
+        // Skip label updates while the tab isn't shown — the monitor still ticks
+        // for the tray/other consumers, but the labels don't need refreshing.
+        if (!Visible) return;
+
         _lblCpuTemp.Text = data.CpuTemp > 0 ? $"{data.CpuTemp}\u00B0C" : "--";
         _lblGpuTemp.Text = data.GpuTemp > 0 ? $"{data.GpuTemp}\u00B0C" : "--";
 
@@ -114,5 +107,4 @@ class SystemInfoTab : UserControl
             ? $"{data.ThermalBudgetWatts} W"
             : "--";
     }
-
 }
