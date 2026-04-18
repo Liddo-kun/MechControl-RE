@@ -381,6 +381,9 @@ class LiquidCoolerTab : UserControl
 
     private async void BtnScan_Click(object? sender, EventArgs e)
     {
+        // Stop any pending reconnect so the timer doesn't flip UI state mid-scan.
+        StopReconnectTimer();
+
         // Re-check Bluetooth availability on each scan (handles adapter re-enable)
         bool btAvailable = await BleDevice.IsBluetoothAvailableAsync();
         if (!btAvailable)
@@ -540,13 +543,19 @@ class LiquidCoolerTab : UserControl
     {
         using var cts = new CancellationTokenSource();
         var connectTask = _ble.ConnectAsync(address, cts.Token);
-        if (await Task.WhenAny(connectTask, Task.Delay(15000)) != connectTask)
+        var delayTask = Task.Delay(15000, cts.Token);
+        if (await Task.WhenAny(connectTask, delayTask) != connectTask)
         {
+            // Timed out. Don't call _ble.Disconnect() here — WinRT BLE ops don't
+            // honour cts, so ConnectAsync may still be running and racing with
+            // us on _device/_tx. The next ConnectAsync attempt cleans up stale
+            // state via its internal `if (_device != null) Disconnect()` under
+            // _connectLock.
             cts.Cancel();
-            _ble.Disconnect();
             _ = connectTask.ContinueWith(static _ => { }, TaskContinuationOptions.OnlyOnFaulted);
             return false;
         }
+        cts.Cancel();   // release the delay task's timer registration
         await connectTask;
         return true;
     }
@@ -561,7 +570,8 @@ class LiquidCoolerTab : UserControl
 
     private void StopReconnectTimer()
     {
-        _reconnectTimer.Change(Timeout.Infinite, Timeout.Infinite);
+        try { _reconnectTimer.Change(Timeout.Infinite, Timeout.Infinite); }
+        catch (ObjectDisposedException) { }
         _reconnecting = false;
         _reconnectAttempt = 0;
     }
@@ -569,13 +579,25 @@ class LiquidCoolerTab : UserControl
     private void ScheduleNextReconnect()
     {
         int delayMs = ReconnectBackoffMs[Math.Min(_reconnectAttempt, ReconnectBackoffMs.Length - 1)];
-        _reconnectTimer.Change(delayMs, Timeout.Infinite);
+        try { _reconnectTimer.Change(delayMs, Timeout.Infinite); }
+        catch (ObjectDisposedException) { }
     }
 
     private async void ReconnectTimerCallback(object? state)
     {
         if (_reconnecting || _ble.IsConnected || _state.SavedAddress == 0) return;
+
+        // Gate on BT availability so we don't log a spurious "watcher start
+        // failed" every backoff tick while the radio is off.
+        if (!await BleDevice.IsBluetoothAvailableAsync())
+        {
+            _reconnectAttempt++;
+            ScheduleNextReconnect();
+            return;
+        }
+
         _reconnecting = true;
+        DiagnosticLog.Write($"[BLE] Reconnect attempt {_reconnectAttempt + 1}");
 
         bool succeeded = false;
         try
@@ -583,13 +605,14 @@ class LiquidCoolerTab : UserControl
             if (await ConnectWithTimeoutAsync(_state.SavedAddress))
             {
                 succeeded = true;
+                DiagnosticLog.Write("[BLE] Reconnect succeeded");
                 if (IsHandleCreated)
                     BeginInvoke(async () => { OnConnected(); await ApplyCurrentAsync(); });
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // Silently retry with backoff
+            DiagnosticLog.Write($"[BLE] Reconnect attempt {_reconnectAttempt + 1} failed: {ex.Message}");
         }
         finally
         {
@@ -744,28 +767,24 @@ class LiquidCoolerTab : UserControl
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[LC] Apply failed: {ex.Message}");
+            DiagnosticLog.Write($"[LC] Apply failed: {ex.Message}");
         }
     }
 
     /// <summary>Check Bluetooth and auto-connect if enabled. Called by MainForm on startup.</summary>
     public async Task InitAsync()
     {
-        // On Task Scheduler startup after reboot, the BT radio may still be
-        // initializing. Retry the availability check a few times before giving up.
-        for (int i = 0; i < 4; i++)
-        {
-            await CheckBluetoothAsync();
-            if (!_btUnavailablePanel.Visible) break;
-            if (i < 3) await Task.Delay(3000);
-        }
+        // Single BT availability check. If the radio isn't up yet (e.g. Task
+        // Scheduler cold boot), the reconnect timer's fast tier with its own
+        // BT gating drives retry — no second retry loop here.
+        await CheckBluetoothAsync();
 
         if (!_state.AutoConnect || _state.SavedAddress == 0) return;
 
         if (!_btUnavailablePanel.Visible)
             await TryConnectAsync(_state.SavedAddress);
         else
-            StartReconnectTimer();  // BT still not up — keep trying with backoff
+            StartReconnectTimer();
     }
 
     /// <summary>Send reset to cooler (called during app shutdown).</summary>
@@ -784,7 +803,18 @@ class LiquidCoolerTab : UserControl
         if (disposing)
         {
             _ble.ConnectionLost -= _onConnectionLostHandler;
-            _reconnectTimer.Dispose();
+
+            // Wait for any in-flight ReconnectTimerCallback to return before
+            // the timer is actually disposed. Prevents ObjectDisposedException
+            // from ScheduleNextReconnect's Change() on a disposed timer, and
+            // prevents BleDevice.Disconnect racing with an in-flight ConnectAsync.
+            using var done = new ManualResetEvent(false);
+            try
+            {
+                _reconnectTimer.Dispose(done);
+                done.WaitOne(3000);
+            }
+            catch { }
         }
         base.Dispose(disposing);
     }

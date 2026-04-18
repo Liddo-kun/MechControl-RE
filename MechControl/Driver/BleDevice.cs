@@ -86,7 +86,7 @@ sealed class BleDevice : IDisposable
         try { watcher.Start(); }
         catch (Exception ex)
         {
-            Console.WriteLine($"[BLE] Scan start failed (Bluetooth may be off): {ex.Message}");
+            DiagnosticLog.Write($"[BLE] Scan start failed (Bluetooth may be off): {ex.Message}");
             return [];
         }
 
@@ -125,7 +125,7 @@ sealed class BleDevice : IDisposable
         try { watcher.Start(); }
         catch (Exception ex)
         {
-            Console.WriteLine($"[BLE] Advertisement watcher start failed: {ex.Message}");
+            DiagnosticLog.Write($"[BLE] Advertisement watcher start failed: {ex.Message}");
             return false;
         }
 
@@ -182,7 +182,7 @@ sealed class BleDevice : IDisposable
             {
                 if (attempt < maxAttempts)
                 {
-                    Console.WriteLine($"[BLE] NUS service not found (attempt {attempt}/{maxAttempts}), retrying...");
+                    DiagnosticLog.Write($"[BLE] NUS service not found (attempt {attempt}/{maxAttempts}), retrying...");
                     await Task.Delay(retryDelayMs, ct);
                     continue;
                 }
@@ -198,7 +198,7 @@ sealed class BleDevice : IDisposable
             {
                 if (attempt < maxAttempts)
                 {
-                    Console.WriteLine($"[BLE] TX characteristic not found (attempt {attempt}/{maxAttempts}), retrying...");
+                    DiagnosticLog.Write($"[BLE] TX characteristic not found (attempt {attempt}/{maxAttempts}), retrying...");
                     await Task.Delay(retryDelayMs, ct);
                     continue;
                 }
@@ -231,7 +231,7 @@ sealed class BleDevice : IDisposable
 
             DeviceName = _device.Name;
             ConnectedAddress = bluetoothAddress;
-            Console.WriteLine($"[BLE] Connected to {DeviceName} ({FormatAddress(bluetoothAddress)})");
+            DiagnosticLog.Write($"[BLE] Connected to {DeviceName} ({FormatAddress(bluetoothAddress)})");
             return;
         }
         }
@@ -259,7 +259,7 @@ sealed class BleDevice : IDisposable
             _device = null;
         }
 
-        Console.WriteLine("[BLE] Disconnected");
+        DiagnosticLog.Write("[BLE] Disconnected");
     }
 
     // ── Data transfer ────────────────────────────────────────────────
@@ -319,7 +319,7 @@ sealed class BleDevice : IDisposable
     {
         if (sender.ConnectionStatus == BluetoothConnectionStatus.Disconnected)
         {
-            Console.WriteLine("[BLE] Connection lost");
+            DiagnosticLog.Write("[BLE] Connection lost");
             _tx = null;
             _rx = null;
             ConnectionLost?.Invoke();

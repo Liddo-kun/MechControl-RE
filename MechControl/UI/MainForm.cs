@@ -854,6 +854,16 @@ class MainForm : Form
     {
         if (disposing)
         {
+            // BLE shutdown runs BEFORE base.Dispose so the LiquidCoolerTab's
+            // reconnect timer is still live when StopReconnectTimer/SendResetAsync
+            // execute. Task.Run avoids deadlock by running async work off the
+            // UI SynchronizationContext. Timeout prevents hang if BLE is stuck.
+            if (_liquidCoolerTab != null)
+            {
+                try { Task.Run(() => _liquidCoolerTab.ShutdownAsync()).Wait(3000); }
+                catch { }
+            }
+
             _trayAnimTimer?.Change(Timeout.Infinite, Timeout.Infinite);
             _trayAnimTimer?.Dispose();
             _trayIcon.Dispose();
@@ -867,13 +877,6 @@ class MainForm : Form
         base.Dispose(disposing); // FanTab restores curves to EC via LinkedFanController.Dispose
         if (disposing)
         {
-            // BLE shutdown: Task.Run avoids deadlock by running async work off the
-            // UI SynchronizationContext. Timeout prevents hang if BLE is stuck.
-            if (_liquidCoolerTab != null)
-            {
-                try { Task.Run(() => _liquidCoolerTab.ShutdownAsync()).Wait(3000); }
-                catch { }
-            }
             _bleDevice?.Dispose();
             _hidDevice.Dispose();
             _device.Dispose(); // EC device must be last — child controls may write during disposal
