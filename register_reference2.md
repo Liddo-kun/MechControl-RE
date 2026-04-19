@@ -206,7 +206,7 @@ fan control, battery mode, lighting, and OEM config bytes.
 | `0x785` | RW | `PL4` (`ADDR_PL4_SETTING_VALUE`) | Live PL4. Encoding depends on `0x727` bit 7: if set (`PL4D = 1`) then `watts = raw × 2` (range 10–420); if clear, `watts = raw` (10–210). | `CpuPowerControl` write |
 | `0x786` | W | `cpuTempLimitWrite` | CPU temp-limit write. **Bit 7 is a required commit flag** — without it the EC stores the value but does not enforce the limit. Intel: `0x80 \| (105 - °C)`. AMD: `0x80 \| °C`. Readback is via `0x463` with bit 7 stripped. OEM dual label: `ADDR_L1_PWM_DEFAULT_MYFAN3` (not used on IDY_7Y). | `CpuPowerControl` write |
 | `0x787` | RW | `fanSwitchSpeed` (`ADDR_TimAP_FanSwitchSpeedT100mSec`) | Fan switch speed: bit 7 = enable, bits 0–6 = time in units of 100 ms. OEM dual label: `ADDR_L2_PWM_DEFAULT_MYFAN3`. | `FanSwitchSpeedControl` write |
-| `0x788` | R | — | Thermal budget (DSDT `CTWA`). `watts = raw × 8`. OEM dual label: `ADDR_L3_PWM_DEFAULT_MYFAN3`. | `EcMonitor` poll |
+| `0x788` | R | — | NPCF `ACBT` shadow (DSDT `CTWA`). Direct mirror of `0x744` TGP offset byte (`watts = raw + TgpOffset`). DSDT populates `NPCF.ACBT = CTWA × 8` — the ×8 is NPCF's unit (1/8 W), not a watt conversion. OEM dual label: `ADDR_L3_PWM_DEFAULT_MYFAN3`. | `EcMonitor` poll |
 | `0x789` | RW | `ADDR_L1_PWM_DEFAULT_MYFAN2` / `ADDR_L4_PWM_DEFAULT_MYFAN3` | MyFan2 / MyFan3 PWM default (dual-mapped) | OEM symbol only; not used |
 | `0x78A` | RW | `ADDR_L2_PWM_DEFAULT_MYFAN2` / `ADDR_L5_PWM_DEFAULT_MYFAN3` | MyFan2 / MyFan3 PWM default (dual-mapped) | OEM symbol only; not used |
 | `0x78B` | RW | `ADDR_L3_PWM_DEFAULT_MYFAN2` / `ADDR_MYFAN3_GPU_SETTING` | MyFan2 / MyFan3 setting (dual-mapped) | OEM symbol only; not used |
@@ -248,7 +248,7 @@ fan control, battery mode, lighting, and OEM config bytes.
 | `0x7D2` | R | `ADDR_ModuleID_GPU` | GPU module identification | `HardwareDetection` at startup |
 | `0x7D3` | R | `ADDR_ModuleID` | CPU module identification | `HardwareDetection` at startup |
 | `0x7D4` | — | — | unknown | — |
-| `0x7D5` | R | — | GPU power allocation (DSDT `DBAP` / NPCF). `watts = raw × 8`. | `EcMonitor` poll |
+| `0x7D5` | R | — | NPCF `AMAT` shadow (DSDT `DBAP`). Direct mirror of `0x746` DB max byte (`watts = raw`, `0` = DB off). DSDT populates `NPCF.AMAT = DBAP × 8` — the ×8 is NPCF's unit (1/8 W), not a watt conversion. | `EcMonitor` poll |
 | `0x7D6-0x7D7` | — | — | unknown | — |
 | `0x7D8` | R | `ADDR_GAMING_TCC_OFFSET_DEFAULT_VALUE` | Gaming-mode TCC offset default | `HardwareDetection` at startup |
 | `0x7D9` | R | `ADDR_OFFICE_TCC_OFFSET_DEFAULT_VALUE` | Office-mode TCC offset default | `HardwareDetection` at startup |

@@ -292,7 +292,7 @@ class HardwareDetection
 
         // Dynamic Boost: direct, watts
         if (dbMax != 0xFF && dbMax <= 50)
-            limits["dynamicBoost"] = new LimitInfo { Min = 0, Max = dbMax, Encoding = "direct" };
+            limits["dynamicBoost"] = new LimitInfo { Min = 5, Max = dbMax, Encoding = "direct" };
 
         return limits.Count > 0 ? limits : null;
     }

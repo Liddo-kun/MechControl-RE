@@ -49,7 +49,7 @@ static class UniversalDefaults
         ["PL4"]          = new LimitInfo { Min = 30,  Max = 300, Encoding = "double" },
         ["cpuTempLimit"] = new LimitInfo { Min = 80,  Max = 100, Encoding = "inverted_offset", TjMax = 105 },
         ["TGP"]          = new LimitInfo { Min = 95,  Max = 150, Encoding = "offset", Offset = 95 },
-        ["dynamicBoost"] = new LimitInfo { Min = 0,   Max = 25,  Encoding = "direct" },
+        ["dynamicBoost"] = new LimitInfo { Min = 5,   Max = 25,  Encoding = "direct" },
         ["fanDuty"]      = new LimitInfo { Min = 0,   Max = 200, Encoding = "raw_div_2_percent" },
         ["fanTemp"]      = new LimitInfo { Min = 0,   Max = 105, Encoding = "direct" },
         ["fanSwitchSpeed"] = new LimitInfo { Min = 100, Max = 12700, Encoding = "fan_switch_speed" },

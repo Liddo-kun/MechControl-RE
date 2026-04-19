@@ -11,8 +11,8 @@ class SystemInfoTab : UserControl
     // Power delivery labels
     private readonly Label _lblAdapterCurrent;
     private readonly Label _lblSystemPower;
-    private readonly Label _lblGpuPowerAlloc;
-    private readonly Label _lblThermalBudget;
+    private readonly Label _lblDbMaxLive;
+    private readonly Label _lblTgpLive;
 
     public SystemInfoTab(string? systemName, string? cpuName)
     {
@@ -68,8 +68,8 @@ class SystemInfoTab : UserControl
         var powerLayout = UiHelpers.BuildKeyValueTable();
         _lblAdapterCurrent = UiHelpers.AddKeyValueRow(powerLayout, "Adapter Current [0x449]:");
         _lblSystemPower    = UiHelpers.AddKeyValueRow(powerLayout, "System Power [0x60C-0x60D]:");
-        _lblGpuPowerAlloc  = UiHelpers.AddKeyValueRow(powerLayout, "GPU Power Alloc / NPCF [0x7D5]:");
-        _lblThermalBudget  = UiHelpers.AddKeyValueRow(powerLayout, "Thermal Budget / CTWA [0x788]:");
+        _lblTgpLive        = UiHelpers.AddKeyValueRow(powerLayout, "TGP Live / NPCF ACBT [0x788]:");
+        _lblDbMaxLive      = UiHelpers.AddKeyValueRow(powerLayout, "DB Max Live / NPCF AMAT [0x7D5]:");
         grpPower.Controls.Add(powerLayout);
         stack.Controls.Add(grpPower);
 
@@ -99,12 +99,10 @@ class SystemInfoTab : UserControl
             ? $"{data.SystemPowerWatts} W"
             : "--";
 
-        _lblGpuPowerAlloc.Text = data.GpuPowerAllocWatts > 0
-            ? $"{data.GpuPowerAllocWatts} W"
-            : "--";
+        _lblTgpLive.Text = $"{data.TgpLiveWatts} W";
 
-        _lblThermalBudget.Text = data.ThermalBudgetWatts > 0
-            ? $"{data.ThermalBudgetWatts} W"
-            : "--";
+        _lblDbMaxLive.Text = data.DbMaxLiveWatts > 0
+            ? $"{data.DbMaxLiveWatts} W"
+            : "off";
     }
 }
