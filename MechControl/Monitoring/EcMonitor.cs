@@ -22,8 +22,13 @@ struct MonitorData
     public int GpuTemp;               // degrees C
     public double AdapterCurrentAmps; // 0x449 / 10.0
     public int SystemPowerWatts;      // 0x60C | (0x60D << 8)
-    public int GpuPowerAllocWatts;    // 0x7D5 * 8 (NPCF)
-    public int ThermalBudgetWatts;    // 0x788 * 8 (CTWA)
+
+    // NPCF mirrors: 0x7D5 shadows 0x746 (DB max, direct watts); 0x788 shadows 0x744
+    // (TGP offset, watts - TgpOffset). DSDT multiplies each by 8 before stuffing into
+    // NPCF.AMAT / NPCF.ACBT — that ×8 is the NPCF unit (1/8 W), NOT a watt conversion.
+    // We display the physical watts here, not the NPCF integers.
+    public int DbMaxLiveWatts;        // 0x7D5 raw, direct watts (0 = DB off)
+    public int TgpLiveWatts;          // 0x788 raw + TgpOffset (total TGP)
 }
 
 class EcMonitor : IDisposable
@@ -52,8 +57,8 @@ class EcMonitor : IDisposable
     private const int AddrAdapterCurrent = 0x449;
     private const int AddrSystemPowerLo  = 0x60C;
     private const int AddrSystemPowerHi  = 0x60D;
-    private const int AddrGpuPowerAlloc  = 0x7D5;  // DBAP, ×8 = watts
-    private const int AddrThermalBudget  = 0x788;   // CTWA, ×8 = watts
+    private const int AddrDbMaxMirror    = 0x7D5;  // DBAP (shadows 0x746, direct watts)
+    private const int AddrTgpMirror      = 0x788;  // CTWA (shadows 0x744, watts - TgpOffset)
 
     private int _consecutiveFailures;
 
@@ -146,8 +151,8 @@ class EcMonitor : IDisposable
             data.AdapterCurrentAmps = _device.ReadByte(AddrAdapterCurrent) / 10.0;
             data.SystemPowerWatts = _device.ReadByte(AddrSystemPowerLo)
                                   | (_device.ReadByte(AddrSystemPowerHi) << 8);
-            data.GpuPowerAllocWatts = _device.ReadByte(AddrGpuPowerAlloc) * 8;
-            data.ThermalBudgetWatts = _device.ReadByte(AddrThermalBudget) * 8;
+            data.DbMaxLiveWatts = _device.ReadByte(AddrDbMaxMirror);
+            data.TgpLiveWatts = _device.ReadByte(AddrTgpMirror) + _profile.TgpOffset;
 
             _consecutiveFailures = 0;
             Updated?.Invoke(data);

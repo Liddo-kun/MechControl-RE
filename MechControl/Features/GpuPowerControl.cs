@@ -15,6 +15,10 @@ class GpuPowerControl
     private readonly byte _dbMask;
     private readonly int _tgpOffset;
 
+    // Within the 0x07 control mask, bit 1 is the actual Dynamic Boost enable.
+    // The OEM app writes 0x07 (on) or 0x05 (off) — bits 0,2 stay set in both states.
+    private const byte DbEnableBit = 0x02;
+
     public GpuPowerControl(EcDevice device, WriteGuard guard, MachineProfile profile)
     {
         _device = device;
@@ -23,7 +27,7 @@ class GpuPowerControl
         _addrTgp = profile.GetRegister("tgp");
         _addrDbTotalPower = profile.GetRegister("dbTotalPower");
         _addrDbMaxTgp = profile.GetRegister("dbMaxTgp");
-        _dbMask = profile.Bitfields["dynamicBoostEn"].GetMask(); // 0x02
+        _dbMask = profile.Bitfields["dynamicBoostEn"].GetMask(); // 0x07 (bits 0,1,2)
         _tgpOffset = profile.TgpOffset;
     }
 
@@ -60,7 +64,7 @@ class GpuPowerControl
         return new GpuPowerValues
         {
             TgpWatts = RegisterEncoding.DecodeTGP(tgpRaw, _tgpOffset),
-            DynamicBoostEnabled = (ctrlRaw & _dbMask) != 0,
+            DynamicBoostEnabled = (ctrlRaw & DbEnableBit) != 0,
             DbWatts = RegisterEncoding.DecodeDB(dbMaxRaw)
         };
     }
