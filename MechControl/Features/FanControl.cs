@@ -32,6 +32,14 @@ class FanControl
     public bool HasGpuFan => _hasGpuFan;
     public bool FormatSupported => _formatSupported;
 
+    /// <summary>
+    /// Fires after ApplyCurves completes. Passes the caller's curve references
+    /// (with EnforceRange already applied in-place by WriteCurve). Subscribers
+    /// must NOT mutate — Clone first if they need a persistent copy. Duty[0] in
+    /// the object may be non-zero even though the EC received 0x00.
+    /// </summary>
+    public event Action<FanCurveModel, FanCurveModel?>? CurvesApplied;
+
     public FanControl(EcDevice device, WriteGuard guard, MachineProfile profile)
     {
         _device = device;
@@ -110,6 +118,8 @@ class FanControl
         WriteCurve(cpuCurve, _cpuTempUpBase, _cpuTempDownBase, _cpuDutyBase);
         if (_hasGpuFan && gpuCurve != null)
             WriteCurve(gpuCurve, _gpuTempUpBase, _gpuTempDownBase, _gpuDutyBase);
+
+        CurvesApplied?.Invoke(cpuCurve, _hasGpuFan ? gpuCurve : null);
     }
 
     private void WriteCurve(FanCurveModel curve, int tempUpBase, int tempDownBase, int dutyBase)

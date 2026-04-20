@@ -16,6 +16,10 @@ class FanTab : UserControl
     private readonly FanCurvePanel _cpuCurvePanel;
     private readonly FanCurvePanel _gpuCurvePanel;
     private readonly LinkedFanStatusBar? _linkedStatusBar;
+    private readonly FanCurveDebugSection? _debugSection;
+
+    // Fixed height for all curve graphs (edit panels + debug panels).
+    private const int CurvePanelHeight = 320;
     private readonly Label _lblValidation;
     private readonly CheckBox? _chkSwitchSpeed;
     private readonly TrackBar? _sliderSwitchSpeed;
@@ -110,30 +114,24 @@ class FanTab : UserControl
         }
 
         // ── Custom Fan Curve section ─────────────────────────────
-        // Dock.Fill + Percent 100 row (added to stack below) so the section
-        // grows with the window. MinimumSize prevents collapse below what the
-        // FanCurvePanel (Dock.Fill, no preferred size) needs: panel MinHeight +
-        // chrome (header row + footer row + group padding).
+        // Section AutoSizes to fit: header (AutoSize) + curves (fixed 320px) + footer (AutoSize).
         var grpCurve = UiHelpers.BuildSection("Custom Fan Curve");
-        grpCurve.AutoSize = false;
-        grpCurve.Dock = DockStyle.Fill;
-        const int headerRowHeight = 28;      // enable checkbox + link fans row
-        const int footerRowHeight = UiMetrics.ButtonHeight + UiMetrics.RowGap * 2;
-        const int groupChrome = UiMetrics.GroupPadTop + UiMetrics.GroupPadBottom;
-        int minCurveHeight = _curveEditingEnabled
-            ? FanCurvePanel.MinHeight + headerRowHeight + footerRowHeight + groupChrome
+
+        int curvesRowHeight = _curveEditingEnabled
+            ? CurvePanelHeight + UiMetrics.RowGap * 2
             : 100;
-        grpCurve.MinimumSize = new System.Drawing.Size(0, minCurveHeight);
 
         var curveInner = new TableLayoutPanel
         {
-            Dock = DockStyle.Fill,
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
             ColumnCount = 1,
             RowCount = 3,
         };
         curveInner.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
         curveInner.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        curveInner.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+        curveInner.RowStyles.Add(new RowStyle(SizeType.Absolute, curvesRowHeight));
         curveInner.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
         // Header row: [Custom Fan Curve chk] [Link Fans chk] [status panel fill]
@@ -279,8 +277,20 @@ class FanTab : UserControl
         }
 
         grpCurve.Controls.Add(curveInner);
-        stack.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+        stack.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         stack.Controls.Add(grpCurve);
+
+        // ── Debug section: curves actually written to EC ─────────
+        // Always mounted, starts hidden. Toggled by Link Fans.
+        if (_curveEditingEnabled)
+        {
+            _debugSection = new FanCurveDebugSection(control, profile, _hasGpuFan, CurvePanelHeight)
+            {
+                Visible = false,
+            };
+            stack.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            stack.Controls.Add(_debugSection);
+        }
 
         Controls.Add(stack);
     }
@@ -453,6 +463,7 @@ class FanTab : UserControl
             _chkFanCurve.Checked = true;
             SetLinkedControlsEnabled(true);
             if (_linkedStatusBar != null) _linkedStatusBar.Visible = true;
+            if (_debugSection != null) _debugSection.Visible = true;
 
             try
             {
@@ -465,6 +476,7 @@ class FanTab : UserControl
                 _chkLinkFans.Checked = false;
                 SetLinkedControlsEnabled(false);
                 if (_linkedStatusBar != null) _linkedStatusBar.Visible = false;
+                if (_debugSection != null) _debugSection.Visible = false;
                 return;
             }
         }
@@ -481,6 +493,7 @@ class FanTab : UserControl
             }
             SetLinkedControlsEnabled(false);
             if (_linkedStatusBar != null) _linkedStatusBar.Visible = false;
+            if (_debugSection != null) _debugSection.Visible = false;
         }
     }
 
