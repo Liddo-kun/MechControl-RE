@@ -12,6 +12,7 @@
 
 ## Evidence Archive (consult when debugging or doing new RE)
 
+All in `captures/`:
 - `frida_capture_annotated_X6AR55xY.md` — Raw annotated Frida capture (EC + HID + WMI) from Intel IDY_7Y system.
 - `api_monitor_results.md` — Frida EC-only capture (ground truth for buffer format).
 - `dll_decompile_results.md` — ACPIDriverDll.dll disassembly (buffer format proof).
