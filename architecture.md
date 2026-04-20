@@ -58,6 +58,9 @@ MechControl/
     PowerTab.cs                   CPU (PL1/PL2/PL4/temp limit) + GPU (TGP/DB) sliders
     FanTab.cs                     Boost/curve checkboxes + single Apply button + FanCurvePanel + fan switch speed + linked mode
     FanCurvePanel.cs              GDI+ chart, draggable points (point 0 locked to 0% duty), mouse interaction, ReadOnly mode
+    FanCurveDebugSection.cs       Section with 2 read-only FanCurvePanels; live view of curves
+                                  written to EC. Owns FanControl.CurvesApplied subscription.
+                                  Mounted always but hidden unless Link Fans is on.
     LinkedFanStatusBar.cs         Custom-painted status bar for linked fan mode (fill bar + mixed-font text)
     BatteryTab.cs                 3 radio buttons + battery telemetry (live, 2s poll)
     LightingTab.cs                3 LightingZonePanels (keyboard, light bar, logo) + idle timer + mini-LED dimming
@@ -205,7 +208,7 @@ Each feature module follows the same pattern: `ReadState()` reads current EC val
 |--------|----------|---------------|
 | `CpuPowerControl` | PL1, PL2, PL4, CPU temp limit. Temp write sets bit 7 as the commit/enable flag on both encodings — `EncodeCpuTempLimit` (Intel inverted_offset) and `EncodeCpuTempLimitDirect` (AMD direct). Without bit 7 the EC stores the value but does not enforce the limit. WriteGuard strips bit 7 before verifying against the `0x463` read redirect. | `0x783`-`0x786` |
 | `GpuPowerControl` | TGP, Dynamic Boost toggle/value | `0x743`-`0x746` |
-| `FanControl` | Fan boost, custom fan curve mode, fan table write. `ApplyCurves(cpu, gpu, enabled)` is the primary entry point: sets `0x7C5` bit 7 + `0x7C6 = 0x04` before writing both tables (probe-verified order). `SetCustomFanCurveMode(bool)` writes only `0x7C5` bit 7 — standalone toggle for linked mode. `WriteCurve` writes 94 bytes per fan in array-by-array order (all tempUp, all tempDown, all duty): skips `tempDown[0]`, forces `duty[0] = 0x00` (EC rejects non-zero), enforces 4°C hysteresis via `EnforceRange()`. Padding: `tempUp/tempDown = 0xFF` (first padding tempDown = lastActive.TempDown + 4), `duty = last active duty`. GPU curves gated by `HasGpuFan`, all curves gated by format == RamFan1. | `0x751`, `0x7C5`, `0x7C6`, `0xF00`-`0xF5F` |
+| `FanControl` | Fan boost, custom fan curve mode, fan table write. `ApplyCurves(cpu, gpu, enabled)` is the primary entry point: sets `0x7C5` bit 7 + `0x7C6 = 0x04` before writing both tables (probe-verified order), then fires `CurvesApplied` event for debug/UI consumers. `SetCustomFanCurveMode(bool)` writes only `0x7C5` bit 7 — standalone toggle for linked mode. `WriteCurve` writes 94 bytes per fan in array-by-array order (all tempUp, all tempDown, all duty): skips `tempDown[0]`, forces `duty[0] = 0x00` (EC rejects non-zero), enforces 4°C hysteresis via `EnforceRange()`. Padding: `tempUp/tempDown = 0xFF` (first padding tempDown = lastActive.TempDown + 4), `duty = last active duty`. GPU curves gated by `HasGpuFan`, all curves gated by format == RamFan1. `CurvesApplied` passes raw references (subscribers must Clone if persisting) and is gated at the subscriber via `Visible` cascade so it's a no-op when the form is hidden to tray. | `0x751`, `0x7C5`, `0x7C6`, `0xF00`-`0xF5F` |
 | `FanSwitchSpeedControl` | Fan ramp speed | `0x787` |
 | `LinkedFanController` | Linked fan mode: polls temps (1.5s), evaluates user curves, writes safe curves with per-sensor safety ramp | `cpuTemp`, `gpuTemp`, fan table |
 | `BatteryControl` | Battery health mode (3 modes) + telemetry. Reads `0x7A6` at construction to detect variant: Intel bit 3 set (`0x08`/`0x18`/`0x28`) vs AMD bit 3 clear (`0x00`/`0x10`/`0x20`). Cached `bit3Flag` used for all encodes; profile `BatteryModes` updated in-place for RestoreDefaults. | `0x7A6`, `0x402`-`0x4AB` |
@@ -237,13 +240,13 @@ EC firmware evaluates CPU and GPU fan tables independently — no hardware "link
 
 **Safety ramp**: Each written curve is flat at `linkedDuty` up to the current sensor temp, then ramps linearly to 100% at the last point (96°C). The ramp start is per-sensor — CPU curve ramps based on CPU temp, GPU curve based on GPU temp. If the app crashes, the EC keeps these curves and fans ramp up if temps rise.
 
-Fixed temp points: 15, 24, 33, 42, 51, 60, 69, 78, 87, 96°C (9°C spacing provides natural headroom).
+Fixed temp points: 10, 16, 33, 42, 51, 60, 69, 78, 87, 96°C. Points 0–1 are low-zone sentinels (below any realistic operating temp); points 2–9 form the working curve with 9°C spacing. Safe-curve TempDown uses the cross-point convention (`tempDown[i+1] = tempUp[i] − RangeCelsius`) matching `FanCurveModel.EnforceRange`; Point 0 duty is pinned to 0% (EC requires `duty[0] = 0x00`).
 
 **Panels as source of truth**: The user's editable fan curves live in FanCurvePanel. LinkedFanController reads them via `Func<FanCurveModel?>` delegates each tick — never caches stale references. Profile save reads from panels, not EC (EC has flat/safe curves during linked mode). Profile load writes to panels, then EC picks up the new curves on next tick.
 
 **Shutdown**: `LinkedFanController.Dispose()` restores real panel curves to EC. MainForm disposes the EC device *after* child controls (`base.Dispose`) so this write succeeds.
 
-**UI**: Compact painted status panel to the right of the Link Fans checkbox. Shows linked duty % as a filled bar, CPU/GPU temps and contributions, and safety ramp start temps. Only invalidates when visible (guards against hidden/minimized).
+**UI**: Compact painted status panel to the right of the Link Fans checkbox. Shows linked duty % as a filled bar, CPU/GPU temps and contributions, and safety ramp start temps. Only invalidates when visible (guards against hidden/minimized). A `FanCurveDebugSection` below the editable curves shows the actual CPU/GPU curves written to the EC (read-only, live); it is mounted always but `Visible = false` when Link Fans is off, and its `CurvesApplied` handler cascades the same `Visible` check so no Clone/Invalidate work happens when hidden.
 
 **Profile persistence**: `linkedEnabled` is saved/loaded in user profiles. On auto-load, curves are loaded into panels first, then `SetLinkedEnabled(true)` starts the controller.
 

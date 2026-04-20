@@ -16,7 +16,7 @@ class LinkedFanController : IDisposable
     private bool _enabled;
     private int _lastLinkedDuty = -1;
 
-    private static readonly int[] FixedTemps = { 15, 24, 33, 42, 51, 60, 69, 78, 87, 96 };
+    private static readonly int[] FixedTemps = { 10, 16, 33, 42, 51, 60, 69, 78, 87, 96 };
 
     public int CpuTemp { get; private set; }
     public int GpuTemp { get; private set; }
@@ -168,9 +168,16 @@ class LinkedFanController : IDisposable
         for (int i = 0; i < FixedTemps.Length; i++)
         {
             curve.Points[i].TempUp = FixedTemps[i];
-            curve.Points[i].TempDown = i > 0 ? Math.Max(0, FixedTemps[i] - FanCurveModel.RangeCelsius) : 0;
+            // Cross-point hysteresis (matches FanCurveModel.EnforceRange, OEM convention):
+            // tempDown[i] = tempUp[i-1] - RangeCelsius. Point 0 pinned to 0 (not written to EC).
+            curve.Points[i].TempDown = i > 0 ? Math.Max(0, FixedTemps[i - 1] - FanCurveModel.RangeCelsius) : 0;
 
-            if (i < rampStart || rampCount <= 0)
+            // Point 0 duty pinned to 0 (EC requires duty[0] = 0x00, force-written by WriteCurve).
+            if (i == 0)
+            {
+                curve.Points[i].DutyPercent = 0;
+            }
+            else if (i < rampStart || rampCount <= 0)
             {
                 curve.Points[i].DutyPercent = dutyPercent;
             }
