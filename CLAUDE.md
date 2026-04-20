@@ -12,10 +12,9 @@
 
 ## Evidence Archive (consult when debugging or doing new RE)
 
-- `frida_full_capture-2.md` — Raw annotated Frida capture (EC + HID + WMI).
+- `frida_capture_annotated_X6AR55xY.md` — Raw annotated Frida capture (EC + HID + WMI) from Intel IDY_7Y system.
 - `api_monitor_results.md` — Frida EC-only capture (ground truth for buffer format).
 - `dll_decompile_results.md` — ACPIDriverDll.dll disassembly (buffer format proof).
-- `ilspy_verification.md` — ILSpy cross-verification of extracted data.
 - `ec_trace_decoded.md` — ECSpec register address dump.
 
 ## Organized Subdirectories
