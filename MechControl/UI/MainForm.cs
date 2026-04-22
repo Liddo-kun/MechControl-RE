@@ -638,7 +638,13 @@ class MainForm : Form
             _trayAnimTimer?.Change(Timeout.Infinite, Timeout.Infinite);
             return;
         }
-        try { BeginInvoke(() => _trayIcon.Icon = _kekwaitFrames[frame]); }
+        // Guard against a tick that's already been queued when the user switches
+        // away from slot 5 — without this, the queued BeginInvoke runs after
+        // UpdateTrayIcon swapped the icon and reverts it to a kekwait frame.
+        try { BeginInvoke(() => {
+            if (_profileBar.ActiveSlot == 5)
+                _trayIcon.Icon = _kekwaitFrames[frame];
+        }); }
         catch { }
     }
 

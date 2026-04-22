@@ -261,6 +261,7 @@ static class UiHelpers
         try { action(); }
         catch (Exception ex)
         {
+            DiagnosticLog.Error($"UI operation '{operation}' failed: {ex.Message}");
             System.Windows.Forms.MessageBox.Show(
                 $"Failed to {operation}:\n{ex.Message}",
                 title ?? "Error",
@@ -275,6 +276,7 @@ static class UiHelpers
         try { await action(); }
         catch (Exception ex)
         {
+            DiagnosticLog.Error($"UI operation '{operation}' failed: {ex.Message}");
             System.Windows.Forms.MessageBox.Show(
                 $"Failed to {operation}:\n{ex.Message}",
                 title ?? "Error",
