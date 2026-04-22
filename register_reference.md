@@ -35,7 +35,11 @@ Write(0x786, 0x80 | offset)            -> Intel inverted_offset: offset = 105 - 
                                         -> AMD direct:           offset = cpu_temp
                                         -> bit 7 is the commit/enable flag; without it the EC
                                            stores the value but does NOT enforce the limit
-                                        -> verify via 0x463 redirect (strip bit 7 before compare)
+                                        -> verify via 0x463 redirect; mask low 7 bits on both
+                                           sides (bit 7 at read address is EC firmware
+                                           bookkeeping, may be set or clear). 0x463 updates on
+                                           the EC's polling cycle (~300-900ms observed) — retry
+                                           read with backoff until masked value matches.
 ```
 
 **Defaults by mode (read-only reference):**
@@ -374,7 +378,7 @@ Sent before keyboard OFF (other zones don't use this).
 
 | Register | Rule |
 |----------|------|
-| `0x786` (CPU temp write) | Redirect: read `0x463`, check `105 - readback == target_temp` |
+| `0x786` (CPU temp write) | Redirect: read `0x463`, compare low 7 bits only (`readback & 0x7F == written & 0x7F`). Readback settles on EC polling cycle (~300-900ms) — use retry with backoff. |
 | `0x767` (trigger clear) | Skip verification (fire-and-forget) |
 | `0x78C` (logo commit) | Skip verification (write-only trigger) |
 | `0x741` (activation) | Skip verification (EC transforms value: write 0x05, reads back 0x01) |
@@ -538,7 +542,7 @@ EC version, system ID, live sensor temps, BIOS info, fan RPM, silent mode.
 | `0x454` | R | ecOEM_EC_VER | EC firmware version |
 | `0x456` | R | ADDR_SystemID | System identification byte |
 | `0x45B` | R | ADDR_SILENTMODE_STATUS_BYTE | Silent mode status (0=off, nonzero=active) |
-| `0x463` | R | (cpuTempLimit read) | CPU temp limit readback: `105 - reg` = degrees C. Write via 0x786. |
+| `0x463` | R | (cpuTempLimit read) | CPU temp limit readback. Low 7 bits are the offset: `105 - (reg & 0x7F)` = degrees C. Bit 7 is EC firmware bookkeeping (the commit flag mirrored from 0x786) — may be set or clear. Write via 0x786. |
 | `0x464` | R | ADDR_EC_MAIN_FAN_RPM_BYTE1 | CPU fan RPM high byte (pair with 0x465). RPM = `(0x464 << 8) \| 0x465` |
 | `0x465` | R | ADDR_EC_MAIN_FAN_RPM_BYTE2 | CPU fan RPM low byte (pair with 0x464) |
 | `0x466` | R | ADDR_EC_BIOS_INFO5 | BIOS info register 5 |
@@ -594,7 +598,7 @@ Mode defaults (gaming/office/battery saver), live PL1/PL2/PL4, VRM current, temp
 | `0x783` | RW | ADDR_PL1_SETTING_VALUE | Live PL1 setting (direct byte = watts, 10-210) |
 | `0x784` | RW | ADDR_PL2_SETTING_VALUE | Live PL2 setting (direct byte = watts, 10-210) |
 | `0x785` | RW | ADDR_PL4_SETTING_VALUE | Live PL4 setting (byte x2 = watts when double flag=1, 10-420) |
-| `0x786` | W | ADDR_L1_PWM_DEFAULT_MYFAN3 / (cpuTempLimit write) | CPU temp limit write. Bit 7 = commit/enable (required — without it the EC stores the value but does not enforce the limit). Intel inverted_offset: `0x80 \| (105 - temp)`. AMD direct: `0x80 \| temp`. Readback via 0x463 (strip bit 7). Also MyFan3 L1 PWM default in fan context. |
+| `0x786` | W | ADDR_L1_PWM_DEFAULT_MYFAN3 / (cpuTempLimit write) | CPU temp limit write. Bit 7 = commit/enable (required — without it the EC stores the value but does not enforce the limit). Intel inverted_offset: `0x80 \| (105 - temp)`. AMD direct: `0x80 \| temp`. Readback via 0x463; compare low 7 bits only. Also MyFan3 L1 PWM default in fan context. |
 
 ---
 
