@@ -52,8 +52,9 @@ pwsh -File build-scripts\build-release.ps1
 # Exes (run elevated):
 #   bin\Release\net8.0-windows10.0.19041.0\MechControl.exe (needs .NET 8)
 #   bin\selfcontained\MechControl.exe (standalone)
-# Zips: bin\release-zips\MechControl-release.zip (~0.6 MB)
-#       bin\release-zips\MechControl-selfcontained.zip (~22 MB)
+# Zips: bin\release-zips\MechControl-release.zip (~0.7 MB)
+#       bin\release-zips\MechControl-selfcontained.zip (~14 MB)
+#       bin\release-zips\MechControl-selfcontained.7z  (~10 MB, only when 7-Zip is installed)
 ```
 
 ## Compilation (standalone .cs tools in `tools/`)
