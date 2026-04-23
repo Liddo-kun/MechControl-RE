@@ -28,43 +28,38 @@ static class DiagnosticLog
     }
 
     // Retention: keep the very first session (origin state of the machine) plus
-    // the last 5 sessions. Drop anything between. Session blocks are bounded by
-    // a separator line of 72 '=' chars followed by "Session started:".
-    // Opportunistic — any failure silently skips rotation for this launch.
+    // the KeepRecent most-recent sessions. Drop anything between.
+    // Opportunistic — any IO failure silently skips rotation for this launch.
+    private const int KeepRecent = 5;
+
     private static void TrimOldSessions(string path)
     {
         if (!File.Exists(path)) return;
-        string content;
-        try { content = File.ReadAllText(path); }
+        string[] lines;
+        try { lines = File.ReadAllLines(path); }
         catch { return; }
 
-        const string marker = "Session started:";
-        var starts = new List<int>();
-        for (int i = 0; (i = content.IndexOf(marker, i, StringComparison.Ordinal)) >= 0; i += marker.Length)
-            starts.Add(i);
-        if (starts.Count <= 6) return;
-
-        // For each "Session started:" position, find the start of its preceding
-        // '=' separator line — that's the true block boundary.
-        int BlockStart(int markerPos)
+        // A session block starts with a 72-char '=' separator immediately
+        // followed by a "Session started:" line. Anchoring on both lines
+        // avoids false matches on body text that happens to contain the phrase.
+        string sep = new string('=', 72);
+        var blockStarts = new List<int>();
+        for (int i = 0; i < lines.Length - 1; i++)
         {
-            int prevNl = content.LastIndexOf('\n', markerPos - 1);
-            if (prevNl < 1) return 0;
-            int sepLineStart = content.LastIndexOf('\n', prevNl - 1);
-            return sepLineStart < 0 ? 0 : sepLineStart + 1;
+            if (lines[i] == sep && lines[i + 1].StartsWith("Session started:", StringComparison.Ordinal))
+                blockStarts.Add(i);
         }
+        if (blockStarts.Count <= 1 + KeepRecent) return;
 
-        int firstBlockStart = BlockStart(starts[0]);
-        int firstBlockEnd = BlockStart(starts[1]);
-        int recentBlockStart = BlockStart(starts[starts.Count - 5]);
-        int elided = starts.Count - 6;
+        int firstStart = blockStarts[0];
+        int firstEnd = blockStarts[1]; // exclusive
+        int recentStart = blockStarts[blockStarts.Count - KeepRecent];
 
-        string firstSession = content.Substring(firstBlockStart, firstBlockEnd - firstBlockStart);
-        string recentSessions = content.Substring(recentBlockStart);
-        string separator = Environment.NewLine +
-            $"    [ ... {elided} earlier session(s) elided ... ]" + Environment.NewLine;
+        var result = new List<string>(capacity: lines.Length);
+        for (int i = firstStart; i < firstEnd; i++) result.Add(lines[i]);
+        for (int i = recentStart; i < lines.Length; i++) result.Add(lines[i]);
 
-        try { File.WriteAllText(path, firstSession.TrimEnd() + Environment.NewLine + separator + recentSessions); }
+        try { File.WriteAllLines(path, result); }
         catch { /* opportunistic */ }
     }
 
