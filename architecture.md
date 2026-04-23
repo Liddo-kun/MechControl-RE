@@ -90,7 +90,7 @@ MechControl/
     TrayIcons/kekwait_*.png       40 animated frames (embedded resource) for profile 5 tray icon
 
   build-scripts/
-    build-release.ps1             Release build: dev exe + framework-dependent zip + self-contained zip
+    build-release.ps1             Release build: dev exe + framework-dependent zip + self-contained zip + self-contained .7z (if 7-Zip installed)
 ```
 
 ### UI layout pattern
@@ -517,7 +517,9 @@ Fan curves are read from FanTab panels (source of truth), not from EC — EC may
 
 ## 11. Diagnostic Logging (DiagnosticLog.cs)
 
-Every session appends to `mechcontrol.log` next to the exe. Logs hardware identity (ModuleID, ROMID, EC version, VRM), ECSpec config, per-mode PL defaults, effective limits and their source, feature register values (raw + decoded), fan table hex dumps (snapshot + post-write verify), fan detection results (activeEntries, GPU presence), startup validation pass/fail per feature, HID enumeration, and EC init steps. Designed so a remote user's log contains everything needed to build a verified profile.
+Every session appends to `mechcontrol.log` next to the exe. Logs hardware identity (ModuleID, ROMID, EC version, VRM), ECSpec config, per-mode PL defaults, effective limits and their source, feature register values (raw + decoded), fan table hex dumps (snapshot + post-write verify), fan detection results (activeEntries, GPU presence), startup validation pass/fail per feature, HID enumeration, and EC init steps. UI errors caught by `TryUi`/`TryUiAsync` are logged before the popup is shown, so failed profile applies etc. leave a trail. Designed so a remote user's log contains everything needed to build a verified profile.
+
+Retention: `Start()` trims the log on each launch before opening the writer — keeps the very first session (baseline snapshot of the machine's original state) plus the 5 most recent sessions, drops everything between. Trimming is opportunistic; any IO failure silently skips rotation for that launch.
 
 ---
 
