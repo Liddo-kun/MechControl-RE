@@ -11,8 +11,12 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$7zPath = 'C:\Program Files\7-Zip\7z.exe'
-$has7z = Test-Path $7zPath
+$7zPath = @(
+    'C:\Program Files\7-Zip\7z.exe',
+    'C:\Program Files (x86)\7-Zip\7z.exe',
+    'C:\Program_Files\7-Zip\7z.exe'
+) | Where-Object { Test-Path $_ } | Select-Object -First 1
+$has7z = [bool]$7zPath
 $projectDir = Split-Path $PSScriptRoot -Parent
 $binDir = Join-Path $projectDir 'bin'
 $releaseDir = Join-Path $binDir 'Release\net8.0-windows10.0.19041.0'
