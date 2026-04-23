@@ -18,12 +18,54 @@ static class DiagnosticLog
     public static void Start()
     {
         _logPath = Path.Combine(AppContext.BaseDirectory, "mechcontrol.log");
+        TrimOldSessions(_logPath);
         _writer = new StreamWriter(_logPath, append: true);
         _writer.AutoFlush = true;
         _writer.WriteLine();
         _writer.WriteLine(new string('=', 72));
         _writer.WriteLine($"Session started: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
         _writer.WriteLine(new string('=', 72));
+    }
+
+    // Retention: keep the very first session (origin state of the machine) plus
+    // the last 5 sessions. Drop anything between. Session blocks are bounded by
+    // a separator line of 72 '=' chars followed by "Session started:".
+    // Opportunistic — any failure silently skips rotation for this launch.
+    private static void TrimOldSessions(string path)
+    {
+        if (!File.Exists(path)) return;
+        string content;
+        try { content = File.ReadAllText(path); }
+        catch { return; }
+
+        const string marker = "Session started:";
+        var starts = new List<int>();
+        for (int i = 0; (i = content.IndexOf(marker, i, StringComparison.Ordinal)) >= 0; i += marker.Length)
+            starts.Add(i);
+        if (starts.Count <= 6) return;
+
+        // For each "Session started:" position, find the start of its preceding
+        // '=' separator line — that's the true block boundary.
+        int BlockStart(int markerPos)
+        {
+            int prevNl = content.LastIndexOf('\n', markerPos - 1);
+            if (prevNl < 1) return 0;
+            int sepLineStart = content.LastIndexOf('\n', prevNl - 1);
+            return sepLineStart < 0 ? 0 : sepLineStart + 1;
+        }
+
+        int firstBlockStart = BlockStart(starts[0]);
+        int firstBlockEnd = BlockStart(starts[1]);
+        int recentBlockStart = BlockStart(starts[starts.Count - 5]);
+        int elided = starts.Count - 6;
+
+        string firstSession = content.Substring(firstBlockStart, firstBlockEnd - firstBlockStart);
+        string recentSessions = content.Substring(recentBlockStart);
+        string separator = Environment.NewLine +
+            $"    [ ... {elided} earlier session(s) elided ... ]" + Environment.NewLine;
+
+        try { File.WriteAllText(path, firstSession.TrimEnd() + Environment.NewLine + separator + recentSessions); }
+        catch { /* opportunistic */ }
     }
 
     public static void Write(string message)
