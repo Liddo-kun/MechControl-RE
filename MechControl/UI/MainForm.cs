@@ -881,7 +881,7 @@ class MainForm : Form
                 foreach (var f in _kekwaitFrames)
                     f?.Dispose();
         }
-        base.Dispose(disposing); // FanTab restores curves to EC via LinkedFanController.Dispose
+        base.Dispose(disposing); // FanTab → LinkedFanController.Dispose intentionally does NOT touch the EC (see LinkedFanController.Dispose comment)
         if (disposing)
         {
             _bleDevice?.Dispose();

@@ -46,7 +46,7 @@ All in `captures/`:
 
 ## Build
 
-To build, run `pwsh -File MechControl\build-scripts\build-release.ps1`. The script autodetects dotnet.exe and produces both the framework-dependent and self-contained release outputs under `MechControl\bin\`.
+To build, run `MechControl\build-scripts\build-release.ps1`. The script autodetects dotnet.exe and produces both the framework-dependent and self-contained release outputs under `MechControl\bin\`.
 
 ## Compilation (standalone .cs tools in `tools/`)
 
