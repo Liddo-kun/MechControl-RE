@@ -240,7 +240,7 @@ EC firmware evaluates CPU and GPU fan tables independently — no hardware "link
 
 **Safety ramp**: Each written curve is flat at `linkedDuty` up to the current sensor temp, then ramps linearly to 100% at the last point (96°C). The ramp start is per-sensor — CPU curve ramps based on CPU temp, GPU curve based on GPU temp. If the app crashes, the EC keeps these curves and fans ramp up if temps rise.
 
-Fixed temp points: 10, 16, 33, 42, 51, 60, 69, 78, 87, 96°C. Points 0–1 are low-zone sentinels (below any realistic operating temp); points 2–9 form the working curve with 9°C spacing. Safe-curve TempDown uses the cross-point convention (`tempDown[i+1] = tempUp[i] − RangeCelsius`) matching `FanCurveModel.EnforceRange`; Point 0 duty is pinned to 0% (EC requires `duty[0] = 0x00`).
+Fixed temp points: 10, 16, 33, 42, 51, 60, 69, 78, 87, 96°C. Points 0–1 are low-zone sentinels (below any realistic operating temp); points 2–9 form the working curve with 9°C spacing. Safe-curve TempDown uses `tempDown[i] = tempUp[i-1] − RangeCelsius` matching `FanCurveModel.EnforceRange`; point 0 duty is pinned to 0% (EC requires `duty[0] = 0x00`).
 
 **Panels as source of truth**: The user's editable fan curves live in FanCurvePanel. LinkedFanController reads them via `Func<FanCurveModel?>` delegates each tick — never caches stale references. Profile save reads from panels, not EC (EC has flat/safe curves during linked mode). Profile load writes to panels, then EC picks up the new curves on next tick.
 

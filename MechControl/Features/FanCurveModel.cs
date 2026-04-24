@@ -12,9 +12,14 @@ class FanCurvePoint
 class FanCurveModel
 {
     /// <summary>
-    /// Cross-point hysteresis: tempDown[i+1] = tempUp[i] - RangeCelsius.
-    /// Point 0 tempDown is pinned to 0. This is the single source of truth for
-    /// fan curve hysteresis — we do not read tempDown from the EC or profiles.
+    /// Hysteresis range in °C. The EC evaluates the fan table with the
+    /// "right-point" rule: duty[i] applies when tempUp[i-1] &lt; temp ≤ tempUp[i].
+    /// Crossing tempUp[i] going up jumps duty to duty[i+1]; crossing
+    /// tempDown[i] going down drops duty to duty[i-1]. We pair this with a
+    /// cross-point tempDown formula so every zone gets a clean RangeCelsius-
+    /// wide hysteresis band: tempDown[i] = tempUp[i-1] - RangeCelsius (for
+    /// i ≥ 1). Also doubles as the minimum spacing enforced between adjacent
+    /// tempUp values.
     /// </summary>
     public const int RangeCelsius = 4;
 
@@ -91,19 +96,18 @@ class FanCurveModel
     }
 
     /// <summary>
-    /// Force every point's TempDown to TempUp - RangeCelsius (point 0 pinned to 0).
-    /// Call this at any materialization point (EC write, profile serialize) so we
-    /// never leak stale/imported TempDown values.
+    /// Recompute every TempDown from the current TempUp values using the
+    /// cross-point formula tempDown[i] = tempUp[i-1] - RangeCelsius
+    /// (point 0 pinned to 0; never written to EC). Call at every
+    /// materialization point (EC write, profile serialize) so user-edited
+    /// TempUp changes always produce a matching tempDown set.
     /// </summary>
     public void EnforceRange()
     {
         if (Points.Length == 0) return;
         Points[0].TempDown = 0;
-        // Cross-point convention (OEM/probe-verified):
-        // tempDown[i] = tempUp[i-1] - hysteresis
-        // Guarantees clean zone separation: tempDown[i] < tempUp[i-1]
-        for (int i = 0; i < Points.Length - 1; i++)
-            Points[i + 1].TempDown = Math.Max(0, Points[i].TempUp - RangeCelsius);
+        for (int i = 1; i < Points.Length; i++)
+            Points[i].TempDown = Math.Max(0, Points[i - 1].TempUp - RangeCelsius);
     }
 
     /// <summary>
@@ -155,7 +159,8 @@ class FanCurveModel
     public static FanCurveModel CreateGenericDefault()
     {
         int[] tempUp   = { 30, 40, 50, 60, 65, 70, 75, 80, 85, 90 };
-        int[] tempDown = {  0, 36, 46, 56, 61, 66, 71, 76, 81, 86 }; // 4C range (point 0 is always 0)
+        // tempDown[i] = tempUp[i-1] - RangeCelsius; index 0 is never written.
+        int[] tempDown = {  0, 26, 36, 46, 56, 61, 66, 71, 76, 81 };
         int[] duty     = {  0, 25, 35, 45, 55, 65, 75, 85, 95, 100 };
         var model = new FanCurveModel(tempUp.Length);
         for (int i = 0; i < tempUp.Length; i++)

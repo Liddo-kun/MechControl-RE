@@ -15,12 +15,59 @@ class FanCurvePanel : UserControl
     private static readonly System.Drawing.Pen s_gridPen = new(System.Drawing.Color.FromArgb(190, 195, 200), 1);
     private static readonly System.Drawing.Pen s_axisPen = new(System.Drawing.Color.Black, 1);
     private static readonly System.Drawing.Pen s_linePen = new(System.Drawing.Color.RoyalBlue, 2);
+    private static readonly System.Drawing.Pen s_hysteresisPen = new(
+        System.Drawing.Color.FromArgb(130, 65, 105, 225), 1.5f)
+    {
+        DashStyle = System.Drawing.Drawing2D.DashStyle.Dash,
+    };
+    private static readonly System.Drawing.Pen s_currentTempPen = new(
+        System.Drawing.Color.FromArgb(200, 220, 80, 80), 1.5f)
+    {
+        DashStyle = System.Drawing.Drawing2D.DashStyle.Dot,
+    };
     private static readonly System.Drawing.SolidBrush s_fillBrush = new(System.Drawing.Color.FromArgb(30, 65, 105, 225));
     private static readonly System.Drawing.SolidBrush s_pointBrush = new(System.Drawing.Color.RoyalBlue);
     private static readonly System.Drawing.SolidBrush s_selectedPointBrush = new(System.Drawing.Color.OrangeRed);
 
     public int DutyBaseAddress { get; set; }
     public bool ReadOnly { get; set; }
+
+    /// <summary>
+    /// When true, draw straight line segments between points (implies linear
+    /// interpolation) and anchor each drag handle at (tempUp[i], duty[i]).
+    /// When false (default), draw the curve as a step function matching how
+    /// the EC actually evaluates the table: duty[i] applies when
+    /// tempUp[i-1] &lt; temp ≤ tempUp[i], with the vertical step at tempUp[i]
+    /// jumping to duty[i+1] going up. In step mode the handle anchor shifts
+    /// to the step-up corner (tempUp[i], duty[i+1]) for i &lt; n-1 so that
+    /// "dragging a point to (50°C, 80%)" reads as "crossing 50°C jumps to
+    /// 80%" — what users expect. Handle n-1 stays on the plateau's right
+    /// edge, so it shares its duty value with handle n-2 (both edit
+    /// duty[n-1]); moving either slides the whole top plateau.
+    /// Interpolated mode is only honest when an external software loop
+    /// samples the curve (Link Fans); in stock EC mode the step view
+    /// reflects real fan behavior.
+    /// </summary>
+    public bool InterpolatedRendering { get; set; }
+
+    private int? _currentTempC;
+
+    /// <summary>
+    /// Current measured temperature in °C. When set and in range, a dotted
+    /// light-red vertical line is drawn at that temp. Set null to hide.
+    /// Invalidate is skipped when the panel isn't Visible, so pushing updates
+    /// while the fan tab is inactive or the form is in the tray is free.
+    /// </summary>
+    public int? CurrentTempC
+    {
+        get => _currentTempC;
+        set
+        {
+            if (_currentTempC == value) return;
+            _currentTempC = value;
+            if (Visible) Invalidate();
+        }
+    }
 
     // Graph margins
     private const int MarginLeft = 44;
@@ -47,7 +94,15 @@ class FanCurvePanel : UserControl
     public FanCurveModel? Curve
     {
         get => _curve;
-        set { _curve = value; Invalidate(); }
+        set
+        {
+            // Normalize tempDown on assignment so the dashed hysteresis line
+            // is correct from the first paint, regardless of whether the
+            // incoming curve came from a stale profile, EC read, or snapshot.
+            value?.EnforceRange();
+            _curve = value;
+            Invalidate();
+        }
     }
 
     public const int MinWidth = 400;
@@ -59,6 +114,25 @@ class FanCurvePanel : UserControl
         MinimumSize = new System.Drawing.Size(MinWidth, MinHeight);
         BackColor = System.Drawing.Color.White;
         BorderStyle = BorderStyle.FixedSingle;
+    }
+
+    /// <summary>
+    /// Index into Points[] of the duty value edited by handle <paramref name="handleIdx"/>.
+    /// In interpolated mode it's the identity. In step mode, handle i sits at the
+    /// step-up corner and its Y = duty[i+1]; the final handle has no "next zone",
+    /// so it shares duty[n-1] with handle n-2.
+    /// </summary>
+    private int HandleDutyIndex(int handleIdx)
+    {
+        if (_curve == null || InterpolatedRendering) return handleIdx;
+        return Math.Min(handleIdx + 1, _curve.Points.Length - 1);
+    }
+
+    private System.Drawing.PointF HandlePixel(int handleIdx)
+    {
+        var p = _curve!.Points[handleIdx];
+        float duty = _curve.Points[HandleDutyIndex(handleIdx)].DutyPercent;
+        return ToPixel(p.TempUp, duty);
     }
 
     // Convert temp,duty to pixel coords
@@ -127,27 +201,91 @@ class FanCurvePanel : UserControl
 
         if (_curve == null || _curve.Points.Length == 0) return;
 
-        // Fill below curve
-        var fillPts = new System.Drawing.PointF[_curve.Points.Length + 2];
-        for (int i = 0; i < _curve.Points.Length; i++)
-            fillPts[i] = ToPixel(_curve.Points[i].TempUp, _curve.Points[i].DutyPercent);
-        fillPts[_curve.Points.Length] = ToPixel(_curve.Points[^1].TempUp, 0);
-        fillPts[_curve.Points.Length + 1] = ToPixel(_curve.Points[0].TempUp, 0);
-        g.FillPolygon(s_fillBrush, fillPts);
+        int n = _curve.Points.Length;
 
-        // Lines between points
-        for (int i = 0; i < _curve.Points.Length - 1; i++)
+        if (InterpolatedRendering)
         {
-            var a = ToPixel(_curve.Points[i].TempUp, _curve.Points[i].DutyPercent);
-            var b = ToPixel(_curve.Points[i + 1].TempUp, _curve.Points[i + 1].DutyPercent);
-            g.DrawLine(s_linePen, a, b);
+            // Diagonal fill + lines (implies linear interpolation — only honest
+            // under Link Fans, where a software loop really does interpolate).
+            var fillPts = new System.Drawing.PointF[n + 2];
+            for (int i = 0; i < n; i++)
+                fillPts[i] = ToPixel(_curve.Points[i].TempUp, _curve.Points[i].DutyPercent);
+            fillPts[n] = ToPixel(_curve.Points[n - 1].TempUp, 0);
+            fillPts[n + 1] = ToPixel(_curve.Points[0].TempUp, 0);
+            g.FillPolygon(s_fillBrush, fillPts);
+
+            for (int i = 0; i < n - 1; i++)
+            {
+                var a = ToPixel(_curve.Points[i].TempUp, _curve.Points[i].DutyPercent);
+                var b = ToPixel(_curve.Points[i + 1].TempUp, _curve.Points[i + 1].DutyPercent);
+                g.DrawLine(s_linePen, a, b);
+            }
+        }
+        else
+        {
+            // Step-function rendering — matches EC behavior under the right-
+            // point rule: duty[i] applies when tempUp[i-1] < temp ≤ tempUp[i].
+            // So the drag point (tempUp[i], duty[i]) sits at the TOP-RIGHT
+            // corner of its duty zone. Going up, the vertical step at
+            // tempUp[i] jumps from duty[i] to duty[i+1] (entering the next
+            // zone). Horizontal at duty[i+1] spans (tempUp[i], tempUp[i+1]].
+            var fillPath = new List<System.Drawing.PointF>
+            {
+                ToPixel(_curve.Points[0].TempUp, 0),
+                ToPixel(_curve.Points[0].TempUp, _curve.Points[0].DutyPercent),
+            };
+            for (int i = 0; i < n - 1; i++)
+            {
+                fillPath.Add(ToPixel(_curve.Points[i].TempUp, _curve.Points[i + 1].DutyPercent));
+                fillPath.Add(ToPixel(_curve.Points[i + 1].TempUp, _curve.Points[i + 1].DutyPercent));
+            }
+            fillPath.Add(ToPixel(_curve.Points[n - 1].TempUp, 0));
+            g.FillPolygon(s_fillBrush, fillPath.ToArray());
+
+            for (int i = 0; i < n - 1; i++)
+            {
+                var a = ToPixel(_curve.Points[i].TempUp, _curve.Points[i].DutyPercent);
+                var corner = ToPixel(_curve.Points[i].TempUp, _curve.Points[i + 1].DutyPercent);
+                var b = ToPixel(_curve.Points[i + 1].TempUp, _curve.Points[i + 1].DutyPercent);
+                g.DrawLine(s_linePen, a, corner);
+                g.DrawLine(s_linePen, corner, b);
+            }
+
+            // Hysteresis / going-down staircase using tempDown thresholds.
+            // Traced right-to-left: at temps above tempDown[i] the EC stays at
+            // duty[i]; when temp drops below tempDown[i] it falls to duty[i-1].
+            // Dashed and lighter so it reads as "the return path" rather than
+            // competing with the primary curve. TempDown is kept current by
+            // OnMouseMove calling EnforceRange after each drag.
+            if (n >= 2)
+            {
+                var down = ToPixel(_curve.Points[n - 1].TempUp, _curve.Points[n - 1].DutyPercent);
+                for (int i = n - 1; i >= 1; i--)
+                {
+                    var corner = ToPixel(_curve.Points[i].TempDown, _curve.Points[i].DutyPercent);
+                    g.DrawLine(s_hysteresisPen, down, corner);
+                    var next = ToPixel(_curve.Points[i].TempDown, _curve.Points[i - 1].DutyPercent);
+                    g.DrawLine(s_hysteresisPen, corner, next);
+                    down = next;
+                }
+                // Close to the solid line's left endpoint at 0%
+                g.DrawLine(s_hysteresisPen, down, ToPixel(_curve.Points[0].TempUp, 0));
+            }
         }
 
-        // Points
+        // Current-temperature indicator (dotted vertical line, painted under
+        // the point markers so markers remain legible when they overlap).
+        if (_currentTempC.HasValue && _currentTempC.Value > TempMin && _currentTempC.Value <= TempMax)
+        {
+            var top = ToPixel(_currentTempC.Value, DutyMax);
+            var bot = ToPixel(_currentTempC.Value, DutyMin);
+            g.DrawLine(s_currentTempPen, top.X, top.Y, bot.X, bot.Y);
+        }
+
+        // Points (anchor depends on render mode — see HandleDutyIndex doc).
         for (int i = 0; i < _curve.Points.Length; i++)
         {
-            var pt = _curve.Points[i];
-            var px = ToPixel(pt.TempUp, pt.DutyPercent);
+            var px = HandlePixel(i);
             var brush = i == _selectedIndex ? s_selectedPointBrush : s_pointBrush;
             g.FillEllipse(brush, px.X - PointRadius, px.Y - PointRadius, PointRadius * 2, PointRadius * 2);
             g.DrawEllipse(s_axisPen, px.X - PointRadius, px.Y - PointRadius, PointRadius * 2, PointRadius * 2);
@@ -159,10 +297,12 @@ class FanCurvePanel : UserControl
         base.OnMouseDown(e);
         if (ReadOnly || _curve == null || e.Button != MouseButtons.Left) return;
 
-        // Hit test
-        for (int i = 0; i < _curve.Points.Length; i++)
+        // Hit test — iterate in reverse so the last (rightmost) handle wins
+        // when handle n-2 and n-1 overlap at the top-right corner of the
+        // plateau (they share duty[n-1] and differ only in X).
+        for (int i = _curve.Points.Length - 1; i >= 0; i--)
         {
-            var px = ToPixel(_curve.Points[i].TempUp, _curve.Points[i].DutyPercent);
+            var px = HandlePixel(i);
             float dx = e.X - px.X;
             float dy = e.Y - px.Y;
             if (dx * dx + dy * dy <= HitRadius * HitRadius)
@@ -188,39 +328,41 @@ class FanCurvePanel : UserControl
 
         var (temp, duty) = FromPixel(e.X, e.Y);
         int i = _selectedIndex;
+        int dutyIdx = HandleDutyIndex(i);
         int newTemp = (int)Math.Round(temp);
         int newDuty = (int)Math.Round(duty);
 
         // Clamp temp between neighbors. Adjacent points must be at least
-        // FanCurveModel.RangeCelsius apart so their hysteresis bands don't overlap.
-        // If the loaded curve has neighbors already closer than 2*RangeCelsius
-        // (e.g. legacy 6C curve imported from OEM), tempMin > tempMax and this
-        // point cannot be moved horizontally without first moving a neighbor.
-        // Pin TempUp in that case so duty is still editable and no crash occurs.
+        // FanCurveModel.RangeCelsius apart so each zone gets a well-defined
+        // hysteresis band. If an imported curve has neighbors closer than
+        // 2*RangeCelsius, tempMin > tempMax and this point can't move
+        // horizontally until a neighbor does; pin TempUp so duty is still
+        // editable and no crash occurs.
         int tempMin = i > 0 ? _curve.Points[i - 1].TempUp + FanCurveModel.RangeCelsius : 0;
         int tempMax = i < _curve.Points.Length - 1 ? _curve.Points[i + 1].TempUp - FanCurveModel.RangeCelsius : TempMax;
         newTemp = tempMin <= tempMax
             ? Math.Clamp(newTemp, tempMin, tempMax)
             : _curve.Points[i].TempUp;
 
-        // Clamp duty — point 0 locked to 0% (EC requires duty[0] = 0x00),
-        // all others minimum 1% (EC treats raw 0 as "auto", overrides to ~25%)
-        newDuty = i == 0 ? 0 : Math.Clamp(newDuty, 1, DutyMax);
+        // Clamp duty — duty[0] locked to 0% (EC requires duty[0] = 0x00);
+        // all others minimum 1% (raw 0 triggers EC auto-override to ~25%).
+        // In step mode handle 0 edits duty[1], so dutyIdx == 0 only occurs
+        // in interpolated mode when i == 0.
+        newDuty = dutyIdx == 0 ? 0 : Math.Clamp(newDuty, 1, DutyMax);
 
         _curve.Points[i].TempUp = newTemp;
-        _curve.Points[i].DutyPercent = newDuty;
+        _curve.Points[dutyIdx].DutyPercent = newDuty;
 
-        // Push points to the right up if they're below us
-        for (int j = i + 1; j < _curve.Points.Length; j++)
+        // Monotonicity: keep duty non-decreasing by index. Pushes fan out
+        // from dutyIdx (the value we just wrote), not from the handle index.
+        for (int j = dutyIdx + 1; j < _curve.Points.Length; j++)
         {
             if (_curve.Points[j].DutyPercent < _curve.Points[j - 1].DutyPercent)
                 _curve.Points[j].DutyPercent = _curve.Points[j - 1].DutyPercent;
             else
                 break;
         }
-
-        // Push points to the left down if they're above us
-        for (int j = i - 1; j >= 0; j--)
+        for (int j = dutyIdx - 1; j >= 0; j--)
         {
             if (_curve.Points[j].DutyPercent > _curve.Points[j + 1].DutyPercent)
             {
@@ -229,6 +371,11 @@ class FanCurvePanel : UserControl
             else
                 break;
         }
+
+        // Re-derive TempDown so the hysteresis line tracks the drag in real
+        // time. EnforceRange is the sole owner of the tempDown formula.
+        _curve.EnforceRange();
+
         Invalidate();
     }
 
@@ -245,9 +392,9 @@ class FanCurvePanel : UserControl
     private void UpdateHoverTooltip(int mx, int my)
     {
         if (_curve == null) return;
-        for (int i = 0; i < _curve.Points.Length; i++)
+        for (int i = _curve.Points.Length - 1; i >= 0; i--)
         {
-            var px = ToPixel(_curve.Points[i].TempUp, _curve.Points[i].DutyPercent);
+            var px = HandlePixel(i);
             float dx = mx - px.X;
             float dy = my - px.Y;
             if (dx * dx + dy * dy <= HitRadius * HitRadius)
@@ -255,10 +402,13 @@ class FanCurvePanel : UserControl
                 if (_tooltipIndex != i)
                 {
                     _tooltipIndex = i;
-                    int rawDuty = RegisterEncoding.EncodeFanDuty(_curve.Points[i].DutyPercent);
+                    int dutyIdx = HandleDutyIndex(i);
+                    int dutyPct = _curve.Points[dutyIdx].DutyPercent;
+                    int tempC = _curve.Points[i].TempUp;
+                    int rawDuty = RegisterEncoding.EncodeFanDuty(dutyPct);
                     string tip = DutyBaseAddress > 0
-                        ? $"Point {i} | Register 0x{DutyBaseAddress + i:X3} | Raw: {rawDuty} | Duty: {_curve.Points[i].DutyPercent}%"
-                        : $"Point {i} | Raw: {rawDuty} | Duty: {_curve.Points[i].DutyPercent}%";
+                        ? $"{tempC}°C → {dutyPct}% | Register 0x{DutyBaseAddress + dutyIdx:X3} (Raw {rawDuty})"
+                        : $"{tempC}°C → {dutyPct}% (Raw {rawDuty})";
                     _tooltip.SetToolTip(this, tip);
                 }
                 return;

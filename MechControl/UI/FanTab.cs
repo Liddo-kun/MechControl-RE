@@ -1,5 +1,6 @@
 using MechControl.Driver;
 using MechControl.Features;
+using MechControl.Monitoring;
 using MechControl.Profile;
 
 namespace MechControl.UI;
@@ -391,6 +392,21 @@ class FanTab : UserControl
     }
 
     /// <summary>
+    /// Route live EC telemetry into the curve panels so they can draw a
+    /// current-temperature indicator. Cheap when the tab isn't active — each
+    /// panel's setter skips Invalidate when it isn't Visible.
+    /// </summary>
+    public void OnMonitorUpdated(MonitorData data)
+    {
+        int? cpu = data.CpuTemp > 0 ? data.CpuTemp : null;
+        int? gpu = data.GpuTemp > 0 ? data.GpuTemp : null;
+        _cpuCurvePanel.CurrentTempC = cpu;
+        if (_hasGpuFan)
+            _gpuCurvePanel.CurrentTempC = gpu;
+        _debugSection?.OnMonitorUpdated(cpu, gpu);
+    }
+
+    /// <summary>
     /// Read curves from EC into panels. Only called by "Read from EC" button
     /// and on initial startup when no profile is auto-loaded.
     /// </summary>
@@ -444,6 +460,15 @@ class FanTab : UserControl
         _btnApply.Enabled = !linked;
         _btnRead.Enabled = !linked;
         _chkFanCurve.Enabled = !linked;
+
+        // In linked mode LinkedFanController samples the panel curves with
+        // linear interpolation to compute a per-tick duty, so diagonal lines
+        // are accurate. In stock mode the EC evaluates the table as a step
+        // function, so show the stepwise rendering instead.
+        _cpuCurvePanel.InterpolatedRendering = linked;
+        _gpuCurvePanel.InterpolatedRendering = linked;
+        _cpuCurvePanel.Invalidate();
+        _gpuCurvePanel.Invalidate();
     }
 
     private void OnLinkFansChanged(object? sender, EventArgs e)
