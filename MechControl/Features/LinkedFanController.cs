@@ -15,13 +15,15 @@ class LinkedFanController : IDisposable
 
     private bool _enabled;
     private int _lastLinkedDuty = -1;
+    private int _lastCpuRampStart = -1;
+    private int _lastGpuRampStart = -1;
 
-    private static readonly int[] FixedTemps = { 10, 16, 33, 42, 51, 60, 69, 78, 87, 96 };
+    private static readonly int[] FixedTemps = { 19, 29, 39, 49, 57, 65, 73, 81, 89, 97 };
 
     // Ramp start must be at least this many degrees above the current sensor temp.
     // Without it, a sensor just below a grid point (e.g. 50°C vs the 51°C point)
     // leaves only 1°C of flat headroom before the curve starts ramping toward 100%.
-    private const int MinHeadroomCelsius = 2;
+    private const int MinHeadroomCelsius = 4;
 
     public int CpuTemp { get; private set; }
     public int GpuTemp { get; private set; }
@@ -54,6 +56,8 @@ class LinkedFanController : IDisposable
     {
         _enabled = true;
         _lastLinkedDuty = -1;
+        _lastCpuRampStart = -1;
+        _lastGpuRampStart = -1;
         OnTick(null, EventArgs.Empty);
         _timer.Start();
     }
@@ -67,6 +71,8 @@ class LinkedFanController : IDisposable
         WrittenCpuCurve = null;
         WrittenGpuCurve = null;
         _lastLinkedDuty = -1;
+        _lastCpuRampStart = -1;
+        _lastGpuRampStart = -1;
         Updated?.Invoke();
     }
 
@@ -107,7 +113,12 @@ class LinkedFanController : IDisposable
             GpuRampTemp = gpuRampStart < FixedTemps.Length ? FixedTemps[gpuRampStart] : 0;
 
             // Skip if duty change is insignificant (< 2% diff, or both in low zone 1-7%)
+            // AND neither ramp start has shifted upward (sensor crossed a grid point),
+            // which would shrink headroom below the safety floor. Cooling drift
+            // (rampStart lower than last-written) is safe to skip.
             bool skip = _lastLinkedDuty >= 0
+                && cpuRampStart <= _lastCpuRampStart
+                && gpuRampStart <= _lastGpuRampStart
                 && (Math.Abs(LinkedDuty - _lastLinkedDuty) < 2 || (LinkedDuty <= 7 && _lastLinkedDuty <= 7));
 
             if (!skip)
@@ -116,6 +127,8 @@ class LinkedFanController : IDisposable
                 WrittenGpuCurve = BuildSafeCurve(LinkedDuty, gpuRampStart);
                 _fanControl.ApplyCurves(WrittenCpuCurve, WrittenGpuCurve, true);
                 _lastLinkedDuty = LinkedDuty;
+                _lastCpuRampStart = cpuRampStart;
+                _lastGpuRampStart = gpuRampStart;
             }
 
             Updated?.Invoke();
@@ -182,6 +195,12 @@ class LinkedFanController : IDisposable
             {
                 curve.Points[i].DutyPercent = 0;
             }
+            // Last point always 100% — preserves the crash-safety tail even when the
+            // sensor is hot enough that FindRampStart returned no grid (rampCount <= 0).
+            else if (i == FixedTemps.Length - 1)
+            {
+                curve.Points[i].DutyPercent = 100;
+            }
             else if (i < rampStart || rampCount <= 0)
             {
                 curve.Points[i].DutyPercent = dutyPercent;
@@ -201,12 +220,14 @@ class LinkedFanController : IDisposable
 
     public void Dispose()
     {
+        // Leave the EC state as-is on app exit. If linked mode was on, the last-written
+        // safety curve (flat at linkedDuty with ramp-to-100 tail) stays in effect —
+        // exactly what it was designed for. Writing panel curves here caused a GPU fan
+        // cliff-drop while CPU was under load, which the EC interprets as inadequate
+        // cooling (tach=0 on GPU fan + high CPU power) and latches CPU at 600 MHz
+        // after ~6s. The OEM app has the same bug; we avoid it by not rewriting.
         _timer.Stop();
-        if (_enabled)
-        {
-            _enabled = false;
-            try { WritePanelCurvesToEc(); } catch { }
-        }
+        _enabled = false;
         _timer.Dispose();
     }
 }

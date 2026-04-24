@@ -240,11 +240,11 @@ EC firmware evaluates CPU and GPU fan tables independently — no hardware "link
 
 **Safety ramp**: Each written curve is flat at `linkedDuty` up to the current sensor temp, then ramps linearly to 100% at the last point (96°C). The ramp start is per-sensor — CPU curve ramps based on CPU temp, GPU curve based on GPU temp. If the app crashes, the EC keeps these curves and fans ramp up if temps rise.
 
-Fixed temp points: 10, 16, 33, 42, 51, 60, 69, 78, 87, 96°C. Points 0–1 are low-zone sentinels (below any realistic operating temp); points 2–9 form the working curve with 9°C spacing. Safe-curve TempDown uses `tempDown[i] = tempUp[i-1] − RangeCelsius` matching `FanCurveModel.EnforceRange`; point 0 duty is pinned to 0% (EC requires `duty[0] = 0x00`).
+Fixed temp points: 19, 29, 39, 49, 57, 65, 73, 81, 89, 97°C (10°C spacing below 49°C, 8°C above). Safe-curve TempDown uses `tempDown[i] = tempUp[i-1] − RangeCelsius` matching `FanCurveModel.EnforceRange`; point 0 duty is pinned to 0% (EC requires `duty[0] = 0x00`).
 
 **Panels as source of truth**: The user's editable fan curves live in FanCurvePanel. LinkedFanController reads them via `Func<FanCurveModel?>` delegates each tick — never caches stale references. Profile save reads from panels, not EC (EC has flat/safe curves during linked mode). Profile load writes to panels, then EC picks up the new curves on next tick.
 
-**Shutdown**: `LinkedFanController.Dispose()` restores real panel curves to EC. MainForm disposes the EC device *after* child controls (`base.Dispose`) so this write succeeds.
+**Shutdown**: `LinkedFanController.Dispose()` does **not** write to the EC. The last-written safety curve stays in effect, letting the ramp-to-100 tail keep the fans honest even after the app is gone. Writing panel curves here used to cause a GPU fan cliff-drop while CPU was under load, which the EC interprets as inadequate cooling and latches CPU at 600 MHz. (Exit on `Disable()` — user toggling linked mode off in the running app — still writes panel curves, because the user is present to deal with any thermal consequences.)
 
 **UI**: Compact painted status panel to the right of the Link Fans checkbox. Shows linked duty % as a filled bar, CPU/GPU temps and contributions, and safety ramp start temps. Only invalidates when visible (guards against hidden/minimized). A `FanCurveDebugSection` below the editable curves shows the actual CPU/GPU curves written to the EC (read-only, live); it is mounted always but `Visible = false` when Link Fans is off, and its `CurvesApplied` handler cascades the same `Visible` check so no Clone/Invalidate work happens when hidden.
 
@@ -499,7 +499,7 @@ Minimize or close hides to tray. On hide: EC monitor and battery telemetry stop 
 
 ### Shutdown / Disposal Order
 
-MainForm.Dispose disposes tray icon/menu first, then `base.Dispose()` (which disposes child controls including FanTab → LinkedFanController, and LiquidCoolerTab which unsubscribes `ConnectionLost` + stops reconnect timer), then EC device and HID device last. This ordering is critical: LinkedFanController.Dispose restores real panel curves to the EC, which requires the EC device to still be open.
+MainForm.Dispose disposes tray icon/menu first, then `base.Dispose()` (which disposes child controls including FanTab → LinkedFanController, and LiquidCoolerTab which unsubscribes `ConnectionLost` + stops reconnect timer), then EC device and HID device last. LinkedFanController.Dispose intentionally does not touch the EC (see Linked Fan Mode shutdown note above), so the device-last ordering is defensive rather than required for fans — LiquidCoolerTab's BLE shutdown is the current reason it still matters.
 
 ### Mode Defaults (Gaming/Office/BatterySaver buttons)
 
