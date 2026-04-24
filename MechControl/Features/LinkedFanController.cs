@@ -18,6 +18,11 @@ class LinkedFanController : IDisposable
 
     private static readonly int[] FixedTemps = { 10, 16, 33, 42, 51, 60, 69, 78, 87, 96 };
 
+    // Ramp start must be at least this many degrees above the current sensor temp.
+    // Without it, a sensor just below a grid point (e.g. 50°C vs the 51°C point)
+    // leaves only 1°C of flat headroom before the curve starts ramping toward 100%.
+    private const int MinHeadroomCelsius = 2;
+
     public int CpuTemp { get; private set; }
     public int GpuTemp { get; private set; }
     public int CpuDuty { get; private set; }
@@ -94,9 +99,10 @@ class LinkedFanController : IDisposable
             GpuDuty = EvaluateCurve(gpuCurve, GpuTemp);
             LinkedDuty = Math.Max(CpuDuty, GpuDuty);
 
-            // Safety ramp: each curve ramps based on its own sensor temperature
-            int cpuRampStart = FindRampStart(CpuTemp);
-            int gpuRampStart = FindRampStart(GpuTemp);
+            // Safety ramp: each curve ramps based on its own sensor temperature,
+            // with MinHeadroomCelsius of flat zone before the ramp kicks in.
+            int cpuRampStart = FindRampStart(CpuTemp + MinHeadroomCelsius);
+            int gpuRampStart = FindRampStart(GpuTemp + MinHeadroomCelsius);
             CpuRampTemp = cpuRampStart < FixedTemps.Length ? FixedTemps[cpuRampStart] : 0;
             GpuRampTemp = gpuRampStart < FixedTemps.Length ? FixedTemps[gpuRampStart] : 0;
 
@@ -168,8 +174,7 @@ class LinkedFanController : IDisposable
         for (int i = 0; i < FixedTemps.Length; i++)
         {
             curve.Points[i].TempUp = FixedTemps[i];
-            // Cross-point hysteresis (matches FanCurveModel.EnforceRange, OEM convention):
-            // tempDown[i] = tempUp[i-1] - RangeCelsius. Point 0 pinned to 0 (not written to EC).
+            // tempDown[i] = tempUp[i-1] - RangeCelsius (see FanCurveModel.EnforceRange).
             curve.Points[i].TempDown = i > 0 ? Math.Max(0, FixedTemps[i - 1] - FanCurveModel.RangeCelsius) : 0;
 
             // Point 0 duty pinned to 0 (EC requires duty[0] = 0x00, force-written by WriteCurve).

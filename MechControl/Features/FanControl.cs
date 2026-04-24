@@ -103,21 +103,30 @@ class FanControl
         FanCurveModel.ReadFromEc(_device, _gpuTempUpBase, _gpuTempDownBase, _gpuDutyBase, _entriesPerArray, _activeEntries);
 
     /// <summary>
-    /// Set master enable + latch, then write CPU + GPU fan tables.
-    /// Matches probe-verified order: 0x7C5 bit 7, 0x7C6 = 0x04, then table data.
+    /// Set master enable, then write CPU + GPU fan tables bracketed by the
+    /// 0x7C6 latch. The 0x04 → 0x00 → 0x04 transition forces the EC to drop
+    /// any cached fan-curve state and re-evaluate current temp against the
+    /// fresh table; without it the EC is lazy and holds the previously-
+    /// computed duty until the next threshold crossing, which makes rapid
+    /// curve swaps look "stuck" at the old value.
     /// </summary>
     public void ApplyCurves(FanCurveModel cpuCurve, FanCurveModel? gpuCurve, bool enabled)
     {
         if (!_formatSupported) return;
 
-        // Master enable + latch before table (probe-verified sequence)
+        // Master enable — separate concern from the table/latch.
         _guard.WriteBitfield(_addrFanCurveEnable, _fanCurveEnableMask,
             enabled ? _fanCurveEnableMask : (byte)0x00);
-        _guard.Write(AddrFanCurveMode, 0x04);
+
+        // Deactivate latch so the EC won't evaluate a half-written table.
+        _guard.Write(AddrFanCurveMode, 0x00);
 
         WriteCurve(cpuCurve, _cpuTempUpBase, _cpuTempDownBase, _cpuDutyBase);
         if (_hasGpuFan && gpuCurve != null)
             WriteCurve(gpuCurve, _gpuTempUpBase, _gpuTempDownBase, _gpuDutyBase);
+
+        // Re-activate latch — transition from 0x00 forces EC re-evaluation.
+        _guard.Write(AddrFanCurveMode, 0x04);
 
         CurvesApplied?.Invoke(cpuCurve, _hasGpuFan ? gpuCurve : null);
     }
@@ -134,7 +143,8 @@ class FanControl
             DiagnosticLog.Warn("Fan curve write blocked: curve has 0 active entries");
             return;
         }
-        // Normalize TempDown before writing (cross-point: tempDown[i+1] = tempUp[i] - 4C).
+        // Recompute TempDown from TempUp so writes always reflect the current
+        // curve (tempDown[i] = tempUp[i-1] - RangeCelsius).
         curve.EnforceRange();
 
         byte paddingRawDuty = RegisterEncoding.EncodeFanDuty(curve.Points[curve.ActiveEntries - 1].DutyPercent);

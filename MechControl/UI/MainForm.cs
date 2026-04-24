@@ -259,6 +259,7 @@ class MainForm : Form
             if (profile.Registers.ContainsKey("fanSwitchSpeed"))
                 _switchSpeedControl = new FanSwitchSpeedControl(device, guard, profile);
             _fanTab = new FanTab(_fanControl, profile, device, _switchSpeedControl);
+            _monitor.Updated += _fanTab.OnMonitorUpdated;
             var fanPage = new TabPage("Fan Control");
             _fanTab.Dock = DockStyle.Fill;
             fanPage.Controls.Add(_fanTab);

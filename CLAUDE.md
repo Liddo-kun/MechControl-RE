@@ -46,16 +46,7 @@ All in `captures/`:
 
 ## Build
 
-```powershell
-cd C:\Users\Jon\clean\MechControl
-pwsh -File build-scripts\build-release.ps1
-# Exes (run elevated):
-#   bin\Release\net8.0-windows10.0.19041.0\MechControl.exe (needs .NET 8)
-#   bin\selfcontained\MechControl.exe (standalone)
-# Zips: bin\release-zips\MechControl-release.zip (~0.7 MB)
-#       bin\release-zips\MechControl-selfcontained.zip (~14 MB)
-#       bin\release-zips\MechControl-selfcontained.7z  (~10 MB, only when 7-Zip is installed)
-```
+To build, run `pwsh -File MechControl\build-scripts\build-release.ps1`. The script autodetects dotnet.exe and produces both the framework-dependent and self-contained release outputs under `MechControl\bin\`.
 
 ## Compilation (standalone .cs tools in `tools/`)
 

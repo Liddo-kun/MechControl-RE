@@ -466,7 +466,7 @@ class ProfileBar : UserControl
     {
         int entriesPerArray = _profile.FanTable.EntriesPerArray;
         int paddingTemp = _profile.FanTable.PaddingTemp;
-        // Normalize TempDown to the fixed 4C range before serializing — matches
+        // Recompute TempDown from TempUp before serializing — matches
         // what FanControl.WriteCurve pushes to the EC.
         model.EnforceRange();
         // Padding duty = last active entry's raw duty (matches EC write behavior).

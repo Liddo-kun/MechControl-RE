@@ -39,6 +39,9 @@ class FanCurveDebugSection : Section
         }
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
 
+        // This section is only shown in Link Fans mode, where software samples
+        // the curves with linear interpolation — so diagonal rendering here is
+        // the accurate view.
         _cpuPanel = new FanCurvePanel
         {
             Title = "CPU (Sent to EC)",
@@ -46,6 +49,7 @@ class FanCurveDebugSection : Section
             Dock = DockStyle.Fill,
             Margin = new Padding(0, 0, 4, 0),
             ReadOnly = true,
+            InterpolatedRendering = true,
         };
         layout.Controls.Add(_cpuPanel);
 
@@ -58,12 +62,21 @@ class FanCurveDebugSection : Section
                 Dock = DockStyle.Fill,
                 Margin = new Padding(4, 0, 0, 0),
                 ReadOnly = true,
+                InterpolatedRendering = true,
             };
             layout.Controls.Add(_gpuPanel);
         }
 
         Controls.Add(layout);
         _control.CurvesApplied += OnCurvesApplied;
+    }
+
+    /// <summary>Forward live temps to the debug panels.</summary>
+    public void OnMonitorUpdated(int? cpuTempC, int? gpuTempC)
+    {
+        _cpuPanel.CurrentTempC = cpuTempC;
+        if (_gpuPanel != null)
+            _gpuPanel.CurrentTempC = gpuTempC;
     }
 
     private void OnCurvesApplied(FanCurveModel cpu, FanCurveModel? gpu)

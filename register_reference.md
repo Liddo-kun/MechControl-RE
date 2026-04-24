@@ -91,7 +91,7 @@ Registers: `0x43E`-`0x46C` (sensors/RPM), `0x751` (boost), `0x75B`/`0x75C` (duty
 | Base | Offset | Purpose |
 |------|--------|---------|
 | `0xF00` | +N | Temp UP threshold |
-| `0xF10` | +N | Temp DOWN threshold (hysteresis) |
+| `0xF10` | +N | Temp DOWN threshold |
 | `0xF20` | +N | Duty cycle (raw/2 = percent) |
 
 **GPU fan table:**
@@ -102,29 +102,36 @@ Registers: `0x43E`-`0x46C` (sensors/RPM), `0x751` (boost), `0x75B`/`0x75C` (duty
 | `0xF40` | +N | Temp DOWN threshold |
 | `0xF50` | +N | Duty cycle |
 
+**EC evaluation rule** (right-point):
+- `duty[i]` applies when `tempUp[i-1] < temp ≤ tempUp[i]`.
+- Going up, crossing `tempUp[i]` jumps duty to `duty[i+1]`.
+- Going down, crossing `tempDown[i]` drops duty to `duty[i-1]`.
+- We set `tempDown[i] = tempUp[i-1] - 4` (cross-point), giving every zone a clean 4°C hysteresis band around its entry threshold `tempUp[i-1]`.
+
 **Write order** (interleaved triplets, matches OEM):
 ```
 active = number of active points (typically 10)
 for i in 0..15:
   if i < active:
     Write(tempUpBase   + i, tempUp[i])
-    Write(tempDownBase + i, i == 0 ? 0x00 : tempUp[i] - 5)   -- fixed 5C range, point 0 pinned to 0
-    Write(dutyBase     + i, duty[i])                          -- raw = percent * 2
+    if i > 0: Write(tempDownBase + i, tempUp[i-1] - 4)        -- cross-point; index 0 never written
+    Write(dutyBase     + i, i == 0 ? 0x00 : duty[i])          -- raw = percent * 2; duty[0] must be 0
   else:
     Write(tempUpBase   + i, 0xFF)
     Write(tempDownBase + i, i == active ? tempDown[active-1] + 4 : 0xFF)   -- OEM leftover byte
     Write(dutyBase     + i, duty[active-1])                   -- last active duty
 ```
 
+Total per apply: 47 writes per fan table (16 tempUp + 15 tempDown + 16 duty), 94 across CPU and GPU.
+
 **Key details:**
-- `tempDown[0]` is written as `0x00` (matches OEM; the level has no "step down" behavior but the EC expects the byte set)
-- Fixed 5°C range: `tempDown[i] = tempUp[i] - 5` for i in 1..active-1 (single source of truth, not read from EC or profile)
-- Adjacent points must be at least 5°C apart on `tempUp` (UI enforces; `Validate()` rejects violations)
-- Padding tempUp = `0xFF`; padding duty = last active entry's raw duty (matches OEM, avoids a discontinuity if the EC ever evaluates a padding row)
-- Padding tempDown at the first padding slot (i == active) = `tempDown[active-1] + 4`; remaining padding tempDown = `0xFF`. The EC never consults these bytes because `tempUp == 0xFF` guarantees the row can't fire; we mirror the OEM write purely for verify-diff cleanliness.
-- Duty raw=0 triggers EC auto-override (~25%) -- minimum safe raw is 2 (1%)
-- Writes take effect immediately (no trigger byte needed)
-- CPU and GPU sections are independent -- changing a GPU point only rewrites 0xF30-0xF5F
+- `tempDown[0]` is **not written**. Zone 0 has no lower zone to drop into, and writing the byte caused table rejection on some EC firmware versions.
+- `duty[0]` must be `0x00`. Raw 0 at other indices triggers EC auto-override (~25% duty); minimum safe raw is 2 (= 1%).
+- Adjacent points must be at least 4°C apart on `tempUp` (`Validate()` rejects violations; UI drag clamps to this).
+- Padding `tempUp = 0xFF`; padding duty = last active entry's raw duty. Avoids a discontinuity if the EC ever evaluates a padding row.
+- First padding `tempDown` (i == active) = `tempDown[active-1] + 4` (OEM leftover byte); remaining padding tempDown = `0xFF`. The EC never consults these because `tempUp == 0xFF` guarantees the row can't fire; we mirror the OEM writes for verify-diff cleanliness.
+- Writes take effect immediately (no trigger byte needed).
+- CPU and GPU sections are independent — changing a GPU point only rewrites `0xF30-0xF5F`.
 
 **RamFan2 format** (for models with 3 fans): Uses separate address ranges for Fan1 (`0xF00+`), Fan2 (`0xF50+`), Fan3 (`0xFA0+`).
 
@@ -721,11 +728,11 @@ Basic 2-fan format. 6 base addresses, each spanning 16 bytes (indices 0-15, 10 a
 
 | Address | R/W | OEM Name | Description |
 |---------|-----|----------|-------------|
-| `0xF00`+N | RW | ADDR_CPU_FAN_TABLE_TEMP_UP0 | CPU temp UP thresholds (N=0..15). Fan speeds up when temp exceeds value. Padding entries = `0xFF`. |
-| `0xF10`+N | RW | ADDR_CPU_FAN_TABLE_TEMP_DOWN0 | CPU temp DOWN thresholds (N=0..15). Index 0 = `0x00` (matches OEM). Active entries N=1..active-1 = `tempUp[N] - 5` (fixed 5°C range). First padding slot (N=active) = `tempDown[active-1] + 4` (OEM leftover; EC never consults it). Remaining padding = `0xFF`. |
+| `0xF00`+N | RW | ADDR_CPU_FAN_TABLE_TEMP_UP0 | CPU temp UP thresholds (N=0..15). Going up, crossing `tempUp[N]` jumps duty to `duty[N+1]`. Padding entries = `0xFF`. |
+| `0xF10`+N | RW | ADDR_CPU_FAN_TABLE_TEMP_DOWN0 | CPU temp DOWN thresholds (N=0..15). Going down, crossing `tempDown[N]` drops duty to `duty[N-1]`. Active entries N=1..active-1 = `tempUp[N-1] - 4` (cross-point 4°C range). Index 0 is **not written** (writing it caused table rejection on some EC versions). First padding slot (N=active) = `tempDown[active-1] + 4` (OEM leftover; EC never consults it). Remaining padding = `0xFF`. |
 | `0xF20`+N | RW | ADDR_CPU_FAN_TABLE_DUTY0 | CPU fan duty cycle (N=0..15). raw/2 = percent. Padding = last active entry's raw duty (matches OEM, avoids discontinuity). |
 | `0xF30`+N | RW | ADDR_GPU_FAN_TABLE_TEMP_UP0 | GPU temp UP thresholds (N=0..15). Padding entries = `0xFF`. |
-| `0xF40`+N | RW | ADDR_GPU_FAN_TABLE_TEMP_DOWN0 | GPU temp DOWN thresholds (N=0..15). Same layout rules as `0xF10` (point 0 = 0x00, fixed 5°C range, first padding = `tempDown[active-1] + 4`, rest = `0xFF`). |
+| `0xF40`+N | RW | ADDR_GPU_FAN_TABLE_TEMP_DOWN0 | GPU temp DOWN thresholds (N=0..15). Same layout rules as `0xF10` (point 0 not written, cross-point 4°C range, first padding = `tempDown[active-1] + 4`, rest = `0xFF`). |
 | `0xF50`+N | RW | ADDR_GPU_FAN_TABLE_DUTY0 | GPU fan duty cycle (N=0..15). raw/2 = percent. Padding = last active entry's raw duty. |
 
 **RamFan1p5 additions** (enhanced format adds timing/status at end of same address range):
