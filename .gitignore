@@ -33,3 +33,7 @@ syncthing-backup/
 Thumbs.db
 .DS_Store
 desktop.ini
+
+# Syncthing temp files
+.syncthing.*
+*.sync-conflict-*

@@ -13,18 +13,25 @@ static class DiagnosticLog
     private static string? _logPath;
     private static StreamWriter? _writer;
 
+    // Serializes writer access — the log is written from the UI thread plus
+    // background threads (activation watchdog timer, resume recovery).
+    private static readonly object _sync = new();
+
     public static string LogPath => _logPath ?? "(not initialized)";
 
     public static void Start()
     {
-        _logPath = Path.Combine(AppContext.BaseDirectory, "mechcontrol.log");
-        TrimOldSessions(_logPath);
-        _writer = new StreamWriter(_logPath, append: true);
-        _writer.AutoFlush = true;
-        _writer.WriteLine();
-        _writer.WriteLine(new string('=', 72));
-        _writer.WriteLine($"Session started: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-        _writer.WriteLine(new string('=', 72));
+        lock (_sync)
+        {
+            _logPath = Path.Combine(AppContext.BaseDirectory, "mechcontrol.log");
+            TrimOldSessions(_logPath);
+            _writer = new StreamWriter(_logPath, append: true);
+            _writer.AutoFlush = true;
+            _writer.WriteLine();
+            _writer.WriteLine(new string('=', 72));
+            _writer.WriteLine($"Session started: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+            _writer.WriteLine(new string('=', 72));
+        }
     }
 
     // Retention: keep the very first session (origin state of the machine) plus
@@ -65,14 +72,20 @@ static class DiagnosticLog
 
     public static void Write(string message)
     {
-        _writer?.WriteLine(message);
-        Console.WriteLine(message);
+        lock (_sync)
+        {
+            _writer?.WriteLine(message);
+            Console.WriteLine(message);
+        }
     }
 
     public static void Section(string header)
     {
-        _writer?.WriteLine();
-        _writer?.WriteLine($"--- {header} ---");
+        lock (_sync)
+        {
+            _writer?.WriteLine();
+            _writer?.WriteLine($"--- {header} ---");
+        }
     }
 
     /// <summary>
@@ -207,6 +220,7 @@ static class DiagnosticLog
         Write($"  EC Version:    {hw.EcVersion}.{hw.EcSubVersion}");
         Write($"  SystemID:      0x{hw.SystemId:X2}");
         Write($"  Support6:      0x{hw.Support6:X2}");
+        Write($"  ApBiosByte:    0x{hw.ApBiosByte:X2} (LiquidCooling={hw.SupportsLiquidCooling})");
         Write($"  VRM Current:   {hw.VrmCurrentLimit}A (max {hw.VrmMaxCurrentLimit}A)");
         Write($"  0x727:         0x{hw.CpuDoubleFlagByte:X2} (PL4D={(hw.Pl4Doubled ? 1 : 0)} -> PL4 encoding={(hw.Pl4Doubled ? "double" : "direct")})");
     }
@@ -394,8 +408,11 @@ static class DiagnosticLog
 
     public static void Close()
     {
-        _writer?.Dispose();
-        _writer = null;
+        lock (_sync)
+        {
+            _writer?.Dispose();
+            _writer = null;
+        }
     }
 
     private static void LogRegister(EcDevice device, MachineProfile profile, string name, Func<byte, string> decode)

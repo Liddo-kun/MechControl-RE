@@ -56,7 +56,7 @@ class UserProfileManager
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[UserProfile] Failed to load slot {slot}: {ex.Message}");
+            DiagnosticLog.Warn($"[UserProfile] Failed to load slot {slot}: {ex.Message}");
             return null;
         }
     }

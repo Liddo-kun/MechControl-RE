@@ -5,6 +5,7 @@
 - `register_reference.md` — **Read first for feature work.** Single source of truth for all EC registers, encodings, write sequences, and HID protocol.
 - `architecture.md` — App architecture, component design, and build instructions.
 - `report.md` — RE background: system info, OEM architecture, methodology, project IDs, safety rules.
+- `handoff_code_review.md` — **Read for code-quality work.** 2026-07 full-app review: completed fixes (EC re-activation watchdog, scheduler 72h kill), open findings with file:line refs, build/deploy/verification recipes.
 
 # IMPORTANT!! WHEN MAKING ANY CHANGES, FIXING BUGS, OR ADDING FEATURES, KEEP IN MIND WE WANT TO CONSIDER COMPATABILITY WITH OTHER MODELS.  For example,  how is model detection done to choose which profile to load at startup? How do we know which features apply to that model? Don't make code changes that appear specific to my machine that we're testing on.
 
@@ -36,7 +37,8 @@ All in `captures/`:
 
 ## OEM App Backup
 
-- `C:\Users\Jon\clean\ControlCenter-V1` — Copy of the installed OEM app. All our Frida captures, DLL disassembly, and profile extraction were done against this version. DO NOT DELETE.
+- Lost in a Windows rebuild (searched all drives 2026-07-18). Decompilations/captures in the repo are the surviving record; new RE requires re-downloading Control Center (different version — treat old offsets as stale).
+- `UWACPIDriver` (the only OEM piece MechControl needs) is still installed; backup at `D:\BU\UWACPIDriver-backup\` (`pnputil /add-driver UWACPIDriver.inf /install`).
 
 ## Safety
 

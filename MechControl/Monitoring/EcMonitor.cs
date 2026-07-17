@@ -96,7 +96,13 @@ class EcMonitor : IDisposable
     private static int TryGetRegister(MachineProfile profile, string name) =>
         profile.Registers.ContainsKey(name) ? profile.GetRegister(name) : -1;
 
-    public void Start() => _timer.Start();
+    public void Start()
+    {
+        // Reset after an auto-stop — otherwise a single failure after restart
+        // would immediately trip the 5-failure threshold again.
+        _consecutiveFailures = 0;
+        _timer.Start();
+    }
 
     public void Stop() => _timer.Stop();
 
@@ -160,7 +166,7 @@ class EcMonitor : IDisposable
         catch (Exception ex)
         {
             _consecutiveFailures++;
-            Console.WriteLine($"EcMonitor tick failed ({_consecutiveFailures}/5): {ex.Message}");
+            DiagnosticLog.Warn($"EcMonitor tick failed ({_consecutiveFailures}/5): {ex.Message}");
 
             if (_consecutiveFailures >= 5)
             {

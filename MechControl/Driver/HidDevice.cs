@@ -183,13 +183,13 @@ sealed class HidDevice : IDisposable
         lock (_lock)
         {
             var itePaths = FindIteDevicePaths();
-            Console.WriteLine($"[HID] Found {itePaths.Count} ITE HID device paths");
+            DiagnosticLog.Write($"[HID] Found {itePaths.Count} ITE HID device paths");
 
             // Probe each device: get feature report length and usage to identify zone mapping
             var lightingDevices = new List<(string path, ushort usage)>();
             foreach (string path in itePaths)
             {
-                Console.WriteLine($"[HID]   Probing: {path}");
+                DiagnosticLog.Write($"[HID]   Probing: {path}");
 
                 // Open with zero access for probing — some HID devices reject
                 // GENERIC_READ if the OS input stack holds them exclusively
@@ -211,7 +211,7 @@ sealed class HidDevice : IDisposable
                 if (!opened || probeHandle == null || probeHandle.IsInvalid)
                 {
                     int err = Marshal.GetLastWin32Error();
-                    Console.WriteLine($"[HID]     Cannot open (error {err})");
+                    DiagnosticLog.Write($"[HID]     Cannot open (error {err})");
                     continue;
                 }
 
@@ -219,19 +219,19 @@ sealed class HidDevice : IDisposable
                 {
                     if (!HidD_GetPreparsedData(probeHandle, out IntPtr preparsed))
                     {
-                        Console.WriteLine("[HID]     GetPreparsedData failed");
+                        DiagnosticLog.Write("[HID]     GetPreparsedData failed");
                         continue;
                     }
 
                     try
                     {
                         int status = HidP_GetCaps(preparsed, out HIDP_CAPS caps);
-                        Console.WriteLine($"[HID]     GetCaps status=0x{status:X8} feature={caps.FeatureReportByteLength} input={caps.InputReportByteLength} output={caps.OutputReportByteLength} usage=0x{caps.Usage:X4} usagePage=0x{caps.UsagePage:X4}");
+                        DiagnosticLog.Write($"[HID]     GetCaps status=0x{status:X8} feature={caps.FeatureReportByteLength} input={caps.InputReportByteLength} output={caps.OutputReportByteLength} usage=0x{caps.Usage:X4} usagePage=0x{caps.UsagePage:X4}");
 
                         if (status == HIDP_STATUS_SUCCESS && caps.FeatureReportByteLength == 9)
                         {
                             lightingDevices.Add((path, caps.Usage));
-                            Console.WriteLine("[HID]     -> Lighting controller");
+                            DiagnosticLog.Write("[HID]     -> Lighting controller");
                         }
                     }
                     finally
@@ -241,7 +241,7 @@ sealed class HidDevice : IDisposable
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[HID]     Exception: {ex.Message}");
+                    DiagnosticLog.Write($"[HID]     Exception: {ex.Message}");
                 }
                 finally
                 {
@@ -249,12 +249,16 @@ sealed class HidDevice : IDisposable
                 }
             }
 
-            Console.WriteLine($"[HID] {lightingDevices.Count} lighting devices (9-byte feature reports)");
+            DiagnosticLog.Write($"[HID] {lightingDevices.Count} lighting devices (9-byte feature reports)");
 
             // Map zones by usage value:
             //   usage 0x0001 → zone 0 (keyboard), zone 1 (secondary)
             //   usage 0x0002 → zone 2 (light bar), zone 3 (logo)
             // Fallback: if usages don't match, assign sequentially.
+            // Sort by path first — enumeration order is arbitrary, and with
+            // first-wins TryAdd below, two interfaces sharing a usage value
+            // would otherwise make the zone pick nondeterministic.
+            lightingDevices.Sort((a, b) => StringComparer.OrdinalIgnoreCase.Compare(a.path, b.path));
             var byUsage = new Dictionary<ushort, string>();
             foreach (var (path, usage) in lightingDevices)
                 byUsage.TryAdd(usage, path);
@@ -266,14 +270,14 @@ sealed class HidDevice : IDisposable
                 if (byUsage.TryGetValue(0x0001, out string? kbPath))
                 {
                     _zoneHandles[0] = OpenWriteHandle(kbPath);
-                    Console.WriteLine($"[HID]   Zone 0 (keyboard): {(_zoneHandles[0] != null && !_zoneHandles[0].IsInvalid ? "opened" : "FAILED")}");
+                    DiagnosticLog.Write($"[HID]   Zone 0 (keyboard): {(_zoneHandles[0] != null && !_zoneHandles[0].IsInvalid ? "opened" : "FAILED")}");
                 }
                 if (byUsage.TryGetValue(0x0002, out string? barPath))
                 {
                     _zoneHandles[2] = OpenWriteHandle(barPath);
                     _zoneHandles[3] = OpenWriteHandle(barPath); // logo = same device, separate handle
-                    Console.WriteLine($"[HID]   Zone 2 (light bar): {(_zoneHandles[2] != null && !_zoneHandles[2].IsInvalid ? "opened" : "FAILED")}");
-                    Console.WriteLine($"[HID]   Zone 3 (logo): {(_zoneHandles[3] != null && !_zoneHandles[3].IsInvalid ? "opened" : "FAILED")}");
+                    DiagnosticLog.Write($"[HID]   Zone 2 (light bar): {(_zoneHandles[2] != null && !_zoneHandles[2].IsInvalid ? "opened" : "FAILED")}");
+                    DiagnosticLog.Write($"[HID]   Zone 3 (logo): {(_zoneHandles[3] != null && !_zoneHandles[3].IsInvalid ? "opened" : "FAILED")}");
                 }
             }
 
@@ -284,7 +288,7 @@ sealed class HidDevice : IDisposable
                 for (int z = 0; z < Math.Min(sorted.Count, 4); z++)
                 {
                     _zoneHandles[z] = OpenWriteHandle(sorted[z].path);
-                    Console.WriteLine($"[HID]   Zone {z}: {(_zoneHandles[z] != null && !_zoneHandles[z].IsInvalid ? "opened" : "FAILED")}");
+                    DiagnosticLog.Write($"[HID]   Zone {z}: {(_zoneHandles[z] != null && !_zoneHandles[z].IsInvalid ? "opened" : "FAILED")}");
                 }
             }
 

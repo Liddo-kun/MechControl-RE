@@ -66,7 +66,7 @@ class LiquidCoolerState
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[LiquidCoolerState] Load failed: {ex.Message}");
+            DiagnosticLog.Warn($"[LiquidCoolerState] Load failed: {ex.Message}");
         }
         return new();
     }
@@ -80,7 +80,7 @@ class LiquidCoolerState
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[LiquidCoolerState] Save failed: {ex.Message}");
+            DiagnosticLog.Warn($"[LiquidCoolerState] Save failed: {ex.Message}");
         }
     }
 }

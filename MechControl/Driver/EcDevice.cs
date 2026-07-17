@@ -39,13 +39,14 @@ sealed class EcDevice : IDisposable
     {
         lock (_lock)
         {
+            ObjectDisposedException.ThrowIf(_disposed, this);
             try
             {
                 return ReadByteInternal(addr);
             }
-            catch
+            catch (Exception first)
             {
-                TryReconnect();
+                TryReconnect(first);
                 return ReadByteInternal(addr);
             }
         }
@@ -55,13 +56,14 @@ sealed class EcDevice : IDisposable
     {
         lock (_lock)
         {
+            ObjectDisposedException.ThrowIf(_disposed, this);
             try
             {
                 WriteByteInternal(addr, value);
             }
-            catch
+            catch (Exception first)
             {
-                TryReconnect();
+                TryReconnect(first);
                 WriteByteInternal(addr, value);
             }
         }
@@ -114,6 +116,7 @@ sealed class EcDevice : IDisposable
     {
         lock (_lock)
         {
+            ObjectDisposedException.ThrowIf(_disposed, this);
             int inBuf = 0xBB | (index << 8);
             int outBuf = 0;
             bool ok = EcDriver.DeviceIoControl(
@@ -133,18 +136,24 @@ sealed class EcDevice : IDisposable
         }
     }
 
-    private void TryReconnect()
+    // Called with _lock held. Logs the error that triggered the reconnect so
+    // the original failure isn't silently discarded by the retry.
+    private void TryReconnect(Exception cause)
     {
+        DiagnosticLog.Warn($"EC I/O failed ({cause.Message}); reopening driver handle and retrying once.");
         try { EcDriver.CloseHandle(_handle); } catch { }
         _handle = OpenHandle();
     }
 
     public void Dispose()
     {
-        if (!_disposed)
+        lock (_lock)
         {
-            _disposed = true;
-            EcDriver.CloseHandle(_handle);
+            if (!_disposed)
+            {
+                _disposed = true;
+                EcDriver.CloseHandle(_handle);
+            }
         }
     }
 }

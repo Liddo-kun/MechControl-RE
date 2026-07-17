@@ -2,6 +2,7 @@
   "projectId": "IDY_7Y",
   "projectIdValue": 13,
   "verified": false,
+  "baseboardPatterns": ["X6AR55xY"],
   "driver": { "devicePath": "\\\\.\\ACPIDriver" },
   "registers": {
     "PL1": "0x783", "PL2": "0x784", "PL4": "0x785",

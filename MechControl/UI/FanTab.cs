@@ -35,6 +35,10 @@ class FanTab : UserControl
     public FanCurveModel? GpuCurve => _gpuCurvePanel.Curve;
     public bool LinkedEnabled => _linkedController?.IsEnabled ?? false;
 
+    /// <summary>Current state of the custom-curve enable checkbox (last user
+    /// intent — used when restoring EC state after re-activation).</summary>
+    public bool CurveEnableChecked => _chkFanCurve.Checked;
+
     public FanTab(FanControl control, MachineProfile profile, EcDevice device,
         FanSwitchSpeedControl? switchSpeedControl = null)
     {

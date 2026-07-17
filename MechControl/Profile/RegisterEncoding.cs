@@ -29,8 +29,11 @@ static class RegisterEncoding
 
     // CPU Temp Limit (Intel, inverted_offset): bit 7 = enable, bits 0-6 = (tjMax - temp)
     // Write to 0x786, read from 0x463 (no enable bit)
+    // Safety clamp is tjMax-relative: TccOffset must stay in 0..40 (the range
+    // ECSpec byte[3] declares valid). Policy clamping to the profile's
+    // cpuTempLimit min/max is the caller's job.
     public static byte EncodeCpuTempLimit(int tempC, int tjMax = 105) =>
-        (byte)(0x80 | (tjMax - Math.Clamp(tempC, 80, 95)));
+        (byte)(0x80 | (tjMax - Math.Clamp(tempC, tjMax - 40, tjMax)));
     public static int DecodeCpuTempLimit(byte reg, int tjMax = 105) =>
         tjMax - reg;  // Use on 0x463 readback, NOT 0x786
 

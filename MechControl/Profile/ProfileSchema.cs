@@ -28,6 +28,15 @@ class MachineProfile
     [JsonPropertyName("batteryModes")]
     public List<BatteryModeInfo> BatteryModes { get; set; } = new();
 
+    /// <summary>
+    /// Substrings of Win32_BaseBoard.Product that identify this model
+    /// (case-insensitive). Real baseboards (e.g. "YAOSHI Series-X6AR55xY" for
+    /// IDY_7Y) don't contain the profile name, so this explicit mapping —
+    /// built up from field logs — is what makes WMI fallback detection work.
+    /// </summary>
+    [JsonPropertyName("baseboardPatterns")]
+    public List<string> BaseboardPatterns { get; set; } = new();
+
     [JsonPropertyName("skipVerify")]
     public List<string> SkipVerify { get; set; } = new();
 

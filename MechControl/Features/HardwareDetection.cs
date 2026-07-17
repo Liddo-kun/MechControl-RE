@@ -189,7 +189,7 @@ class HardwareDetection
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[HW] ECSpec config read failed: {ex.Message}");
+            DiagnosticLog.Warn($"[HW] ECSpec config read failed: {ex.Message}");
             EcSpecAvailable = false;
         }
 
@@ -202,7 +202,7 @@ class HardwareDetection
             // Validate buffer format: index 9 should echo 0xBB (out-of-range marker)
             EcSpecDecoded = (EcSpecConfig[9] & 0xFF) == 0xBB;
             if (!EcSpecDecoded)
-                Console.WriteLine($"[HW] ECSpec buffer format unexpected: index 9 LSB = 0x{(EcSpecConfig[9] & 0xFF):X2}, expected 0xBB");
+                DiagnosticLog.Warn($"[HW] ECSpec buffer format unexpected: index 9 LSB = 0x{(EcSpecConfig[9] & 0xFF):X2}, expected 0xBB");
         }
     }
 
