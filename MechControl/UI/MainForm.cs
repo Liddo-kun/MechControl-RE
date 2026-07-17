@@ -34,6 +34,8 @@ class MainForm : Form
     private readonly UserProfileManager _profileManager;
     private readonly ProfileBar _profileBar;
 
+    private readonly EcActivationWatchdog _watchdog;
+
     private readonly NotifyIcon _trayIcon;
     private readonly ContextMenuStrip _trayMenu;
     private bool _exitRequested;
@@ -149,13 +151,35 @@ class MainForm : Form
         _monitor = new EcMonitor(device, profile);
         var monitorPanel = new MonitorPanel { Dock = DockStyle.Bottom };
         _monitor.Updated += monitorPanel.OnMonitorUpdated;
-        _monitor.Stopped += msg => MessageBox.Show(msg, "Monitor Error",
-            MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        // Log + tray balloon, not MessageBox — the app usually runs tray-hidden
+        // and a modal dialog would pop invisibly (or steal focus). The monitor
+        // is always-on (it feeds the perf counters too), so schedule a restart
+        // instead of leaving it dead until the window is next opened.
+        _monitor.Stopped += msg =>
+        {
+            DiagnosticLog.Warn($"EC monitor: {msg} Restarting in 60s.");
+            if (_trayIcon != null && _trayIcon.Visible)
+                _trayIcon.ShowBalloonTip(5000, "MechControl", msg, ToolTipIcon.Warning);
+            var restart = new System.Windows.Forms.Timer { Interval = 60_000 };
+            restart.Tick += (s, e) =>
+            {
+                restart.Dispose();
+                if (!IsDisposed && !_exitRequested) _monitor.Start();
+            };
+            restart.Start();
+        };
 
-        // Publish fan data to Windows Performance Counters (for MSI Afterburner overlay etc.)
-        // Runs its own timer — reads only fan RPM/duty (6 EC bytes), independent of EcMonitor.
-        _perfCounters = new PerfCounterPublisher(device, profile);
+        // Publish fan data to Windows Performance Counters (for MSI Afterburner
+        // overlay etc.) — a passive sink on the monitor's Updated event, so the
+        // fan bytes are only read once per second.
+        _perfCounters = new PerfCounterPublisher();
         _perfCounters.Start();
+        _monitor.Updated += _perfCounters.OnMonitorUpdated;
+
+        // Always-on: feeds the perf counters and the bottom monitor panel.
+        // (Timer only ticks once the message loop runs, i.e. after startup
+        // init below has finished.)
+        _monitor.Start();
 
         // Log feature registers before init
         DiagnosticLog.LogFeatureRegisters(device, profile);
@@ -171,6 +195,15 @@ class MainForm : Form
                 "EC Init Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
         Controls.Add(monitorPanel);
+
+        // EC activation watchdog — the EC clears 0x741 on sleep/resume and
+        // then ignores PL/fan/GPU writes. Three recovery paths (failed-write
+        // hook, resume hook, 30s spot-check) share one re-init routine; after
+        // any re-activation OnEcReactivated re-applies the user's settings.
+        _watchdog = new EcActivationWatchdog(ecActivation);
+        guard.VerifyFailureRecovery = () => _watchdog.TryRecover("write verify failure");
+        _watchdog.Reactivated += OnEcReactivated;
+        _watchdog.Start();
 
         // Single fan snapshot — one read feeds detection, diagnostic dump,
         // panel seeding, and the startup custom-mode decision.
@@ -450,7 +483,7 @@ class MainForm : Form
             }
         };
 
-        // Read current values on load (monitor stays paused until window is shown)
+        // Read current values on load
         Load += async (s, e) =>
         {
             _powerTab?.RefreshFromEc();
@@ -472,6 +505,7 @@ class MainForm : Form
 
             _trayIcon.Visible = false;
             _batteryTab?.StopTelemetry();
+            _watchdog.Dispose();
             _monitor.Dispose();
             _perfCounters.Dispose();
             DiagnosticLog.Close();
@@ -528,7 +562,7 @@ class MainForm : Form
         Show();
         ShowInTaskbar = true;
         WindowState = FormWindowState.Normal;
-        _monitor.Start();
+        _monitor.Start(); // no-op if running; recovers early from a failure auto-stop
         // Restart battery telemetry if battery tab is active
         if (_batteryTab != null && _tabs.SelectedTab?.Controls.Count > 0
             && _tabs.SelectedTab.Controls[0] is BatteryTab)
@@ -540,7 +574,7 @@ class MainForm : Form
     {
         Hide();
         ShowInTaskbar = false;
-        _monitor.Stop();
+        // Monitor keeps running while tray-hidden — it feeds the perf counters.
         _batteryTab?.StopTelemetry();
     }
 
@@ -557,6 +591,73 @@ class MainForm : Form
         _fanTab?.RefreshFromEc();
         _batteryTab?.RefreshFromEc();
         _lightingTab.RefreshFromEc();
+    }
+
+    // ── EC re-activation recovery ────────────────────────────────────
+
+    /// <summary>
+    /// Raised by the watchdog (arbitrary thread) after the EC dropped 0x741
+    /// and was re-initialized. Marshals to the UI thread; during construction
+    /// or shutdown the handle may not exist — skip silently (an in-flight
+    /// apply continues on its own after re-init).
+    /// </summary>
+    private void OnEcReactivated()
+    {
+        try { BeginInvoke(ReapplyAfterReactivation); }
+        catch (InvalidOperationException) { }
+    }
+
+    /// <summary>
+    /// EC deactivation can wipe applied settings (PLs, fan curve state).
+    /// Restore user intent: re-apply the active/last-used profile slot if one
+    /// exists; otherwise validate the fan table left in EC RAM and only
+    /// rewrite it (from the panels — last known-good curves) if it's garbage.
+    /// </summary>
+    private void ReapplyAfterReactivation()
+    {
+        int slot = _profileBar.ActiveSlot;
+        if (slot < 1 || !_profileManager.SlotExists(slot))
+            slot = _profileManager.LastUsedSlot;
+
+        if (slot >= 1 && _profileManager.SlotExists(slot))
+        {
+            try
+            {
+                _profileBar.LoadAndApplySlot(slot);
+                DiagnosticLog.Write($"Re-applied user profile slot {slot} after EC re-activation");
+            }
+            catch (Exception ex)
+            {
+                DiagnosticLog.Warn($"Profile re-apply after EC re-activation failed: {ex.Message}");
+            }
+            return;
+        }
+
+        if (_fanControl == null) return;
+        try
+        {
+            var snapshot = FanSnapshot.Read(_device, _profile.FanTable);
+            if (snapshot.IsValid()) return; // EC still has a sane curve — leave it alone
+
+            var cpuCurve = _fanTab?.CpuCurve;
+            if (cpuCurve != null)
+            {
+                bool enabled = _fanTab!.CurveEnableChecked;
+                _fanControl.ApplyCurves(cpuCurve, _fanTab.GpuCurve, enabled);
+                DiagnosticLog.Warn("EC fan table was invalid after re-activation — rewrote curves from panels " +
+                    $"(custom mode {(enabled ? "on" : "off")})");
+            }
+            else
+            {
+                _fanControl.SetCustomFanCurveMode(false);
+                _fanTab?.SetCurveEnableCheckbox(false);
+                DiagnosticLog.Warn("EC fan table invalid after re-activation and no panel curves — custom fan curve mode disabled");
+            }
+        }
+        catch (Exception ex)
+        {
+            DiagnosticLog.Warn($"Post-reactivation fan table check failed: {ex.Message}");
+        }
     }
 
     private void RefreshTrayProfileMenu()

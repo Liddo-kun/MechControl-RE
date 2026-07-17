@@ -53,7 +53,7 @@ class LightingState
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[LightingState] Load failed: {ex.Message}");
+            DiagnosticLog.Warn($"[LightingState] Load failed: {ex.Message}");
         }
         return new();
     }
@@ -67,7 +67,7 @@ class LightingState
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[LightingState] Save failed: {ex.Message}");
+            DiagnosticLog.Warn($"[LightingState] Save failed: {ex.Message}");
         }
     }
 }

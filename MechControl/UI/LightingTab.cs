@@ -198,7 +198,7 @@ class LightingTab : UserControl
             catch (Exception ex)
             {
                 _suppressDimmingEvent = false;
-                Console.WriteLine($"[LightingTab] Failed to read dimming state: {ex.Message}");
+                DiagnosticLog.Warn($"[LightingTab] Failed to read dimming state: {ex.Message}");
             }
         }
 
@@ -212,7 +212,7 @@ class LightingTab : UserControl
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[LightingTab] Failed to read logo state: {ex.Message}");
+            DiagnosticLog.Warn($"[LightingTab] Failed to read logo state: {ex.Message}");
         }
 
         // Keyboard + Light bar: restore from saved state (HID-only, no EC readback)

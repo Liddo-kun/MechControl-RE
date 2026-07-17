@@ -191,7 +191,7 @@ class ProfileBar : UserControl
             HighlightSlot(_activeSlot);
             ProfileListChanged?.Invoke();
 
-            Console.WriteLine($"[UserProfile] Saved to slot {_activeSlot}");
+            DiagnosticLog.Write($"[UserProfile] Saved to slot {_activeSlot}");
         }
         catch (Exception ex)
         {
@@ -325,7 +325,7 @@ class ProfileBar : UserControl
         if (_dimmingControl != null)
         {
             try { _dimmingControl.SetState(lighting.LocalDimmingEnabled); }
-            catch (Exception ex) { Console.WriteLine($"[UserProfile] Local dimming apply failed: {ex.Message}"); }
+            catch (Exception ex) { DiagnosticLog.Warn($"[UserProfile] Local dimming apply failed: {ex.Message}"); }
         }
 
         // Update LightingState file so LightingTab stays in sync
@@ -347,7 +347,7 @@ class ProfileBar : UserControl
             else
                 _lightingControl.SetZoneOff(zone);
         }
-        catch (Exception ex) { Console.WriteLine($"[UserProfile] Zone {zone} apply failed: {ex.Message}"); }
+        catch (Exception ex) { DiagnosticLog.Warn($"[UserProfile] Zone {zone} apply failed: {ex.Message}"); }
     }
 
     private static void CopyToZoneState(ZoneState zone, bool enabled, byte r, byte g, byte b, int brightness)
@@ -400,7 +400,7 @@ class ProfileBar : UserControl
         if (_dimmingControl != null)
         {
             try { dimmingOn = _dimmingControl.ReadState(); }
-            catch (Exception ex) { Console.WriteLine($"[UserProfile] Dimming read failed: {ex.Message}"); }
+            catch (Exception ex) { DiagnosticLog.Warn($"[UserProfile] Dimming read failed: {ex.Message}"); }
         }
 
         return new UserProfile

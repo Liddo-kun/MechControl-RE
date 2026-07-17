@@ -23,11 +23,58 @@ sealed class WriteGuard
     // clusters with a 1500ms safety cap. Cumulative read times: 450, 650, 1000, 1500ms.
     private static readonly int[] RedirectRetryDelaysMs = [450, 200, 350, 500];
 
+    /// <summary>
+    /// Optional self-heal hook invoked when a write still fails verification
+    /// after the built-in retry. The EC clears its activation byte (0x741) on
+    /// sleep/resume and then silently ignores PL/fan/GPU writes — the hook is
+    /// expected to re-check activation and re-run EC init if it was lost.
+    /// Return true if a recovery was performed (the failed write is then
+    /// retried exactly once); false to let the original error propagate.
+    /// </summary>
+    public Func<bool>? VerifyFailureRecovery { get; set; }
+
+    // Recovery itself writes through this guard (EC init sequence). The
+    // thread-static flag stops those nested writes from recursively invoking
+    // the recovery hook. Set via EnterRecoveryScope() by the recovery routine.
+    [ThreadStatic]
+    private static bool _inRecovery;
+
+    /// <summary>
+    /// Marks the current thread as executing verify-failure recovery so its
+    /// writes can't re-trigger <see cref="VerifyFailureRecovery"/>. Restores
+    /// the previous state on dispose.
+    /// </summary>
+    public static RecoveryScope EnterRecoveryScope() => new();
+
+    public readonly struct RecoveryScope : IDisposable
+    {
+        private readonly bool _previous;
+        public RecoveryScope() { _previous = _inRecovery; _inRecovery = true; }
+        public void Dispose() => _inRecovery = _previous;
+    }
+
     public void Write(int addr, byte value)
     {
         if (!_allowlist.Contains(addr))
             throw new InvalidOperationException($"Write to 0x{addr:X3} blocked: address not in allowlist");
 
+        try
+        {
+            WriteAndVerify(addr, value);
+        }
+        catch (IOException) when (!_inRecovery && VerifyFailureRecovery != null)
+        {
+            if (!VerifyFailureRecovery())
+                throw; // no recovery performed — original verify error stands
+
+            // Recovery re-activated the EC — retry once. A second failure
+            // propagates (this catch does not re-enter for its own body).
+            WriteAndVerify(addr, value);
+        }
+    }
+
+    private void WriteAndVerify(int addr, byte value)
+    {
         _device.WriteByte(addr, value);
 
         if (_skipVerify.Contains(addr))

@@ -31,6 +31,36 @@ static class Program
     [MethodImpl(MethodImplOptions.NoInlining)]
     static void AppMain()
     {
+        // Single-instance guard. A second instance (e.g. the Scheduled Task
+        // firing while one is already running) would throw in
+        // DiagnosticLog.Start() on the locked log file and fight over the EC,
+        // so exit quietly before touching anything.
+        using var instanceMutex = new Mutex(initiallyOwned: true, @"Global\MechControl", out bool isFirstInstance);
+        if (!isFirstInstance)
+            return;
+
+        // Global exception handlers — the app usually runs tray-hidden, so an
+        // unhandled UI-event exception would otherwise kill it invisibly.
+        Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+        DateTime lastCrashDialogUtc = DateTime.MinValue;
+        Application.ThreadException += (_, e) =>
+        {
+            DiagnosticLog.Error($"Unhandled UI exception: {e.Exception}");
+            // Rate-limit the dialog: a fault repeating from a timer tick must
+            // not stack modal dialogs. Every occurrence is still logged above.
+            if ((DateTime.UtcNow - lastCrashDialogUtc).TotalMinutes < 5)
+                return;
+            lastCrashDialogUtc = DateTime.UtcNow;
+            MessageBox.Show(
+                $"An unexpected error occurred:\n\n{e.Exception.Message}\n\nMechControl will keep running. See mechcontrol.log for details.",
+                "MechControl \u2014 Unexpected Error",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+        };
+        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+        {
+            DiagnosticLog.Error($"Fatal unhandled exception (terminating={e.IsTerminating}): {e.ExceptionObject}");
+        };
+
         ApplicationConfiguration.Initialize();
 
         // Start diagnostic logging

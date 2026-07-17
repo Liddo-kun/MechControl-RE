@@ -1,13 +1,13 @@
 using System.Diagnostics;
-using MechControl.Driver;
-using MechControl.Profile;
 
 namespace MechControl.Monitoring;
 
 /// <summary>
-/// Publishes fan RPM/duty as Windows Performance Counters so external tools
+/// Publishes fan RPM as Windows Performance Counters so external tools
 /// (MSI Afterburner via PerfCounter.dll, perfmon, etc.) can read them.
-/// Runs its own timer, reads only the 6 fan bytes from EC — no dependency on EcMonitor.
+/// Passive sink: consumes <see cref="EcMonitor.Updated"/> data instead of
+/// running its own timer, so the fan RPM bytes are read from the EC once per
+/// second total instead of twice.
 /// </summary>
 class PerfCounterPublisher : IDisposable
 {
@@ -15,25 +15,9 @@ class PerfCounterPublisher : IDisposable
     private const string CategoryHelp = "MechControl EC sensor data";
     private const int SchemaVersion = 2;
 
-    private readonly EcDevice _device;
-    private readonly int _addrCpuFanRpmLo;
-    private readonly int _addrCpuFanRpmHi;
-    private readonly int _addrGpuFanRpmLo;
-    private readonly int _addrGpuFanRpmHi;
-
     private PerformanceCounter? _cpuFanRpm;
     private PerformanceCounter? _gpuFanRpm;
-    private System.Threading.Timer? _timer;
     private bool _available;
-
-    public PerfCounterPublisher(EcDevice device, MachineProfile profile)
-    {
-        _device = device;
-        _addrCpuFanRpmLo = profile.GetRegister("cpuFanRpmLo");
-        _addrCpuFanRpmHi = profile.GetRegister("cpuFanRpmHi");
-        _addrGpuFanRpmLo = profile.GetRegister("gpuFanRpmLo");
-        _addrGpuFanRpmHi = profile.GetRegister("gpuFanRpmHi");
-    }
 
     public void Start()
     {
@@ -44,34 +28,29 @@ class PerfCounterPublisher : IDisposable
             _cpuFanRpm = new PerformanceCounter(CategoryName, "CPU Fan RPM", false);
             _gpuFanRpm = new PerformanceCounter(CategoryName, "GPU Fan RPM", false);
             _available = true;
-
-            _timer = new System.Threading.Timer(OnTick, null, 0, 1000);
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"PerfCounter init failed: {ex.Message}");
+            DiagnosticLog.Warn($"PerfCounter init failed: {ex.Message}");
             _available = false;
         }
     }
 
-    private void OnTick(object? state)
+    /// <summary>
+    /// Subscriber for <see cref="EcMonitor.Updated"/> (fires on the UI thread).
+    /// </summary>
+    public void OnMonitorUpdated(MonitorData data)
     {
         if (!_available) return;
 
         try
         {
-            // 4 EC byte reads — fan RPM only
-            byte cpuRpmA = _device.ReadByte(_addrCpuFanRpmLo);
-            byte cpuRpmB = _device.ReadByte(_addrCpuFanRpmHi);
-            _cpuFanRpm!.RawValue = cpuRpmA << 8 | cpuRpmB;
-
-            byte gpuRpmA = _device.ReadByte(_addrGpuFanRpmLo);
-            byte gpuRpmB = _device.ReadByte(_addrGpuFanRpmHi);
-            _gpuFanRpm!.RawValue = gpuRpmB << 8 | gpuRpmA;
+            _cpuFanRpm!.RawValue = data.CpuFanRpm;
+            _gpuFanRpm!.RawValue = data.GpuFanRpm;
         }
         catch
         {
-            // EC read failed — skip this tick, try again next second
+            // Counter write failed — skip, try again on the next update
         }
     }
 
@@ -98,7 +77,6 @@ class PerfCounterPublisher : IDisposable
 
     public void Dispose()
     {
-        _timer?.Dispose();
         _cpuFanRpm?.Dispose();
         _gpuFanRpm?.Dispose();
     }

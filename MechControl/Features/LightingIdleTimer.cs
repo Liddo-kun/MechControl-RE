@@ -83,7 +83,7 @@ class LightingIdleTimer : IDisposable
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[IdleTimer] KB off failed: {ex.Message}");
+            DiagnosticLog.Warn($"[IdleTimer] KB off failed: {ex.Message}");
         }
 
         try
@@ -93,7 +93,7 @@ class LightingIdleTimer : IDisposable
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[IdleTimer] LB off failed: {ex.Message}");
+            DiagnosticLog.Warn($"[IdleTimer] LB off failed: {ex.Message}");
         }
     }
 
@@ -111,7 +111,7 @@ class LightingIdleTimer : IDisposable
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[IdleTimer] KB restore failed: {ex.Message}");
+            DiagnosticLog.Warn($"[IdleTimer] KB restore failed: {ex.Message}");
         }
 
         try
@@ -124,7 +124,7 @@ class LightingIdleTimer : IDisposable
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[IdleTimer] LB restore failed: {ex.Message}");
+            DiagnosticLog.Warn($"[IdleTimer] LB restore failed: {ex.Message}");
         }
     }
 

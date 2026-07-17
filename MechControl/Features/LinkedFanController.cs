@@ -14,6 +14,7 @@ class LinkedFanController : IDisposable
     private readonly Func<FanCurveModel?> _getGpuCurve;
 
     private bool _enabled;
+    private bool _tickFailed;
     private int _lastLinkedDuty = -1;
     private int _lastCpuRampStart = -1;
     private int _lastGpuRampStart = -1;
@@ -132,10 +133,14 @@ class LinkedFanController : IDisposable
             }
 
             Updated?.Invoke();
+            _tickFailed = false;
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"LinkedFanController tick failed: {ex.Message}");
+            // 1.5s timer — log only the first failure of a streak to avoid spam
+            if (!_tickFailed)
+                DiagnosticLog.Warn($"LinkedFanController tick failed: {ex.Message} (suppressing repeats)");
+            _tickFailed = true;
         }
     }
 
