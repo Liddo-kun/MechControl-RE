@@ -65,6 +65,13 @@ class EcMonitor : IDisposable
     public event Action<MonitorData>? Updated;
     public event Action<string>? Stopped;
 
+    /// <summary>
+    /// When true (window tray-hidden), each tick reads only the 4 fan RPM
+    /// bytes the perf counters need — the same EC traffic as the old
+    /// standalone publisher. Full reads resume when the window is shown.
+    /// </summary>
+    public bool Lightweight { get; set; }
+
     public EcMonitor(EcDevice device, MachineProfile profile)
     {
         _device = device;
@@ -116,10 +123,7 @@ class EcMonitor : IDisposable
     {
         try
         {
-            var data = new MonitorData();
-
-            data.CpuFanPercent = RegisterEncoding.DecodeFanDuty(_device.ReadByte(_addrCpuFanDuty));
-            data.GpuFanPercent = RegisterEncoding.DecodeFanDuty(_device.ReadByte(_addrGpuFanDuty));
+            var data = new MonitorData { BatteryModeName = "" };
 
             // RPM byte order is inconsistent in the EC firmware:
             // CPU RPM: register "Lo" (0x464) is actually the high byte
@@ -132,33 +136,39 @@ class EcMonitor : IDisposable
             byte gpuRpmB = _device.ReadByte(_addrGpuFanRpmHi);
             data.GpuFanRpm = gpuRpmB << 8 | gpuRpmA;
 
-            byte tempRaw = _device.ReadByte(_addrCpuTempLimitRead);
-            data.CpuTempLimit = _absoluteTemp ? tempRaw : RegisterEncoding.DecodeCpuTempLimit(tempRaw, _tjMax);
-            data.BatterySoc = _device.ReadByte(_addrBatterySoc);
+            if (!Lightweight)
+            {
+                data.CpuFanPercent = RegisterEncoding.DecodeFanDuty(_device.ReadByte(_addrCpuFanDuty));
+                data.GpuFanPercent = RegisterEncoding.DecodeFanDuty(_device.ReadByte(_addrGpuFanDuty));
 
-            byte batteryRaw = _device.ReadByte(_addrBatteryMode);
-            data.BatteryModeRaw = batteryRaw;
-            data.BatteryModeIndex = RegisterEncoding.DecodeBatteryMode(batteryRaw);
-            data.BatteryModeName = data.BatteryModeIndex < _profile.BatteryModes.Count
-                ? _profile.BatteryModes[data.BatteryModeIndex].Name
-                : $"Unknown ({data.BatteryModeIndex})";
+                byte tempRaw = _device.ReadByte(_addrCpuTempLimitRead);
+                data.CpuTempLimit = _absoluteTemp ? tempRaw : RegisterEncoding.DecodeCpuTempLimit(tempRaw, _tjMax);
+                data.BatterySoc = _device.ReadByte(_addrBatterySoc);
 
-            byte statusRaw = _device.ReadByte(_addrStatusByte);
-            data.FanBoostActive = (statusRaw & 0x04) != 0;
+                byte batteryRaw = _device.ReadByte(_addrBatteryMode);
+                data.BatteryModeRaw = batteryRaw;
+                data.BatteryModeIndex = RegisterEncoding.DecodeBatteryMode(batteryRaw);
+                data.BatteryModeName = data.BatteryModeIndex < _profile.BatteryModes.Count
+                    ? _profile.BatteryModes[data.BatteryModeIndex].Name
+                    : $"Unknown ({data.BatteryModeIndex})";
 
-            byte fanCurveRaw = _device.ReadByte(_addrFanCurveEnable);
-            data.FanCurveEnabled = (fanCurveRaw & 0x80) != 0;
+                byte statusRaw = _device.ReadByte(_addrStatusByte);
+                data.FanBoostActive = (statusRaw & 0x04) != 0;
 
-            // System info (universal EC addresses)
-            if (_addrCpuTemp >= 0)
-                data.CpuTemp = _device.ReadByte(_addrCpuTemp);
-            if (_addrGpuTemp >= 0)
-                data.GpuTemp = _device.ReadByte(_addrGpuTemp);
-            data.AdapterCurrentAmps = _device.ReadByte(AddrAdapterCurrent) / 10.0;
-            data.SystemPowerWatts = _device.ReadByte(AddrSystemPowerLo)
-                                  | (_device.ReadByte(AddrSystemPowerHi) << 8);
-            data.DbMaxLiveWatts = _device.ReadByte(AddrDbMaxMirror);
-            data.TgpLiveWatts = _device.ReadByte(AddrTgpMirror) + _profile.TgpOffset;
+                byte fanCurveRaw = _device.ReadByte(_addrFanCurveEnable);
+                data.FanCurveEnabled = (fanCurveRaw & 0x80) != 0;
+
+                // System info (universal EC addresses)
+                if (_addrCpuTemp >= 0)
+                    data.CpuTemp = _device.ReadByte(_addrCpuTemp);
+                if (_addrGpuTemp >= 0)
+                    data.GpuTemp = _device.ReadByte(_addrGpuTemp);
+                data.AdapterCurrentAmps = _device.ReadByte(AddrAdapterCurrent) / 10.0;
+                data.SystemPowerWatts = _device.ReadByte(AddrSystemPowerLo)
+                                      | (_device.ReadByte(AddrSystemPowerHi) << 8);
+                data.DbMaxLiveWatts = _device.ReadByte(AddrDbMaxMirror);
+                data.TgpLiveWatts = _device.ReadByte(AddrTgpMirror) + _profile.TgpOffset;
+            }
 
             _consecutiveFailures = 0;
             Updated?.Invoke(data);
