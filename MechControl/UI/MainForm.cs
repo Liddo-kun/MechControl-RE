@@ -178,7 +178,10 @@ class MainForm : Form
 
         // Always-on: feeds the perf counters and the bottom monitor panel.
         // (Timer only ticks once the message loop runs, i.e. after startup
-        // init below has finished.)
+        // init below has finished.) The app starts tray-hidden, so begin in
+        // lightweight mode: fan RPM bytes only, same EC traffic as the old
+        // standalone perf counter publisher.
+        _monitor.Lightweight = true;
         _monitor.Start();
 
         // Log feature registers before init
@@ -562,6 +565,7 @@ class MainForm : Form
         Show();
         ShowInTaskbar = true;
         WindowState = FormWindowState.Normal;
+        _monitor.Lightweight = false; // window visible — full reads for the panel
         _monitor.Start(); // no-op if running; recovers early from a failure auto-stop
         // Restart battery telemetry if battery tab is active
         if (_batteryTab != null && _tabs.SelectedTab?.Controls.Count > 0
@@ -574,7 +578,9 @@ class MainForm : Form
     {
         Hide();
         ShowInTaskbar = false;
-        // Monitor keeps running while tray-hidden — it feeds the perf counters.
+        // Monitor keeps running while tray-hidden (it feeds the perf counters),
+        // but drops to lightweight mode: fan RPM bytes only.
+        _monitor.Lightweight = true;
         _batteryTab?.StopTelemetry();
     }
 
