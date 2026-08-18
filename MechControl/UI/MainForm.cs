@@ -1,6 +1,7 @@
 using System.Text.Json;
 using MechControl.Driver;
 using MechControl.Features;
+using MechControl.Hardware.PawnIo;
 using MechControl.Monitoring;
 using MechControl.Profile;
 
@@ -14,6 +15,7 @@ class MainForm : Form
     private readonly TabControl _tabs;
     private readonly EcMonitor _monitor;
     private readonly PerfCounterPublisher _perfCounters;
+    private readonly BlackwellGpuThermProvider? _gpuThermProvider;
     private readonly StartupValidator _validator;
 
     private readonly PowerTab? _powerTab;
@@ -147,9 +149,55 @@ class MainForm : Form
         _tabs = new TabControl { Dock = DockStyle.Fill };
         Controls.Add(_tabs);
 
+        // App-level settings are loaded before optional providers so disabling
+        // GPU hotspot monitoring skips PawnIO DLL loading and driver access.
+        _profileManager = new UserProfileManager();
+        BlackwellGpuThermProvider? gpuThermProvider = null;
+        string gpuThermStatusText;
+
+        DiagnosticLog.Section("GPU Hot Spot (PawnIO)");
+        if (!_profileManager.GpuHotspotEnabled)
+        {
+            gpuThermStatusText = "Disabled. Enabling takes effect next launch and requires PawnIO plus the signed module.";
+            DiagnosticLog.Write("GPU Hot Spot monitoring disabled in settings; PawnIO probe skipped.");
+        }
+        else
+        {
+            // PR #77 requires the consumer to supply the BDF. Discovery is
+            // passive (SetupAPI PnP properties only), so it cannot wake a
+            // power-gated GPU; with no NVIDIA device present, Create fails
+            // before touching the PawnIO DLL or driver.
+            IReadOnlyList<PciBdf> gpuCandidates = NvidiaPciDeviceLocator.FindCandidates();
+            string modulePath = Path.Combine(AppContext.BaseDirectory, BlackwellGpuThermProvider.ModuleFileName);
+            gpuThermProvider = BlackwellGpuThermProvider.Create(
+                modulePath,
+                gpuCandidates,
+                _profileManager.GpuHotspotDiagnosticLogging,
+                out string reason);
+            if (gpuThermProvider != null)
+            {
+                PciBdf target = gpuThermProvider.BoundBdf ?? gpuCandidates[0];
+                string id = $"{target.VendorId:X4}:{target.DeviceId:X4} at {target}";
+                gpuThermStatusText = gpuThermProvider.State switch
+                {
+                    BlackwellGpuThermState.Available => $"Active on {id}.",
+                    BlackwellGpuThermState.Asleep => $"Supported on {id}; GPU is currently power-gated.",
+                    _ => $"NVIDIA GPU found ({id}) but not yet responding; will keep retrying quietly.",
+                };
+                DiagnosticLog.Write($"GPU Hot Spot {gpuThermProvider.State}: {id}, " +
+                    $"PawnIOLib={gpuThermProvider.PawnIoVersion}");
+            }
+            else
+            {
+                gpuThermStatusText = $"Unavailable: {reason}. PawnIO and a signed {BlackwellGpuThermProvider.ModuleFileName} are required.";
+                DiagnosticLog.Write($"GPU Hot Spot unsupported/disabled for this system: {reason}");
+            }
+        }
+        _gpuThermProvider = gpuThermProvider;
+
         // Monitor panel docked at bottom (reads only — always safe)
-        _monitor = new EcMonitor(device, profile);
-        var monitorPanel = new MonitorPanel { Dock = DockStyle.Bottom };
+        _monitor = new EcMonitor(device, profile, _gpuThermProvider);
+        var monitorPanel = new MonitorPanel(_gpuThermProvider != null) { Dock = DockStyle.Bottom };
         _monitor.Updated += monitorPanel.OnMonitorUpdated;
         // Log + tray balloon, not MessageBox — the app usually runs tray-hidden
         // and a modal dialog would pop invisibly (or steal focus). The monitor
@@ -346,7 +394,12 @@ class MainForm : Form
         }
 
         // System Info tab — read-only, driven by EcMonitor
-        _systemInfoTab = new SystemInfoTab(ProfileLoader.LastBaseboard, ProfileLoader.LastCpuName);
+        _systemInfoTab = new SystemInfoTab(
+            ProfileLoader.LastBaseboard,
+            ProfileLoader.LastCpuName,
+            _profileManager.GpuHotspotEnabled,
+            gpuThermStatusText,
+            enabled => _profileManager.GpuHotspotEnabled = enabled);
         _monitor.Updated += _systemInfoTab.OnMonitorUpdated;
         var sysInfoPage = new TabPage("System Info");
         _systemInfoTab.Dock = DockStyle.Fill;
@@ -354,7 +407,6 @@ class MainForm : Form
         _tabs.TabPages.Add(sysInfoPage);
 
         // Profile bar — docked below menu bar
-        _profileManager = new UserProfileManager();
         _profileBar = new ProfileBar(
             _profileManager, _cpuControl, _gpuControl, _fanControl,
             _switchSpeedControl, _batteryControl, _lightingControl, dimmingControl, profile, _fanTab,
@@ -510,6 +562,7 @@ class MainForm : Form
             _batteryTab?.StopTelemetry();
             _watchdog.Dispose();
             _monitor.Dispose();
+            _gpuThermProvider?.Dispose();
             _perfCounters.Dispose();
             DiagnosticLog.Close();
         };
@@ -991,6 +1044,10 @@ class MainForm : Form
         base.Dispose(disposing); // FanTab → LinkedFanController.Dispose intentionally does NOT touch the EC (see LinkedFanController.Dispose comment)
         if (disposing)
         {
+            // Idempotent; usually already disposed via FormClosing, but this
+            // path guarantees the PawnIO module/MMIO mapping is released even
+            // on nonstandard disposal.
+            _gpuThermProvider?.Dispose();
             _bleDevice?.Dispose();
             _hidDevice.Dispose();
             _device.Dispose(); // EC device must be last — child controls may write during disposal

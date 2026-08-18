@@ -11,6 +11,12 @@ class UserProfileSettings
     [JsonPropertyName("profileNames")]
     public List<string> ProfileNames { get; set; } = new()
         { "Profile 1", "Profile 2", "Profile 3", "Profile 4", "Profile 5" };
+
+    [JsonPropertyName("gpuHotspotEnabled")]
+    public bool GpuHotspotEnabled { get; set; } = true;
+
+    [JsonPropertyName("gpuHotspotDiagnosticLogging")]
+    public bool GpuHotspotDiagnosticLogging { get; set; }
 }
 
 class UserProfileManager
@@ -31,6 +37,14 @@ class UserProfileManager
         get => _settings.LastProfile;
         set { _settings.LastProfile = value; SaveSettings(); }
     }
+
+    public bool GpuHotspotEnabled
+    {
+        get => _settings.GpuHotspotEnabled;
+        set { _settings.GpuHotspotEnabled = value; SaveSettings(); }
+    }
+
+    public bool GpuHotspotDiagnosticLogging => _settings.GpuHotspotDiagnosticLogging;
 
     public string[] GetProfileNames() => _settings.ProfileNames.ToArray();
 

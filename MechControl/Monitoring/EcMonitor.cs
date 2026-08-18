@@ -1,4 +1,5 @@
 using MechControl.Driver;
+using MechControl.Hardware.PawnIo;
 using MechControl.Profile;
 
 namespace MechControl.Monitoring;
@@ -29,12 +30,21 @@ struct MonitorData
     // We display the physical watts here, not the NPCF integers.
     public int DbMaxLiveWatts;        // 0x7D5 raw, direct watts (0 = DB off)
     public int TgpLiveWatts;          // 0x788 raw + TgpOffset (total TGP)
+
+    // NVIDIA GB20x thermal channels via the PawnIO.Modules NVIDIA module
+    // (PR #77). State distinguishes a power-gated GPU (Asleep) from unproven
+    // support (Pending) and read failures (Faulted); null state means the
+    // provider is absent entirely.
+    public BlackwellGpuThermState? GpuHotspotState;
+    public double? GpuHotspotC;
+    public double?[]? GpuThermChannelsC;
 }
 
 class EcMonitor : IDisposable
 {
     private readonly EcDevice _device;
     private readonly MachineProfile _profile;
+    private readonly BlackwellGpuThermProvider? _gpuThermProvider;
     private readonly System.Windows.Forms.Timer _timer;
 
     private readonly int _addrCpuFanDuty;
@@ -72,10 +82,14 @@ class EcMonitor : IDisposable
     /// </summary>
     public bool Lightweight { get; set; }
 
-    public EcMonitor(EcDevice device, MachineProfile profile)
+    public EcMonitor(
+        EcDevice device,
+        MachineProfile profile,
+        BlackwellGpuThermProvider? gpuThermProvider = null)
     {
         _device = device;
         _profile = profile;
+        _gpuThermProvider = gpuThermProvider;
 
         _addrCpuFanDuty = profile.GetRegister("cpuFanDuty");
         _addrGpuFanDuty = profile.GetRegister("gpuFanDuty");
@@ -135,6 +149,18 @@ class EcMonitor : IDisposable
             byte gpuRpmA = _device.ReadByte(_addrGpuFanRpmLo);
             byte gpuRpmB = _device.ReadByte(_addrGpuFanRpmHi);
             data.GpuFanRpm = gpuRpmB << 8 | gpuRpmA;
+
+            // Keep this active while tray-hidden so the hotspot remains
+            // available to monitor consumers without waking the GPU through
+            // NVAPI/NVML. Provider failures never count toward the EC
+            // monitor's consecutive-failure accounting (Poll never throws).
+            if (_gpuThermProvider != null)
+            {
+                BlackwellGpuThermSample sample = _gpuThermProvider.Poll();
+                data.GpuHotspotState = sample.State;
+                data.GpuHotspotC = sample.HotspotC;
+                data.GpuThermChannelsC = sample.ChannelTemperaturesC;
+            }
 
             if (!Lightweight)
             {
