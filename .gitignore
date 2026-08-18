@@ -3,6 +3,8 @@ bin/
 obj/
 *.pdb
 *.exe
+tools/pawnio/*.amx
+tools/pawnio/Nvidia.bin
 
 # Claude local state
 .claude/
@@ -37,3 +39,6 @@ desktop.ini
 # Syncthing temp files
 .syncthing.*
 *.sync-conflict-*
+
+# Third-party app archives (RE reference material, not redistributed)
+/hwmonitor_*

@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <PlatformTarget>x64</PlatformTarget>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\..\..\MechControl\Hardware\PawnIo\PawnIoClient.cs" Link="PawnIoClient.cs" />
+    <Compile Include="..\..\..\MechControl\Hardware\PawnIo\BlackwellGpuThermProvider.cs" Link="BlackwellGpuThermProvider.cs" />
+    <Compile Include="..\..\..\MechControl\Hardware\PawnIo\PciBdf.cs" Link="PciBdf.cs" />
+    <Compile Include="..\..\..\MechControl\Hardware\PawnIo\NvidiaPciDeviceLocator.cs" Link="NvidiaPciDeviceLocator.cs" />
+    <!-- The development Nvidia.bin is passed by explicit path; it is never
+         copied into build output (see notes/gpu_hotspot_pr77_plan.md). -->
+  </ItemGroup>
+</Project>

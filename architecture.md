@@ -22,6 +22,12 @@ MechControl/
     HidDevice.cs                  ITE USB HID enumeration + feature report sending (4 zones)
     BleDevice.cs                  WinRT BLE GATT: scan, connect (retry + cancellation), write, notify, disconnect
 
+  Hardware/PawnIo/
+    PawnIoClient.cs               Dynamic PawnIOLib interop, module load/execute/close (module-agnostic)
+    BlackwellGpuThermProvider.cs  Consumes upstream PawnIO.Modules Nvidia.bin (PR #77) six-channel thermal IOCTL
+    PciBdf.cs                     PCI bus/device/function candidate identity (consumer supplies BDF to the module)
+    NvidiaPciDeviceLocator.cs     Passive SetupAPI discovery of NVIDIA display-class PCI candidates (never NVAPI/NVML)
+
   Profile/
     ProfileSchema.cs              C# types mirroring the JSON schema (MachineProfile, ModeDefaultInfo, etc.)
     ProfileLoader.cs              Detect project ID, load matching JSON, validate
@@ -51,7 +57,7 @@ MechControl/
     LiquidCoolerState.cs          JSON persistence for saved device, auto-connect, last settings
 
   Monitoring/
-    EcMonitor.cs                  WinForms Timer (1s), polls ~10 registers, fires Updated event
+    EcMonitor.cs                  WinForms Timer (1s), polls EC + optional GPU hotspot provider, fires Updated event
 
   UI/
     MainForm.cs                   TabControl + monitor panel + profile bar + system tray + EC enrichment orchestration
@@ -343,6 +349,25 @@ WinForms Timer at 1000ms. Reads ~10 registers per tick. Raises `Updated` event c
 
 Polled data: CPU/GPU fan %, CPU/GPU fan RPM, CPU temp limit, battery SOC, battery mode, fan boost status, fan curve status.
 
+When `settings.json` leaves `gpuHotspotEnabled` on and the PawnIO runtime gate
+passes, the same timer also reads all six NVIDIA GB20x thermal channels
+(`BAR0+0xAD0A90..0xAD0AA4`) with one call to the upstream PawnIO.Modules
+NVIDIA module's `ioctl_read_thermal_registers(bus, device, function)`
+(PR #77; see `notes/gpu_hotspot_pr77_plan.md`). The module returns raw DWORDs
+only; MechControl decodes (bit 30 validity, `(raw & 0xFFFF)/256.0`, 0-130 C
+plausibility) and selects `0xAD0AA0` as the primary hot spot value, falling
+back to the max of the five individual channels if that aggregate is invalid.
+All-ones is treated as a normal power-gated GPU state (`Asleep`), and so is a
+`STATUS_NOT_SUPPORTED` failure after support was once proven (deep power-gating
+makes even PCI config space unreadable). A GPU that is asleep at startup leaves
+the provider `Pending`, which retries quietly every 15 monitor ticks until the
+first successful IOCTL proves GB20x support; other read failures after that are
+`Faulted`. Provider failures never count toward the EC monitor's
+consecutive-failure accounting. The provider is GPU-detected and does not use
+model profile JSON. The monitor row is created hidden and appears (without an
+app restart) once support is confirmed. Diagnostic raw-channel logging is
+available only through the default-off `gpuHotspotDiagnosticLogging` setting.
+
 Stops after 5 consecutive read failures.
 
 ---
@@ -469,6 +494,10 @@ Keyboard and light bar are HID-only -- no EC registers to read state from on sta
 
 Profiles store decoded human-readable values (watts, degrees C, percent). Fan curves stored as raw EC bytes (16 padded entries). Encoding/decoding happens at save/load time. Fan section also stores `linkedEnabled`. Lighting settings include idle timer timeout and local dimming state.
 
+App-level `settings.json` also stores `gpuHotspotEnabled` (default `true`) and
+`gpuHotspotDiagnosticLogging` (default `false`). Disabling hotspot monitoring
+skips PawnIO DLL loading and driver access entirely on the next launch.
+
 ### Startup Flow
 
 ```
@@ -522,4 +551,3 @@ Every session appends to `mechcontrol.log` next to the exe. Logs hardware identi
 Retention: `Start()` trims the log on each launch before opening the writer — keeps the very first session (baseline snapshot of the machine's original state) plus the 5 most recent sessions, drops everything between. Trimming is opportunistic; any IO failure silently skips rotation for that launch.
 
 ---
-
