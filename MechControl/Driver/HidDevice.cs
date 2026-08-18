@@ -177,11 +177,23 @@ sealed class HidDevice : IDisposable
     /// Open all ITE HID devices and identify zones by feature report length.
     /// Devices with 9-byte feature reports are lighting controllers.
     /// Zone assignment: sort qualifying devices by path and assign zones 0,1,2,3 in order.
+    /// Idempotent: safe to call again to recover from stale handles after the
+    /// controller re-enumerates (e.g. across standby) — old handles are
+    /// disposed and enumeration re-runs from scratch.
     /// </summary>
     public bool Open()
     {
         lock (_lock)
         {
+            if (_disposed) return false;
+
+            // Drop handles from a previous open (resume/recovery path)
+            for (int i = 0; i < _zoneHandles.Length; i++)
+            {
+                _zoneHandles[i]?.Dispose();
+                _zoneHandles[i] = null!;
+            }
+
             var itePaths = FindIteDevicePaths();
             DiagnosticLog.Write($"[HID] Found {itePaths.Count} ITE HID device paths");
 
@@ -316,7 +328,21 @@ sealed class HidDevice : IDisposable
         zone >= 0 && zone < 4 && _zoneHandles[zone] != null && !_zoneHandles[zone].IsInvalid;
 
     /// <summary>
+    /// True for Win32 errors that mean the cached handle points at a device
+    /// instance that no longer exists (USB drop/re-enumeration across standby).
+    /// </summary>
+    private static bool IsDeviceGoneError(int err) => err is
+        6 or     // ERROR_INVALID_HANDLE
+        31 or    // ERROR_GEN_FAILURE (common for dead USB devices)
+        55 or    // ERROR_DEV_NOT_EXIST
+        433 or   // ERROR_NO_SUCH_DEVICE
+        1167 or  // ERROR_DEVICE_NOT_CONNECTED
+        1617;    // ERROR_DEVICE_REMOVED
+
+    /// <summary>
     /// Send a 9-byte feature report to the specified zone's HID device.
+    /// If the handle went stale (device re-enumerated across standby),
+    /// reopens all devices and retries once.
     /// </summary>
     public void SendFeatureReport(int zone, byte[] report)
     {
@@ -327,21 +353,38 @@ sealed class HidDevice : IDisposable
 
         lock (_lock)
         {
+            if (HidD_SetFeature(_zoneHandles[zone], report, report.Length))
+                return;
+
+            int err = Marshal.GetLastWin32Error();
+            if (!IsDeviceGoneError(err))
+                throw new IOException($"HidD_SetFeature failed for zone {zone} (error {err})");
+
+            // Stale handle — reopen (lock is reentrant) and retry once
+            DiagnosticLog.Warn($"[HID] SetFeature zone {zone} failed (error {err}, device gone) — reopening");
+            Open();
+            if (!IsZoneAvailable(zone))
+                throw new IOException($"HidD_SetFeature failed for zone {zone} (error {err}); zone still unavailable after reopen");
+
             if (!HidD_SetFeature(_zoneHandles[zone], report, report.Length))
             {
-                int err = Marshal.GetLastWin32Error();
-                throw new IOException($"HidD_SetFeature failed for zone {zone} (error {err})");
+                int err2 = Marshal.GetLastWin32Error();
+                throw new IOException($"HidD_SetFeature failed for zone {zone} after reopen (error {err2})");
             }
+            DiagnosticLog.Write($"[HID] Zone {zone} recovered after reopen");
         }
     }
 
     public void Dispose()
     {
-        if (!_disposed)
+        lock (_lock) // serialize against a background Open()/SendFeatureReport
         {
-            _disposed = true;
-            foreach (var h in _zoneHandles)
-                h?.Dispose();
+            if (!_disposed)
+            {
+                _disposed = true;
+                foreach (var h in _zoneHandles)
+                    h?.Dispose();
+            }
         }
     }
 }

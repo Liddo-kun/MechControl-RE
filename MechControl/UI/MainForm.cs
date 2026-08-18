@@ -37,6 +37,7 @@ class MainForm : Form
     private readonly ProfileBar _profileBar;
 
     private readonly EcActivationWatchdog _watchdog;
+    private readonly LightingResumeRestore? _lightingResume;
 
     private readonly NotifyIcon _trayIcon;
     private readonly ContextMenuStrip _trayMenu;
@@ -370,6 +371,16 @@ class MainForm : Form
         DiagnosticLog.LogHidDevices(_hidDevice);
 
         _lightingControl = new LightingControl(_hidDevice, device, guard, profile);
+
+        // The ITE controller re-enumerates across standby, killing the cached
+        // HID handles and (sometimes) its own lighting state. Reopen + re-apply
+        // on resume. Only started when HID lighting exists on this model.
+        if (hidOk)
+        {
+            _lightingResume = new LightingResumeRestore(_hidDevice, _lightingControl);
+            _lightingResume.Start();
+        }
+
         var dimmingControl = new LocalDimmingControl(device);
         _lightingTab = new LightingTab(_lightingControl, profile, dimmingControl);
         var lightingPage = new TabPage("Lighting");
@@ -561,6 +572,7 @@ class MainForm : Form
             _trayIcon.Visible = false;
             _batteryTab?.StopTelemetry();
             _watchdog.Dispose();
+            _lightingResume?.Dispose();
             _monitor.Dispose();
             _gpuThermProvider?.Dispose();
             _perfCounters.Dispose();
