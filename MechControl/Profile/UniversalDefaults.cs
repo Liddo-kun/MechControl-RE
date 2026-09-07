@@ -147,6 +147,8 @@ static class UniversalDefaults
         // Limits: fill from conservative defaults if empty
         if (profile.Limits.Count == 0)
         {
+            profile.TgpLimitIsFallback = true;
+            profile.CpuLimitsAreFallback = true;
             foreach (var kvp in ConservativeLimits)
                 profile.Limits[kvp.Key] = kvp.Value;
         }

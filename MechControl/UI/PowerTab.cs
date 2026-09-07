@@ -223,24 +223,24 @@ class PowerTab : UserControl
 
     private void BtnApply_Click(object? sender, EventArgs e)
     {
-        if (_cpuEnabled && _cpuControl != null && _sliderPL1 != null)
+        var failsafe = _gpuControl?.Failsafe ?? _cpuControl?.Failsafe;
+        UiHelpers.TryUi(() =>
         {
-            UiHelpers.TryUi(() => _cpuControl.ApplyCpuPower(
-                _sliderPL1.Value,
-                _sliderPL2!.Value,
-                _sliderPL4!.Value,
-                _sliderTemp!.Value),
-                "apply CPU power settings", "EC Write Error");
-        }
+            void Apply(GpuTemperatureFailsafe.Restoration? restoration)
+            {
+                if (_cpuEnabled && _cpuControl != null && _sliderPL1 != null)
+                    _cpuControl.ApplyCpuPower(_sliderPL1.Value, _sliderPL2!.Value,
+                        _sliderPL4!.Value, _sliderTemp!.Value, restoration);
 
-        if (_gpuEnabled && _gpuControl != null && _sliderTgp != null)
-        {
-            UiHelpers.TryUi(() => _gpuControl.ApplyGpuPower(
-                _sliderTgp.Value,
-                _chkDynamicBoost!.Checked,
-                _sliderDb!.Value),
-                "apply GPU power settings", "EC Write Error");
-        }
+                if (_gpuEnabled && _gpuControl != null && _sliderTgp != null)
+                    _gpuControl.ApplyGpuPower(_sliderTgp.Value,
+                        _chkDynamicBoost!.Checked, _sliderDb!.Value, restoration);
+            }
+            if (failsafe != null) failsafe.ApplyExplicit(
+                (_cpuEnabled ? ThermalAction.Cpu : 0) | (_gpuEnabled ? ThermalAction.Gpu : 0), Apply);
+            else Apply(null);
+        }, "apply power settings", "EC Write Error");
+        if (failsafe?.HasHold == true) RefreshFromEc();
     }
 
     private void BtnRead_Click(object? sender, EventArgs e)

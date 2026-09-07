@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../../MechControl/Driver/WriteGuard.cs" Link="Production/WriteGuard.cs" />
+    <Compile Include="../../MechControl/Features/GpuPowerControl.cs" Link="Production/GpuPowerControl.cs" />
+    <Compile Include="../../MechControl/Features/GpuTemperatureFailsafe.cs" Link="Production/GpuTemperatureFailsafe.cs" />
+    <Compile Include="../../MechControl/Features/CpuPowerControl.cs" Link="Production/CpuPowerControl.cs" />
+    <Compile Include="../../MechControl/Features/FanControl.cs" Link="Production/FanControl.cs" />
+    <Compile Include="../../MechControl/Features/FanCurveModel.cs" Link="Production/FanCurveModel.cs" />
+    <Compile Include="../../MechControl/Profile/ThermalProtectionState.cs" Link="Production/ThermalProtectionState.cs" />
+    <Compile Include="../../MechControl/Profile/UserProfile.cs" Link="Production/UserProfile.cs" />
+    <Compile Include="../../MechControl/Profile/UserProfileManager.cs" Link="Production/UserProfileManager.cs" />
+    <Compile Include="../../MechControl/Profile/GpuFailsafeSettings.cs" Link="Production/GpuFailsafeSettings.cs" />
+    <Compile Include="../../MechControl/Profile/ProfileSchema.cs" Link="Production/ProfileSchema.cs" />
+    <Compile Include="../../MechControl/Profile/RegisterEncoding.cs" Link="Production/RegisterEncoding.cs" />
+    <Compile Include="../../MechControl/Profile/UniversalDefaults.cs" Link="Production/UniversalDefaults.cs" />
+  </ItemGroup>
+</Project>
