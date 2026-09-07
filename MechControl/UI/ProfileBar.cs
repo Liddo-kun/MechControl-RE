@@ -24,6 +24,7 @@ class ProfileBar : UserControl
     private readonly MachineProfile _profile;
     private readonly FanTab? _fanTab;
     private readonly LiquidCoolerTab? _liquidCoolerTab;
+    private readonly FailsafeTab _failsafeTab;
 
 
     /// <summary>Raised after a profile is loaded and applied to EC.</summary>
@@ -54,6 +55,7 @@ class ProfileBar : UserControl
         LightingControl lightingControl,
         LocalDimmingControl? dimmingControl,
         MachineProfile profile,
+        FailsafeTab failsafeTab,
         FanTab? fanTab = null,
         LiquidCoolerTab? liquidCoolerTab = null)
     {
@@ -66,6 +68,7 @@ class ProfileBar : UserControl
         _lightingControl = lightingControl;
         _dimmingControl = dimmingControl;
         _profile = profile;
+        _failsafeTab = failsafeTab;
         _fanTab = fanTab;
         _liquidCoolerTab = liquidCoolerTab;
 
@@ -142,13 +145,27 @@ class ProfileBar : UserControl
     /// <summary>
     /// Load and apply a profile slot. Called from MainForm for auto-load on startup.
     /// </summary>
-    public void LoadAndApplySlot(int slot)
+    public void LoadAndApplySlot(int slot, bool preserveFailsafeSettings = false, bool automatic = false)
     {
         var profile = _manager.LoadProfile(slot);
         if (profile == null) return;
 
-        ApplyProfile(profile);
-        _manager.LastUsedSlot = slot;
+        var failsafe = _failsafeTab.Controller;
+        var destination = preserveFailsafeSettings ? _failsafeTab.ReadSettings() : profile.GpuFailsafe ?? new();
+        _failsafeTab.ValidateSettings(destination);
+        HighlightSlot(0); // Failed/partial applies must not keep a misleading old highlight.
+        void Apply(GpuTemperatureFailsafe.Restoration? permit)
+        {
+            ApplyProfile(profile, permit);
+            _manager.LastUsedSlot = slot;
+        }
+        try
+        {
+            if (failsafe != null) failsafe.ApplyProfile(destination, ThermalAction.All, Apply, !automatic);
+            else Apply(null);
+        }
+        catch { _failsafeTab.RefreshConfiguration(partial: true); ProfileApplied?.Invoke(); throw; }
+        _failsafeTab.RefreshConfiguration(saved: !preserveFailsafeSettings);
         HighlightSlot(slot);
         ProfileApplied?.Invoke();
     }
@@ -175,18 +192,15 @@ class ProfileBar : UserControl
 
     private void OnSaveClick()
     {
-        if (_activeSlot == 0)
-        {
-            // No slot selected — default to slot 1
-            _activeSlot = 1;
-            HighlightSlot(1);
-        }
-
         try
         {
+            _failsafeTab.Controller?.EnsureCanSaveProfile();
+            // A blocked save must not change the selected/highlighted slot.
+            if (_activeSlot == 0) HighlightSlot(1);
             string currentName = _manager.GetProfileNames()[_activeSlot - 1];
             var profile = BuildProfileFromCurrentState(currentName);
             _manager.SaveProfile(_activeSlot, profile);
+            _failsafeTab.MarkSaved();
 
             HighlightSlot(_activeSlot);
             ProfileListChanged?.Invoke();
@@ -261,7 +275,7 @@ class ProfileBar : UserControl
 
     // ── Apply profile to EC ──────────────────────────────────────────
 
-    private void ApplyProfile(UserProfile profile)
+    private void ApplyProfile(UserProfile profile, GpuTemperatureFailsafe.Restoration? restoration)
     {
         // 1-4. Fan (if available)
         if (_fanControl != null)
@@ -283,16 +297,16 @@ class ProfileBar : UserControl
         // 5. CPU power (if available)
         _cpuControl?.ApplyCpuPower(
             profile.Cpu.PL1, profile.Cpu.PL2,
-            profile.Cpu.PL4, profile.Cpu.TempLimit);
+            profile.Cpu.PL4, profile.Cpu.TempLimit, restoration);
 
         // 6. GPU power (if available)
         _gpuControl?.ApplyGpuPower(
-            profile.Gpu.Tgp,
-            profile.Gpu.DynamicBoostEnabled,
-            profile.Gpu.DynamicBoostWatts);
+                profile.Gpu.Tgp,
+                profile.Gpu.DynamicBoostEnabled,
+                profile.Gpu.DynamicBoostWatts, restoration);
 
         // 7. Fan boost (if available)
-        _fanControl?.SetFanBoost(profile.Fan.BoostEnabled);
+        _fanControl?.SetFanBoost(profile.Fan.BoostEnabled, restoration);
 
         // 8. Fan switch speed
         _switchSpeedControl?.Apply(profile.Fan.SwitchSpeedEnabled, profile.Fan.SwitchSpeedMs);
@@ -408,6 +422,7 @@ class ProfileBar : UserControl
             Name = name,
             ProjectId = _profile.ProjectId,
             SavedAt = DateTime.Now,
+            GpuFailsafe = _failsafeTab.ReadSettings(),
             Cpu = new CpuProfileSettings
             {
                 PL1 = cpu.PL1Watts,

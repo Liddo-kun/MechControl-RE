@@ -31,6 +31,8 @@ class FanControl
 
     public bool HasGpuFan => _hasGpuFan;
     public bool FormatSupported => _formatSupported;
+    public GpuTemperatureFailsafe? Failsafe { get; set; }
+    public bool CanApplyBoost { get; private set; }
 
     /// <summary>
     /// Fires after ApplyCurves completes. Passes the caller's curve references
@@ -61,11 +63,28 @@ class FanControl
         _paddingTemp = ft.PaddingTemp;
         _hasGpuFan = ft.HasGpuFan;
         _formatSupported = ft.Format == "RamFan1";
+        CanApplyBoost = profile.ExpandAllowlist().Contains(_addrFanControlMode);
     }
 
-    public void SetFanBoost(bool enabled)
+    public void ValidateFailsafeRegisters()
     {
-        _guard.Write(_addrFanControlMode, enabled ? (byte)0x40 : (byte)0x00);
+        try { CanApplyBoost &= _device.ReadByte(_addrFanControlMode) is 0x00 or 0x40; }
+        catch { CanApplyBoost = false; }
+    }
+
+    public void SetFanBoost(bool enabled, GpuTemperatureFailsafe.Restoration? restoration = null)
+    {
+        try
+        {
+            if (Failsafe?.Holds(ThermalAction.Fan, restoration) == true)
+            {
+                if (!CanApplyBoost) throw new InvalidOperationException("Held fan boost unavailable; fan boost changes blocked.");
+                enabled = true;
+            }
+            _guard.Write(_addrFanControlMode, enabled ? (byte)0x40 : (byte)0x00);
+            Failsafe?.ConfirmWrite(ThermalAction.Fan, restoration);
+        }
+        catch (Exception ex) { Failsafe?.ReportWriteFailure(ThermalAction.Fan, ex); throw; }
     }
 
     /// <summary>

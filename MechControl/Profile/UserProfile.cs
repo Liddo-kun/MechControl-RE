@@ -20,6 +20,9 @@ class UserProfile
     [JsonPropertyName("gpu")]
     public GpuProfileSettings Gpu { get; set; } = new();
 
+    [JsonPropertyName("gpuFailsafe")]
+    public GpuFailsafeSettings GpuFailsafe { get; set; } = new();
+
     [JsonPropertyName("fan")]
     public FanProfileSettings Fan { get; set; } = new();
 

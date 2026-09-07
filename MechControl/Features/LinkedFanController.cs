@@ -1,15 +1,11 @@
-using MechControl.Driver;
-using MechControl.Profile;
+using MechControl.Monitoring;
 
 namespace MechControl.Features;
 
 class LinkedFanController : IDisposable
 {
-    private readonly EcDevice _device;
     private readonly FanControl _fanControl;
-    private readonly int _addrCpuTemp;
-    private readonly int _addrGpuTemp;
-    private readonly System.Windows.Forms.Timer _timer;
+    private readonly EcMonitor _monitor;
     private readonly Func<FanCurveModel?> _getCpuCurve;
     private readonly Func<FanCurveModel?> _getGpuCurve;
 
@@ -39,41 +35,36 @@ class LinkedFanController : IDisposable
 
     public event Action? Updated;
 
-    public LinkedFanController(EcDevice device, FanControl fanControl, MachineProfile profile,
+    public LinkedFanController(FanControl fanControl, EcMonitor monitor,
         Func<FanCurveModel?> getCpuCurve, Func<FanCurveModel?> getGpuCurve)
     {
-        _device = device;
         _fanControl = fanControl;
-        _addrCpuTemp = profile.GetRegister("cpuTemp");
-        _addrGpuTemp = profile.GetRegister("gpuTemp");
         _getCpuCurve = getCpuCurve;
         _getGpuCurve = getGpuCurve;
 
-        _timer = new System.Windows.Forms.Timer { Interval = 1500 };
-        _timer.Tick += OnTick;
+        _monitor = monitor;
     }
 
     public void Enable()
     {
-        _enabled = true;
+        _monitor.FanTemperatureSample -= OnTemperatureSample;
+        _enabled = false;
         _lastLinkedDuty = -1;
-        _lastCpuRampStart = -1;
-        _lastGpuRampStart = -1;
-        OnTick(null, EventArgs.Empty);
-        _timer.Start();
+        // Enable only after fresh curves are written and verified; preserve failures for the caller.
+        ApplyTemperatures(_monitor.ReadFanTemperatures());
+        _enabled = true;
+        _monitor.FanTemperatureSample += OnTemperatureSample;
+        _monitor.Start();
     }
 
     public void Disable()
     {
-        _timer.Stop();
+        _monitor.FanTemperatureSample -= OnTemperatureSample;
         _enabled = false;
         // Write the real panel curves back to EC
         WritePanelCurvesToEc();
         WrittenCpuCurve = null;
         WrittenGpuCurve = null;
-        _lastLinkedDuty = -1;
-        _lastCpuRampStart = -1;
-        _lastGpuRampStart = -1;
         Updated?.Invoke();
     }
 
@@ -89,59 +80,64 @@ class LinkedFanController : IDisposable
             _fanControl.ApplyCurves(cpu.Clone(), gpu?.Clone(), true);
     }
 
-    private void OnTick(object? sender, EventArgs e)
+    private void OnTemperatureSample((int? Cpu, int? Gpu) temperatures)
     {
         if (!_enabled) return;
-
-        var cpuCurve = _getCpuCurve();
-        var gpuCurve = _getGpuCurve();
-        if (cpuCurve == null || gpuCurve == null) return;
-
-        try
-        {
-            CpuTemp = _device.ReadByte(_addrCpuTemp);
-            GpuTemp = _device.ReadByte(_addrGpuTemp);
-
-            CpuDuty = EvaluateCurve(cpuCurve, CpuTemp);
-            GpuDuty = EvaluateCurve(gpuCurve, GpuTemp);
-            LinkedDuty = Math.Max(CpuDuty, GpuDuty);
-
-            // Safety ramp: each curve ramps based on its own sensor temperature,
-            // with MinHeadroomCelsius of flat zone before the ramp kicks in.
-            int cpuRampStart = FindRampStart(CpuTemp + MinHeadroomCelsius);
-            int gpuRampStart = FindRampStart(GpuTemp + MinHeadroomCelsius);
-            CpuRampTemp = cpuRampStart < FixedTemps.Length ? FixedTemps[cpuRampStart] : 0;
-            GpuRampTemp = gpuRampStart < FixedTemps.Length ? FixedTemps[gpuRampStart] : 0;
-
-            // Skip if duty change is insignificant (< 2% diff, or both in low zone 1-7%)
-            // AND neither ramp start has shifted upward (sensor crossed a grid point),
-            // which would shrink headroom below the safety floor. Cooling drift
-            // (rampStart lower than last-written) is safe to skip.
-            bool skip = _lastLinkedDuty >= 0
-                && cpuRampStart <= _lastCpuRampStart
-                && gpuRampStart <= _lastGpuRampStart
-                && (Math.Abs(LinkedDuty - _lastLinkedDuty) < 2 || (LinkedDuty <= 7 && _lastLinkedDuty <= 7));
-
-            if (!skip)
-            {
-                WrittenCpuCurve = BuildSafeCurve(LinkedDuty, cpuRampStart);
-                WrittenGpuCurve = BuildSafeCurve(LinkedDuty, gpuRampStart);
-                _fanControl.ApplyCurves(WrittenCpuCurve, WrittenGpuCurve, true);
-                _lastLinkedDuty = LinkedDuty;
-                _lastCpuRampStart = cpuRampStart;
-                _lastGpuRampStart = gpuRampStart;
-            }
-
-            Updated?.Invoke();
-            _tickFailed = false;
-        }
+        try { ApplyTemperatures(temperatures); }
         catch (Exception ex)
         {
-            // 1.5s timer — log only the first failure of a streak to avoid spam
+            // Log only the first failure of a streak to avoid spam.
             if (!_tickFailed)
                 DiagnosticLog.Warn($"LinkedFanController tick failed: {ex.Message} (suppressing repeats)");
             _tickFailed = true;
         }
+    }
+
+    private void ApplyTemperatures((int? Cpu, int? Gpu) temperatures)
+    {
+        var cpuCurve = _getCpuCurve();
+        var gpuCurve = _getGpuCurve();
+        if (cpuCurve == null || gpuCurve == null) throw new IOException("Linked fan curves unavailable.");
+        if (temperatures.Cpu is not (> 0 and < 128) || temperatures.Gpu is not (> 0 and < 128))
+            throw new IOException("Linked fan temperatures unavailable; retaining EC safety-ramp curves.");
+        CpuTemp = temperatures.Cpu.Value;
+        GpuTemp = temperatures.Gpu.Value;
+
+        CpuDuty = EvaluateCurve(cpuCurve, CpuTemp);
+        GpuDuty = EvaluateCurve(gpuCurve, GpuTemp);
+        LinkedDuty = Math.Max(CpuDuty, GpuDuty);
+
+        // Safety ramp: each curve ramps based on its own sensor temperature,
+        // with MinHeadroomCelsius of flat zone before the ramp kicks in.
+        int cpuRampStart = FindRampStart(CpuTemp + MinHeadroomCelsius);
+        int gpuRampStart = FindRampStart(GpuTemp + MinHeadroomCelsius);
+        CpuRampTemp = cpuRampStart < FixedTemps.Length ? FixedTemps[cpuRampStart] : 0;
+        GpuRampTemp = gpuRampStart < FixedTemps.Length ? FixedTemps[gpuRampStart] : 0;
+
+        // Skip if duty change is insignificant (< 2% diff, or both in low zone 1-7%)
+        // AND neither ramp start has shifted upward (sensor crossed a grid point),
+        // which would shrink headroom below the safety floor. Cooling drift
+        // (rampStart lower than last-written) is safe to skip.
+        bool skip = _lastLinkedDuty >= 0
+            && cpuRampStart <= _lastCpuRampStart
+            && gpuRampStart <= _lastGpuRampStart
+            && (Math.Abs(LinkedDuty - _lastLinkedDuty) < 2 || (LinkedDuty <= 7 && _lastLinkedDuty <= 7));
+
+        if (!skip)
+        {
+            var cpu = BuildSafeCurve(LinkedDuty, cpuRampStart);
+            var gpu = BuildSafeCurve(LinkedDuty, gpuRampStart);
+            _lastLinkedDuty = -1; // A failed group must be retried even if temperatures revert.
+            _fanControl.ApplyCurves(cpu, gpu, true);
+            WrittenCpuCurve = cpu;
+            WrittenGpuCurve = gpu;
+            _lastLinkedDuty = LinkedDuty;
+            _lastCpuRampStart = cpuRampStart;
+            _lastGpuRampStart = gpuRampStart;
+        }
+
+        Updated?.Invoke();
+        _tickFailed = false;
     }
 
     public static int EvaluateCurve(FanCurveModel curve, int temp)
@@ -231,8 +227,7 @@ class LinkedFanController : IDisposable
         // cliff-drop while CPU was under load, which the EC interprets as inadequate
         // cooling (tach=0 on GPU fan + high CPU power) and latches CPU at 600 MHz
         // after ~6s. The OEM app has the same bug; we avoid it by not rewriting.
-        _timer.Stop();
+        _monitor.FanTemperatureSample -= OnTemperatureSample;
         _enabled = false;
-        _timer.Dispose();
     }
 }

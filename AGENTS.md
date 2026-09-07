@@ -6,6 +6,7 @@
 - `architecture.md` — App architecture, component design, and build instructions.
 - `report.md` — RE background: system info, OEM architecture, methodology, project IDs, safety rules.
 - `handoff_code_review.md` — 2026-07 full-app review. **As of 2026-07-18 all findings (A–E) are implemented** except the MainForm startup-pipeline extraction (skipped by choice). Still worth reading for context, file:line background, and the verification recipe.
+- `notes/practical_safety_simplification_plan.md` — 2026-09-08 implementation handoff, not yet implemented: practical thermal recovery around a 50 C lower threshold, profile loading/saves, model-limit enforcement, and removal of redundant safety work. Supersedes the older failsafe plan only where explicitly stated.
 - `notes/gpu_hotspot_pr77_plan.md` — **GPU hotspot feature: SHELVED 2026-07-19 (Jon's decision).** Phases 1-4 code remains in the tree, dormant and fail-soft without a signed `Nvidia.bin`. See `notes/gpu_hotspot_pr77_validation.md` for the full record and revival recipe. Supersedes the custom-module plan.
 - `notes/gpu_hotspot_pawnio_plan.md` — Superseded historical plan for the abandoned custom `NvBlackwellTherm.p`; retain for context only.
 - `notes/rtx50_hotspot.md` — Historical RE record behind the plan above (captures, HWMonitor decompilation, rejected hypotheses). Not needed for implementation; consult for raw evidence only.

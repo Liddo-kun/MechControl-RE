@@ -43,6 +43,7 @@ MechControl/
     UefiSetup.cs                  One-time UEFI NVRAM flag setup (self-healing)
     CpuPowerControl.cs            PL1/PL2/PL4 + CPU temp limit
     GpuPowerControl.cs            TGP + Dynamic Boost toggle/value
+    GpuTemperatureFailsafe.cs     Thermal trip/acknowledged holds, optional CPU/fan actions, scoped restoration
     FanControl.cs                 Fan boost, custom fan curve mode, fan table write
     FanSnapshot.cs                One-shot fan-table + curve-control register capture (see Section 5)
     FanCurveModel.cs              Fan curve points + hysteresis (`RangeCelsius = 4`)
@@ -62,6 +63,7 @@ MechControl/
   UI/
     MainForm.cs                   TabControl + monitor panel + profile bar + system tray + EC enrichment orchestration
     PowerTab.cs                   CPU (PL1/PL2/PL4/temp limit) + GPU (TGP/DB) sliders
+    FailsafeTab.cs                Thermal Failsafe configuration, peak/history/status, test and manual re-arm
     FanTab.cs                     Boost/curve checkboxes + single Apply button + FanCurvePanel + fan switch speed + linked mode
     FanCurvePanel.cs              GDI+ chart, draggable points (point 0 locked to 0% duty), mouse interaction, ReadOnly mode
     FanCurveDebugSection.cs       Section with 2 read-only FanCurvePanels; live view of curves
@@ -223,6 +225,47 @@ Each feature module follows the same pattern: `ReadState()` reads current EC val
 | `LocalDimmingControl` | Mini-LED local dimming toggle | WMI/ACPI + `0x72B` |
 | `LiquidCoolerControl` | BLE cooler: fan, pump voltage, RGB, commit. Gated by EC `0x7A4` bit 7. See `Architecture_BLE.md`. | BLE (NUS) |
 
+### GPU Temperature Failsafe
+
+Behavior, setup, resource costs and validation are in
+`notes/gpu_temperature_failsafe.md`; UI evidence is in
+`notes/thermal_failsafe_validation.md`.
+
+- `GpuFailsafeSettings` stores per-profile detection, threshold, optional CPU/fan
+  actions and foreground preference. Missing CPU/fan fields default off.
+- `ThermalProtectionState` stores `None`, `Tripped`, or `ResetPending`, the remaining
+  held actions, reset threshold and one historical trip record. `UserProfileManager`
+  atomically flushes/replaces this state in settings separately from user profiles.
+  Interrupted records merge by stronger stage, union of held actions and lower
+  applicable threshold; unreadable state fails closed without dropping known actions.
+- `GpuTemperatureFailsafe` accepts injected sensor/action/persistence dependencies.
+  GPU, fan boost, then CPU actions execute independently through existing feature
+  controllers and `WriteGuard`. CPU writes preserve a freshly read, valid temperature
+  limit; generic fallback CPU/TGP minima are not accepted as hardware authority.
+- Both tripped and acknowledged holds survive restart and remain enforced. Reset
+  requires a fresh cool sample plus successful current enforcement. Explicit
+  restoration uses short-lived per-operation permits, verified per-action completion,
+  then durable release; failure reasserts the old hold. Startup/recovery never receive
+  restoration permits. EC reactivation invalidates verification immediately via an
+  atomic epoch; re-enforcement or reactivation during restoration prevents release.
+- Profile transitions use the union of enabled protection, minimum enabled threshold
+  and union of requested optional actions before writing. Destination policy/slot
+  presentation commits only after synchronous writes and persistence succeed.
+- `EcMonitor` remains the sole recurring failsafe sampler. One GPU-temperature read
+  is shared with linked fans and visible telemetry, or added to tray RPM reads.
+  Disabled/unheld protection has no safety subscriber. Holds are maintained every
+  five samples: a previously verified CPU hold in the same EC epoch uses fresh
+  minimum-PL readback and temperature-limit validation, rewriting the full group
+  on drift. Initial, failed, reset and recovery enforcement still writes/verifies
+  the complete group. UI/notification subscriber faults cannot stop safety work.
+- The Thermal Failsafe tab uses normal section/slider/key-value helpers, separate
+  pending/applied/saved indicators and in-memory peak. `MessageBeep`, tray warning
+  and an independent nonmodal alert remain; the foreground option only activates
+  the main form. No additional timer, GPU driver or BLE dependency is introduced.
+  `TemperatureChanged` updates live readings separately from configuration/history
+  `Changed` notifications; unchanged maintenance results do not trigger full UI
+  refreshes or persistence. Hidden tabs and the bottom monitor panel skip label work.
+
 ### Startup-only modules
 
 | Module | Purpose |
@@ -239,10 +282,18 @@ Each feature module follows the same pattern: `ReadState()` reads current EC val
 
 EC firmware evaluates CPU and GPU fan tables independently — no hardware "link fans" register exists. Linking is done in software:
 
-1. **Poll** (1.5s timer): Read CPU/GPU temps from EC, evaluate each user curve via linear interpolation
+1. **Sample** (shared 1s `EcMonitor`): Receive fresh CPU/GPU temperatures after GPU safety callbacks, before unrelated telemetry; evaluate each user curve via linear interpolation. No separate linked-fan timer or recurring sensor reads.
 2. **Compute**: `linkedDuty = max(cpuDuty, gpuDuty)`
 3. **Write**: Build a safe curve for each fan table at `linkedDuty`, write to both CPU and GPU fan table regions
-4. **Skip**: Only rewrite EC if duty change is significant (>=2% or crossing the low zone threshold)
+4. **Skip**: Only rewrite EC if duty change is significant (>=2% or crossing the low zone threshold), or a rising sensor moves its safety-ramp start upward. Failed curve writes invalidate the skip state so a return to old temperatures cannot suppress recovery.
+
+The monitor reads both temperatures while linked mode is active, even tray-hidden
+with thermal protection disabled, and does not auto-stop control sampling after
+unrelated telemetry failures. Invalid/missing temperatures leave the existing EC
+safety-ramp curves intact. Explicit enable takes fresh readings and synchronously
+writes/verifies curves before subscribing; disable/disposal unsubscribe. Disposal
+does not rewrite curves. Faster evaluation can increase writes during changing
+temperatures; stable duty/headroom still produces no periodic curve writes.
 
 **Safety ramp**: Each written curve is flat at `linkedDuty` up to the current sensor temp, then ramps linearly to 100% at the last point (96°C). The ramp start is per-sensor — CPU curve ramps based on CPU temp, GPU curve based on GPU temp. If the app crashes, the EC keeps these curves and fans ramp up if temps rise.
 

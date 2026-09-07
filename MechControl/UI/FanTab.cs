@@ -1,4 +1,3 @@
-using MechControl.Driver;
 using MechControl.Features;
 using MechControl.Monitoring;
 using MechControl.Profile;
@@ -39,7 +38,7 @@ class FanTab : UserControl
     /// intent — used when restoring EC state after re-activation).</summary>
     public bool CurveEnableChecked => _chkFanCurve.Checked;
 
-    public FanTab(FanControl control, MachineProfile profile, EcDevice device,
+    public FanTab(FanControl control, MachineProfile profile, EcMonitor monitor,
         FanSwitchSpeedControl? switchSpeedControl = null)
     {
         _control = control;
@@ -259,7 +258,7 @@ class FanTab : UserControl
         if (_hasGpuFan && _curveEditingEnabled
             && profile.Registers.ContainsKey("cpuTemp") && profile.Registers.ContainsKey("gpuTemp"))
         {
-            _linkedController = new LinkedFanController(device, control, profile,
+            _linkedController = new LinkedFanController(control, monitor,
                 () => _cpuCurvePanel.Curve, () => _gpuCurvePanel.Curve);
 
             _chkLinkFans = new CheckBox
@@ -307,7 +306,18 @@ class FanTab : UserControl
     {
         if (_chkLinkFans == null || _linkedController == null) return;
         if (_chkLinkFans.Checked != enabled)
-            _chkLinkFans.Checked = enabled; // triggers OnLinkFansChanged
+        {
+            // Profile application needs real synchronous errors, not the UI
+            // handler's caught exception followed by a false success callback.
+            if (enabled) _linkedController.Enable();
+            else _linkedController.Disable();
+            _chkLinkFans.CheckedChanged -= OnLinkFansChanged;
+            try { _chkLinkFans.Checked = enabled; }
+            finally { _chkLinkFans.CheckedChanged += OnLinkFansChanged; }
+            SetLinkedControlsEnabled(enabled);
+            if (_linkedStatusBar != null) _linkedStatusBar.Visible = enabled;
+            if (_debugSection != null) _debugSection.Visible = enabled;
+        }
     }
 
     /// <summary>
@@ -527,8 +537,12 @@ class FanTab : UserControl
     }
 
     private void BtnApplyBoost_Click(object? sender, EventArgs e) =>
-        UiHelpers.TryUi(() => _control.SetFanBoost(_chkFanBoost.Checked),
-            "set fan boost", "EC Write Error");
+        UiHelpers.TryUi(() =>
+        {
+            if (_control.Failsafe is { } failsafe)
+                failsafe.ApplyExplicit(ThermalAction.Fan, permit => _control.SetFanBoost(_chkFanBoost.Checked, permit));
+            else _control.SetFanBoost(_chkFanBoost.Checked);
+        }, "set fan boost", "EC Write Error");
 
     private void BtnApply_Click(object? sender, EventArgs e)
     {

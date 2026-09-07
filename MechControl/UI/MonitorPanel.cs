@@ -66,6 +66,7 @@ class MonitorPanel : UserControl
 
     public void OnMonitorUpdated(MonitorData data)
     {
+        if (!Visible) return;
         _lblCpuFan.Text = $"CPU Fan: {data.CpuFanPercent}% ({data.CpuFanRpm} RPM)";
         _lblGpuFan.Text = $"GPU Fan: {data.GpuFanPercent}% ({data.GpuFanRpm} RPM)";
         if (_lblGpuHotspot != null

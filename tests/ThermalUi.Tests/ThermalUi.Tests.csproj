@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../MechControl/Features/GpuTemperatureFailsafe.cs" />
+    <Compile Include="../../MechControl/Features/LinkedFanController.cs" />
+    <Compile Include="../../MechControl/Features/FanControl.cs" />
+    <Compile Include="../../MechControl/Features/FanCurveModel.cs" />
+    <Compile Include="../../MechControl/Driver/WriteGuard.cs" />
+    <Compile Include="../../MechControl/Profile/GpuFailsafeSettings.cs" />
+    <Compile Include="../../MechControl/Profile/ThermalProtectionState.cs" />
+    <Compile Include="../../MechControl/Profile/ProfileSchema.cs" />
+    <Compile Include="../../MechControl/Profile/UniversalDefaults.cs" />
+    <Compile Include="../../MechControl/Profile/RegisterEncoding.cs" />
+    <Compile Include="../../MechControl/Monitoring/EcMonitor.cs" />
+    <Compile Include="../../MechControl/UI/FailsafeTab.cs" />
+    <Compile Include="../../MechControl/UI/MonitorPanel.cs" />
+    <Compile Include="../../MechControl/UI/UiHelpers.cs" />
+    <Compile Include="../../MechControl/UI/UiMetrics.cs" />
+    <Compile Include="../../MechControl/UI/UiColors.cs" />
+    <Compile Include="../../MechControl/UI/Section.cs" />
+    <Compile Include="../GpuFailsafe.Tests/FakeEcDevice.cs" />
+    <Compile Include="../GpuFailsafe.Tests/DiagnosticLogStub.cs" />
+  </ItemGroup>
+</Project>

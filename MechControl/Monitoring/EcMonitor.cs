@@ -71,14 +71,24 @@ class EcMonitor : IDisposable
     private const int AddrTgpMirror      = 0x788;  // CTWA (shadows 0x744, watts - TgpOffset)
 
     private int _consecutiveFailures;
+    private string _safetySubscriberError = "";
+    private string _fanSubscriberError = "";
 
     public event Action<MonitorData>? Updated;
     public event Action<string>? Stopped;
 
+    // Subscribed only while protection is armed or latched. Runs before unrelated
+    // telemetry reads so a fan/battery failure cannot suppress the safety sample.
+    public event Action<int?>? GpuTemperatureSample;
+
+    // Linked control runs on fresh samples, even in the tray or after a
+    // telemetry failure. GPU safety subscribers always run first.
+    public event Action<(int? Cpu, int? Gpu)>? FanTemperatureSample;
+
     /// <summary>
     /// When true (window tray-hidden), each tick reads only the 4 fan RPM
-    /// bytes the perf counters need — the same EC traffic as the old
-    /// standalone publisher. Full reads resume when the window is shown.
+    /// bytes the perf counters need, plus temperatures required by active
+    /// protection/linked fans. Full reads resume when the window is shown.
     /// </summary>
     public bool Lightweight { get; set; }
 
@@ -117,6 +127,15 @@ class EcMonitor : IDisposable
     private static int TryGetRegister(MachineProfile profile, string name) =>
         profile.Registers.ContainsKey(name) ? profile.GetRegister(name) : -1;
 
+    private int? ReadTemperature(int address)
+    {
+        try { return address >= 0 ? _device.ReadByte(address) : null; }
+        catch { return null; }
+    }
+
+    // Explicit linked-fan enable needs fresh readings before it can report success.
+    public (int? Cpu, int? Gpu) ReadFanTemperatures() => (_device.ReadByte(_addrCpuTemp), _device.ReadByte(_addrGpuTemp));
+
     public void Start()
     {
         // Reset after an auto-stop — otherwise a single failure after restart
@@ -133,8 +152,35 @@ class EcMonitor : IDisposable
         _timer.Dispose();
     }
 
+    private static void Dispatch<T>(Action<T>? handlers, T sample, string source, ref string lastError)
+    {
+        if (handlers == null) return;
+        foreach (Action<T> handler in handlers.GetInvocationList())
+            try { handler(sample); }
+            catch (Exception ex)
+            {
+                if (lastError != ex.Message)
+                    DiagnosticLog.Error($"EC {source} subscriber failed: {ex.Message}");
+                lastError = ex.Message;
+            }
+    }
+
     private void OnTick(object? sender, EventArgs e)
     {
+        int? gpuTemperature = null;
+        int? cpuTemperature = null;
+        bool safetyActive = GpuTemperatureSample != null;
+        bool fansActive = FanTemperatureSample != null;
+        if (safetyActive || fansActive)
+        {
+            gpuTemperature = ReadTemperature(_addrGpuTemp);
+            Dispatch(GpuTemperatureSample, gpuTemperature, "safety", ref _safetySubscriberError);
+        }
+        if (fansActive)
+        {
+            cpuTemperature = ReadTemperature(_addrCpuTemp);
+            Dispatch(FanTemperatureSample, (cpuTemperature, gpuTemperature), "fan", ref _fanSubscriberError);
+        }
         try
         {
             var data = new MonitorData { BatteryModeName = "" };
@@ -186,9 +232,9 @@ class EcMonitor : IDisposable
 
                 // System info (universal EC addresses)
                 if (_addrCpuTemp >= 0)
-                    data.CpuTemp = _device.ReadByte(_addrCpuTemp);
+                    data.CpuTemp = fansActive ? cpuTemperature ?? 0 : _device.ReadByte(_addrCpuTemp);
                 if (_addrGpuTemp >= 0)
-                    data.GpuTemp = _device.ReadByte(_addrGpuTemp);
+                    data.GpuTemp = safetyActive || fansActive ? gpuTemperature ?? 0 : _device.ReadByte(_addrGpuTemp);
                 data.AdapterCurrentAmps = _device.ReadByte(AddrAdapterCurrent) / 10.0;
                 data.SystemPowerWatts = _device.ReadByte(AddrSystemPowerLo)
                                       | (_device.ReadByte(AddrSystemPowerHi) << 8);
@@ -202,9 +248,10 @@ class EcMonitor : IDisposable
         catch (Exception ex)
         {
             _consecutiveFailures++;
-            DiagnosticLog.Warn($"EcMonitor tick failed ({_consecutiveFailures}/5): {ex.Message}");
+            if (_consecutiveFailures <= 5 || _consecutiveFailures % 60 == 0)
+                DiagnosticLog.Warn($"EcMonitor tick failed ({_consecutiveFailures} consecutive failures): {ex.Message}");
 
-            if (_consecutiveFailures >= 5)
+            if (_consecutiveFailures >= 5 && !safetyActive && !fansActive)
             {
                 _timer.Stop();
                 Stopped?.Invoke("Monitor stopped after 5 consecutive read failures.");

@@ -22,6 +22,12 @@ class MachineProfile
     [JsonPropertyName("limits")]
     public Dictionary<string, LimitInfo> Limits { get; set; } = new();
 
+    [JsonIgnore]
+    public bool TgpLimitIsFallback { get; set; }
+
+    [JsonIgnore]
+    public bool CpuLimitsAreFallback { get; set; }
+
     [JsonPropertyName("bitfields")]
     public Dictionary<string, BitfieldInfo> Bitfields { get; set; } = new();
 
