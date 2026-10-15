@@ -13,36 +13,41 @@ static partial class Program
             ("settings JSON uses profile field names", SettingsJsonUsesProfileFieldNames),
             ("disabled performs no hardware or persistence work", DisabledPerformsNoWork),
             ("enabled configuration takes an initial fresh sample", ConfigureEnabledChecksImmediately),
-            ("threshold is inclusive", ThresholdIsInclusive),
+            ("threshold is inclusive on the rolling average", ThresholdIsInclusive),
+            ("noise spikes and too few readings do not trip", NoiseDoesNotTrip),
             ("invalid samples trip after five and valid resets counter", InvalidSamplesTripAndCounterResets),
             ("unavailable during Configure trips immediately", ConfigureUnavailableTripsImmediately),
-            ("unavailable during CheckBeforeApply trips immediately", CheckBeforeApplyUnavailableTripsImmediately),
+            ("unavailable fresh read uses the recent average", CheckBeforeApplyUnavailableUsesAverage),
             ("latch survives disabled and changed profile settings", LatchSurvivesReconfigure),
             ("minimum enforcement retries every five samples", EnforcementRetriesEveryFiveSamples),
             ("persistence failure does not block hardware lowering", PersistenceFailureDoesNotBlockHardware),
             ("reset persistence failure retains latch", ResetPersistenceFailureRetainsLatch),
-            ("reset requires a fresh valid cool sample and does not restore power", ResetRequiresFreshCoolSample),
+            ("reset uses the current trigger and releases all holds", ResetUsesCurrentTrigger),
             ("constructor restores persisted latch", ConstructorRestoresLatch),
             ("manual test trips while disabled", ManualTestTripsWhileDisabled),
             ("GPU power gate integrates with real guard and encoding", GpuPowerGateIntegration),
-            ("reset-pending continues enforcement when disabled", ResetPendingEnforces),
-            ("failed fresh enforcement refuses reset", FailedEnforcementRefusesReset),
+            ("tripped hold continues enforcement when disabled", TrippedEnforcesWhenDisabled),
+            ("reset clears even incomplete protection", ResetClearsIncompleteProtection),
             ("notification exceptions cannot interrupt safety", SubscriberFailuresAreContained),
             ("durable recovery orders stages and unions actions", RecoveryMatrix),
             ("real settings files recover pending/corrupt/legacy states", PersistenceIntegration),
-            ("release persistence failure keeps and reasserts hold", ReleaseFailure),
-            ("individual restoration releases only verified actions", IndividualRestoration),
-            ("multi-action partial failure retains all obligations", PartialRestoration),
-            ("automatic applies never release acknowledged holds", AutomaticApply),
-            ("profile transition union and failure never disarm", ProfileTransitions),
-            ("firmware defaults obey stages and verified completion", FirmwareDefaults),
+            ("release persistence failure keeps the trip", ReleaseFailure),
+            ("reset releases every held action in one step", ResetReleasesEverything),
+            ("failed apply while tripped reasserts emergency settings", FailedApplyReassertsHold),
+            ("automatic applies never clear a trip", AutomaticApply),
+            ("deliberate profile load clears the trip and uses its own trigger", ProfileSwitching),
+            ("only deliberate writes are refused while tripped", TrippedBlocksOnlyDeliberateWrites),
             ("optional failures remain independent and retry", IndependentActions),
             ("unsupported preferences preserved but not executed", UnsupportedActions),
             ("peak and historical event semantics", PeakAndHistory),
             ("CPU and fan real guard encodings and failures", CpuFanIntegration),
-            ("interleaved enforcement/reactivation cannot authorize release", InterruptedRestoration),
+            ("EC reactivation during apply is reported", ReactivationDuringApply),
             ("stable maintenance checks never replace required writes", MaintenanceVerification),
             ("temperature notifications do not rebuild unchanged state", TemperatureNotifications),
+            ("optional metadata recovery and legacy threshold migrations", PracticalRecovery),
+            ("profile loading and atomic partial saves are truthful", PracticalProfiles),
+            ("model limits and complete GPU maintenance readback", PracticalGpuLimits),
+            ("all emergency actions precede durable persistence", PracticalPersistenceOrder),
         ];
 
         int failed = 0;
@@ -70,8 +75,8 @@ static partial class Program
     {
         var settings = new GpuFailsafeSettings();
         Assert.False(settings.Enabled);
-        Assert.Equal(62, settings.ThresholdC);
-        Assert.Equal(30, GpuFailsafeSettings.MinimumThreshold);
+        Assert.Equal(50, settings.ThresholdC);
+        Assert.Equal(50, GpuFailsafeSettings.MinimumThreshold);
         Assert.Equal(95, GpuFailsafeSettings.MaximumThreshold);
 
         var rig = new Rig();
@@ -79,7 +84,7 @@ static partial class Program
         Assert.Throws<ArgumentOutOfRangeException>(() => failsafe.Configure(new GpuFailsafeSettings
         {
             Enabled = true,
-            ThresholdC = 29
+            ThresholdC = 49
         }));
         Assert.Throws<ArgumentOutOfRangeException>(() => failsafe.Configure(new GpuFailsafeSettings
         {
@@ -138,7 +143,7 @@ static partial class Program
         Assert.False(failsafe.IsTripped);
         Assert.Equal(0, rig.ApplyCount);
         Assert.Equal(0, rig.SaveCount);
-        Assert.Contains("Armed - trips at 62 C", failsafe.Status);
+        Assert.Contains("Armed - trips when the 5 s average reaches 62 C", failsafe.Status);
     }
 
     private static void ThresholdIsInclusive()
@@ -147,14 +152,17 @@ static partial class Program
         var failsafe = rig.Create();
         failsafe.Configure(new GpuFailsafeSettings { Enabled = true, ThresholdC = 62 });
 
-        failsafe.OnTemperatureSample(61);
+        Repeat(10, () => failsafe.OnTemperatureSample(61));
         Assert.False(failsafe.IsTripped);
+        Repeat(4, () => failsafe.OnTemperatureSample(62));
+        Assert.False(failsafe.IsTripped); // Average still 61.2 C.
         failsafe.OnTemperatureSample(62);
 
         Assert.True(failsafe.IsTripped);
-        Assert.Equal("GPU reached 62 C (threshold 62 C).", failsafe.TripReason);
+        Assert.Equal("GPU averaged 62 C over the last 5 readings (threshold 62 C, latest 62 C).", failsafe.TripReason);
+        Assert.Equal(62, failsafe.GetState().LastTrip!.TemperatureC);
         Assert.Equal(1, rig.ApplyCount);
-        Assert.Equal(2, rig.SaveCount); // Durable intent, then verification results.
+        Assert.Equal(1, rig.SaveCount); // Emergency actions, then durable state/results.
         Assert.True(failsafe.LimitsApplied);
     }
 
@@ -183,7 +191,7 @@ static partial class Program
         Assert.True(failsafe.IsTripped);
         Assert.Equal("GPU temperature unavailable for 5 consecutive checks.", failsafe.TripReason);
         Assert.Equal(1, rig.ApplyCount);
-        Assert.Equal(2, rig.SaveCount);
+        Assert.Equal(1, rig.SaveCount);
     }
 
     private static void ConfigureUnavailableTripsImmediately()
@@ -197,10 +205,32 @@ static partial class Program
         Assert.True(failsafe.IsTripped);
         Assert.Contains("unavailable before applying", failsafe.TripReason);
         Assert.Equal(1, rig.ApplyCount);
-        Assert.Equal(2, rig.SaveCount);
+        Assert.Equal(1, rig.SaveCount);
     }
 
-    private static void CheckBeforeApplyUnavailableTripsImmediately()
+    private static void NoiseDoesNotTrip()
+    {
+        var rig = new Rig { Temperature = 55 };
+        var failsafe = rig.Create();
+        failsafe.Configure(new GpuFailsafeSettings { Enabled = true, ThresholdC = 62 });
+        foreach (int spike in new[] { 70, 75, 80 })
+        {
+            Repeat(4, () => failsafe.OnTemperatureSample(55));
+            failsafe.OnTemperatureSample(spike);
+            Assert.False(failsafe.IsTripped);
+        }
+        Assert.Equal(80, failsafe.PeakTemperatureC);
+
+        // One or two readings are never enough, even if they are far over.
+        var hot = new Rig { Temperature = 90 }.Create();
+        hot.Configure(new GpuFailsafeSettings { Enabled = true, ThresholdC = 62 });
+        hot.CheckBeforeApply();
+        Assert.False(hot.IsTripped);
+        hot.OnTemperatureSample(90);
+        Assert.True(hot.IsTripped);
+    }
+
+    private static void CheckBeforeApplyUnavailableUsesAverage()
     {
         var rig = new Rig { Temperature = 50 };
         var failsafe = rig.Create();
@@ -210,9 +240,8 @@ static partial class Program
         failsafe.CheckBeforeApply();
 
         Assert.Equal(2, rig.ReadCount);
-        Assert.True(failsafe.IsTripped);
-        Assert.Contains("unavailable before applying", failsafe.TripReason);
-        Assert.Equal(1, rig.ApplyCount);
+        Assert.False(failsafe.IsTripped);
+        Assert.Equal(0, rig.ApplyCount);
     }
 
     private static void LatchSurvivesReconfigure()
@@ -220,7 +249,7 @@ static partial class Program
         var rig = new Rig { Temperature = 50 };
         var failsafe = rig.Create();
         failsafe.Configure(new GpuFailsafeSettings { Enabled = true, ThresholdC = 62 });
-        failsafe.OnTemperatureSample(62);
+        Sustain(failsafe, 62);
         string reason = failsafe.TripReason;
 
         failsafe.Configure(new GpuFailsafeSettings { Enabled = false, ThresholdC = 80 });
@@ -228,16 +257,14 @@ static partial class Program
         Assert.Equal(reason, failsafe.TripReason);
         Assert.False(failsafe.Enabled);
         Assert.True(failsafe.RequiresMonitoring);
-        Assert.Equal(59, failsafe.ResetBelowC);
 
         failsafe.Configure(new GpuFailsafeSettings { Enabled = true, ThresholdC = 90 });
         Assert.True(failsafe.IsTripped);
         Assert.Equal(reason, failsafe.TripReason);
         Assert.Equal(90, failsafe.ThresholdC);
-        Assert.Equal(59, failsafe.ResetBelowC);
         Assert.Equal(1, rig.ReadCount);
         Assert.Equal(1, rig.ApplyCount);
-        Assert.Equal(2, rig.SaveCount);
+        Assert.Equal(1, rig.SaveCount);
     }
 
     private static void EnforcementRetriesEveryFiveSamples()
@@ -250,7 +277,7 @@ static partial class Program
         };
         var failsafe = rig.Create();
         failsafe.Configure(new GpuFailsafeSettings { Enabled = true, ThresholdC = 62 });
-        failsafe.OnTemperatureSample(62);
+        Sustain(failsafe, 62);
 
         Assert.True(failsafe.IsTripped);
         Assert.False(failsafe.LimitsApplied);
@@ -271,7 +298,7 @@ static partial class Program
         Assert.Equal(3, rig.ApplyCount);
         Assert.True(failsafe.IsTripped);
         Assert.True(failsafe.LimitsApplied);
-        Assert.Equal(3, rig.SaveCount);
+        Assert.Equal(2, rig.SaveCount);
     }
 
     private static void PersistenceFailureDoesNotBlockHardware()
@@ -281,9 +308,9 @@ static partial class Program
         var failsafe = rig.Create();
         failsafe.Configure(new GpuFailsafeSettings { Enabled = true, ThresholdC = 62 });
 
-        failsafe.OnTemperatureSample(62);
+        Sustain(failsafe, 62);
 
-        Assert.SequenceEqual(["save", "apply"], rig.Operations);
+        Assert.SequenceEqual(["apply", "save"], rig.Operations);
         Assert.True(failsafe.IsTripped);
         Assert.True(failsafe.LimitsApplied);
         Assert.Equal(1, rig.ApplyCount);
@@ -305,7 +332,7 @@ static partial class Program
         };
         var failsafe = rig.Create();
         failsafe.Configure(new GpuFailsafeSettings { Enabled = true, ThresholdC = 62 });
-        failsafe.OnTemperatureSample(62);
+        Sustain(failsafe, 62);
         string reason = failsafe.TripReason;
 
         Assert.Throws<IOException>(() => failsafe.Reset());
@@ -313,41 +340,46 @@ static partial class Program
         Assert.True(failsafe.IsTripped);
         Assert.Equal(reason, failsafe.TripReason);
         Assert.True(failsafe.LimitsApplied);
-        Assert.Equal(2, rig.ApplyCount);
-        Assert.Equal(3, rig.SaveCount);
+        Assert.Equal(1, rig.ApplyCount);
+        Assert.Equal(2, rig.SaveCount);
     }
 
-    private static void ResetRequiresFreshCoolSample()
+    private static void ResetUsesCurrentTrigger()
     {
         var rig = new Rig { Temperature = 50 };
         var failsafe = rig.Create();
         failsafe.Configure(new GpuFailsafeSettings { Enabled = true, ThresholdC = 62 });
-        failsafe.OnTemperatureSample(62);
-        failsafe.OnTemperatureSample(40); // A cool cached sample must not authorize reset.
+        Sustain(failsafe, 62);
 
         rig.Temperature = 0;
         Assert.Throws<InvalidOperationException>(() => failsafe.Reset());
         Assert.True(failsafe.IsTripped);
 
-        rig.Temperature = 60;
-        Assert.Throws<InvalidOperationException>(() => failsafe.Reset());
+        rig.Temperature = 63; // Average 62.2 C: would trip again immediately.
+        var refused = Assert.Throws<InvalidOperationException>(() => failsafe.Reset());
+        Assert.Contains("Load a profile", refused.Message);
         Assert.True(failsafe.IsTripped);
 
-        rig.Temperature = 59;
+        // Raising the trigger is honoured; there is no latched lower reset point.
+        failsafe.Configure(new GpuFailsafeSettings { Enabled = true, ThresholdC = 70 });
         failsafe.Reset();
 
         Assert.False(failsafe.IsTripped);
-        Assert.True(failsafe.LimitsApplied);
-        Assert.Equal(59, failsafe.TemperatureC);
-        Assert.True(failsafe.NeedsPowerRestore);
-        Assert.Equal(4, rig.ReadCount);
-        Assert.Equal(2, rig.ApplyCount);
-        Assert.Equal(3, rig.SaveCount);
+        Assert.Equal(ThermalAction.None, failsafe.HeldActions);
+        Assert.Equal(63, failsafe.TemperatureC);
+        Assert.Equal(1, rig.ApplyCount); // Reset writes nothing; the UI reapplies the profile.
+        Assert.Equal(2, rig.SaveCount);
         Assert.Equal("", rig.Saves[^1].Reason);
         Assert.True(failsafe.Enabled);
         Assert.True(failsafe.RequiresMonitoring);
-    }
 
+        // With detection disabled nothing can re-trip, so any temperature is accepted.
+        rig.Temperature = 90;
+        failsafe.TestTrip();
+        failsafe.Configure(new GpuFailsafeSettings());
+        failsafe.Reset();
+        Assert.False(failsafe.IsTripped);
+    }
     private static void ConstructorRestoresLatch()
     {
         var rig = new Rig { Temperature = 50 };
@@ -357,14 +389,13 @@ static partial class Program
         Assert.True(failsafe.RequiresMonitoring);
         Assert.False(failsafe.Enabled);
         Assert.Equal("Persisted over-temperature latch", failsafe.TripReason);
-        Assert.Equal(59, failsafe.ResetBelowC);
         Assert.Equal(0, rig.ReadCount);
         Assert.Equal(0, rig.ApplyCount);
         Assert.Equal(0, rig.SaveCount);
 
         Repeat(5, () => failsafe.OnTemperatureSample(40));
         Assert.Equal(1, rig.ApplyCount);
-        Assert.Equal(2, rig.SaveCount);
+        Assert.Equal(1, rig.SaveCount);
         Assert.True(failsafe.IsTripped);
         Assert.True(failsafe.LimitsApplied);
     }
@@ -383,39 +414,43 @@ static partial class Program
         Assert.True(failsafe.RequiresMonitoring);
         Assert.Equal("Manual failsafe test (real emergency settings requested).", failsafe.TripReason);
         Assert.Equal(1, rig.ApplyCount);
-        Assert.Equal(2, rig.SaveCount);
+        Assert.Equal(1, rig.SaveCount);
         Assert.Equal(1, alerts);
         Assert.Equal(0, rig.ReadCount);
 
         Assert.Throws<InvalidOperationException>(() => failsafe.TestTrip());
         Assert.Equal(1, rig.ApplyCount);
-        Assert.Equal(2, rig.SaveCount);
+        Assert.Equal(1, rig.SaveCount);
         Assert.Equal(1, alerts);
     }
 
-    private static void ResetPendingEnforces()
+    private static void TrippedEnforcesWhenDisabled()
     {
         var rig = new Rig();
         var failsafe = rig.Create();
         failsafe.TestTrip();
-        failsafe.Reset();
         failsafe.Configure(new());
         Assert.True(failsafe.RequiresMonitoring);
         int before = rig.ApplyCount;
         Repeat(5, () => failsafe.OnTemperatureSample(40));
         Assert.Equal(before + 1, rig.ApplyCount);
+        failsafe.Reset();
+        Assert.False(failsafe.RequiresMonitoring);
     }
 
-    private static void FailedEnforcementRefusesReset()
+    private static void ResetClearsIncompleteProtection()
     {
         var rig = new Rig();
         var failsafe = rig.Create();
         failsafe.TestTrip();
         rig.ApplyOverride = () => throw new IOException("verification failed");
-        Assert.Throws<InvalidOperationException>(() => failsafe.Reset());
-        Assert.True(failsafe.IsTripped);
+        failsafe.EnforceMinimum();
+        Assert.True(failsafe.ProtectionIncomplete);
+        failsafe.Reset();
+        Assert.False(failsafe.IsTripped);
+        Assert.False(failsafe.ProtectionIncomplete);
+        Assert.Equal("Disabled", failsafe.StateText);
     }
-
     private static void SubscriberFailuresAreContained()
     {
         var rig = new Rig();
@@ -432,9 +467,15 @@ static partial class Program
         for (int i = 0; i < count; i++) action();
     }
 
+    // Feeds a steady reading until the rolling average trips (bounded).
+    private static void Sustain(GpuTemperatureFailsafe failsafe, int temperature)
+    {
+        for (int i = 0; i < 2 * GpuTemperatureFailsafe.AverageWindow && !failsafe.IsTripped; i++) failsafe.OnTemperatureSample(temperature);
+    }
+
     private sealed class Rig
     {
-        public int Temperature { get; set; } = 50;
+        public int Temperature { get; set; } = 40;
         public Func<int>? ReadOverride { get; set; }
         public Action? ApplyOverride { get; set; }
         public Action<string, int>? SaveOverride { get; set; }
@@ -445,7 +486,7 @@ static partial class Program
         public List<(string Reason, int Threshold)> Saves { get; } = new();
 
         public GpuTemperatureFailsafe Create(string tripReason = "", int tripThreshold = GpuFailsafeSettings.DefaultThreshold) =>
-            new(Read, _ => Apply(), state => Save(state.Stage == ThermalStage.Tripped ? state.LastTrip!.Reason : "", state.ResetThresholdC ?? tripThreshold),
+            new(Read, _ => Apply(), state => Save(state.Stage == ThermalStage.Tripped ? state.LastTrip!.Reason : "", state.LastTrip?.ThresholdC ?? tripThreshold),
                 string.IsNullOrEmpty(tripReason) ? null : HeldState(ThermalStage.Tripped, ThermalAction.Gpu, tripThreshold, tripReason));
 
         private int Read()

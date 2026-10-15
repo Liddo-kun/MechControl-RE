@@ -324,3 +324,149 @@ Verification:
   Release packaging completed with **0 errors and the same two existing warnings**.
   Log: `C:/Temp/tandem/thermal-simplification-release.log`. No deployment or live
   hardware/popup tests were performed.
+
+## Practical Safety Implementation (2026-09-08)
+
+Implemented phases 1-6 of `practical_safety_simplification_plan.md` against checkpoint
+`3f985ad`. The only pre-existing local edits were the plan's workflow wording; their
+start-of-session copy is `C:/Temp/tandem/practical-safety-plan-session-baseline.md`.
+Those edits were preserved. No subagents or installed files were used/changed.
+
+### Behavior And Coverage
+
+- Supported trigger range is 50-95 C, default 50 C; inclusive trip and 3 C reset
+  hysteresis retained. Both enabled and disabled legacy low profiles migrate with
+  warning/unsaved state; historical thresholds and actual held bits survive.
+- Both audit JSON reproducers remain unheld. Tests cover bad optional history
+  across GPU/CPU/fan/all holds and both protected stages, differing pending history,
+  malformed operational state, supported versus CPU-only recovery fallback and
+  no fabricated historical measurements/time. Unheld thresholds carry no authority.
+- Real profile manager tests cover corrupt/null/missing/disappearing slots, explicit
+  cross-model refusal, legacy-ID preflight, atomic replacement failure with the old
+  file locked, ignored unfinished profile files, and successful replacement followed
+  by failed settings persistence. Selection rolls back only its in-memory bookkeeping;
+  a completed profile file is never falsely described as unwritten.
+- Real controller/guard tests reject the offset-70/min-80/max-100 GPU's 125 W request
+  before writes, enforce CPU/DB bounds and encoding caps, preserve DB-off zero bytes,
+  Intel/AMD temperature encoding and direct/doubled PL4 quantization. Odd doubled
+  values may round down only within model bounds. Generic fallback limits do not
+  authorize emergency minima. The firmware-default path remains distinct.
+- Maintenance tests cover all four GPU request registers, CPU PL registers and fan
+  request drift, stable zero-write holds, unrelated bit preservation, read failure
+  repair, epoch changes/races, no-write verified re-arm and forced rollback. Models
+  declaring skipped/redirected direct-register verification retain full writes.
+  The initial emergency CPU apply reads its preserved limit once before group writes;
+  existing redirected verification delays are unchanged.
+- All emergency actions are attempted GPU/fan/CPU before the save callback, including
+  independent action failures and disk failure. Runtime holds, retryability and
+  failed-release recovery remain intact. The new durability boundary explicitly
+  permits loss of a new trip record if the process crashes before persistence.
+- Headless UI fixtures now compile the actual ProfileBar and FanTab, using real
+  thermal/fan controllers and fake EC/nonthermal devices. They verify one operation
+  per checkbox action, original linked failure identity, failed re-enable cleanup,
+  no accidental rollback on checkbox repair, no-write disposal, truthful slot/apply
+  events, actual profile arming, preserved holds, migrated-unsaved indicators and
+  partial-save state. A GPU crossing during fan writes is caught before normal GPU
+  power application. Existing shared sampling/hidden UI regressions still pass.
+
+### Verification
+
+- Safety suite: **38/38 passed**. Log: `C:/Temp/tandem/practical-safety-tests-final.log`.
+- Expanded UI suite `--headless`: **passed**, no windows or real hardware access.
+  Log: `C:/Temp/tandem/practical-safety-ui-final.log`.
+- Release script with explicit per-user SDK: **0 errors, only the two existing
+  CS8602 warnings**, now MainForm lines 641/667. Framework-dependent and trimmed
+  self-contained zip/7z packages rebuilt under `MechControl/bin/release-zips`.
+  Log: `C:/Temp/tandem/practical-safety-release.log`.
+- Added `-Headless` mode to the existing packaged smoke harness: shipped-runtime
+  source-generated operational parsing, history repair, threshold migration,
+  profile/settings round trips and atomic replacement **passed**. No MainForm
+  constructor, EC, windows, tray notifications or sound were used. An initial
+  harness build exposed duplicate generated attributes from a pre-existing local
+  `obj` directory when relocating intermediates; explicit obj/bin glob exclusions
+  fixed the harness. Log: `C:/Temp/tandem/practical-safety-packaged-headless-final.log`.
+- `git diff --check`: passed. No native/scaled screenshot, audible alert, live
+  trip/restoration, sleep/resume, physical cooling or deployment certification added.
+
+### Change Accounting
+
+Counts include comments and blank lines, against the start-of-session baseline;
+the plan's pre-existing wording edits are excluded. New repository files are included.
+
+| Area | Added | Removed | Net |
+| --- | ---: | ---: | ---: |
+| Production | 325 | 195 | +130 |
+| Tests / Harnesses | 546 | 26 | +520 |
+| Documentation | 203 | 25 | +178 |
+
+The linked UI cleanup removes duplication; complete production size grows to supply
+the missing recovery/profile/limit behavior rather than compressing code for a target.
+The candidate is **built, not deployed**. No commit or installed-settings migration
+was performed. Known unsupported action obligations remain visibly unresolved;
+readback proves EC requests, not physical watts/RPM, and disk latency is unbounded.
+
+## UI Consolidation Follow-up (2026-09-08)
+
+Jon approved suggestions 1-3: require UI failsafe controllers, give configuration
+warnings one presentation path, and move model preflight out of the profile DTO.
+This pass is measured against the preceding dirty implementation, snapshotted under
+`C:/Temp/tandem/practical-ui-consolidation-baseline`, not against Git HEAD.
+
+- Removed the UI's unused null-controller paths, redundant availability cache and
+  minimum-TGP constructor argument. Unsupported models use controller capabilities;
+  CPU/GPU/fan feature controllers remain optional. Early watchdog null guards remain.
+- Warning text changes now notify the one MainForm tab-title/tray presentation path.
+  Empty warning text starts empty rather than as the helper's `--` placeholder.
+  Successful load/save clears resolved operation warnings instead of replaying the
+  manager's accumulated loader diagnostics. Current migrated profiles still warn
+  until saved, and failures/blocked saves do not clear existing warnings or holds.
+- Moved unchanged identity/null-group/power preflight into `LoadAndApplySlot`.
+  Profile DTOs no longer orchestrate feature controllers; hardware-boundary validation
+  stays in those controllers. No recovery-parser or hardware-control code changed.
+- Safety suite: **38/38 passed**. Cross-model/legacy-ID preflight coverage moved from
+  direct DTO calls to actual ProfileBar load tests; coverage was not dropped.
+- Expanded headless UI suite: **passed**, including required-but-unsupported
+  controllers, unavailable enabled-profile refusal, disabled-profile success,
+  warning notification deduplication, historical versus active warnings, migration
+  warnings, successful retry clearing and blocked-save warning retention.
+- Packaged `-Headless` smoke: **passed**. It also exercises the actual MainForm
+  indicator method/event route without its hardware constructor: warnings before
+  tray initialization, warning clearing and thermal-hold priority. The synthetic
+  tray icon remains invisible; no windows, sound or hardware access.
+- Release packages rebuilt: **0 errors, only the two existing CS8602 warnings**
+  (MainForm lines 638/661). `git diff --check` passed. Logs in `C:/Temp/tandem/`:
+  `ui-consolidation-safety.log`, `ui-consolidation-headless.log`,
+  `ui-consolidation-release.log`, `ui-consolidation-packaged.log`.
+
+Counts for this follow-up only, including comments/blank lines and moved tests:
+
+| Area | Added | Removed | Net |
+| --- | ---: | ---: | ---: |
+| Production | 68 | 99 | -31 |
+| Tests / Harnesses | 90 | 17 | +73 |
+| Documentation | 64 | 0 | +64 |
+
+The preceding practical-safety implementation was +130 production lines. After
+this consolidation it is +99 overall, not a net reduction against the checkpoint.
+
+The candidate remains **built, not deployed**. No commit, installed-file changes,
+live trip/sleep tests or new physical-enforcement certification were performed.
+
+## Startup Warning Lifetime Fix (2026-09-08)
+
+- Kept the change local to UI presentation: FailsafeTab captures startup settings/
+  recovery diagnostics at construction and prefixes them to operation warnings.
+  Profile load/save clears only the operation warning. Startup diagnostics remain
+  for the session and are re-evaluated on next launch; persisted recovery details
+  can still warn after restart. No new warning framework or dismissal workflow.
+- Headless UI regression passed for unreadable pending settings without supported
+  GPU recovery: no invented GPU hold, startup warning visible initially and alongside
+  an operation failure, retained through automatic load and successful save.
+  Existing operation-only clearing tests still pass.
+- Packaged headless smoke passed with/without startup warnings and thermal holds,
+  including initial tab presentation before tray creation and hold priority.
+- Safety suite: **38/38 passed**. Release packages rebuilt with **0 errors and only
+  the two existing CS8602 warnings** (MainForm 638/661). `git diff --check` passed.
+  Logs: `C:/Temp/tandem/startup-warning-{ui,safety,release,packaged}.log`.
+- Recovery parsing, hardware behavior and installed files unchanged. Built, not
+  deployed; no commit, windows, sound or live hardware tests.

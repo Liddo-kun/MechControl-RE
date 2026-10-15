@@ -18,6 +18,7 @@ class CpuPowerControl
     private readonly int _tjMax;
     private readonly int _tempMin;
     private readonly int _tempMax;
+    private readonly LimitInfo _pl1Limit, _pl2Limit, _pl4Limit;
     public GpuTemperatureFailsafe? Failsafe { get; set; }
     public bool CanApplyMinimum { get; private set; }
     public CpuPowerValues Minimum { get; }
@@ -33,6 +34,9 @@ class CpuPowerControl
         _addrTempRead = profile.GetRegister("cpuTempLimitRead");
         _absoluteTemp = profile.CpuTempEncoding == "direct";
         _pl4Doubled = profile.Pl4Doubled;
+        _pl1Limit = profile.Limits.GetValueOrDefault("PL1") ?? UniversalDefaults.ConservativeLimits["PL1"];
+        _pl2Limit = profile.Limits.GetValueOrDefault("PL2") ?? UniversalDefaults.ConservativeLimits["PL2"];
+        _pl4Limit = profile.Limits.GetValueOrDefault("PL4") ?? UniversalDefaults.ConservativeLimits["PL4"];
 
         // Temp limit bounds come from the profile, not encoding defaults —
         // TjMax and the allowed range differ per model.
@@ -84,14 +88,15 @@ class CpuPowerControl
     public void ApplyMinimumPower()
     {
         if (!CanApplyMinimum) throw new InvalidOperationException("Model-specific CPU minimum/temperature-limit capability unavailable.");
-        ApplyCpuPower(Minimum.PL1Watts, Minimum.PL2Watts, Minimum.PL4Watts, ReadEmergencyTemperatureLimit());
+        ApplyCpuPower(Minimum.PL1Watts, Minimum.PL2Watts, Minimum.PL4Watts, null);
     }
 
     // Only a previously verified hold may use this read-only maintenance check.
     // A fresh valid temperature limit is preserved, including firmware changes.
     public bool IsMinimumPowerRequested()
     {
-        if (!CanApplyMinimum) return false;
+        if (!CanApplyMinimum || !_guard.VerifiesSameAddress(_addrPL1) ||
+            !_guard.VerifiesSameAddress(_addrPL2) || !_guard.VerifiesSameAddress(_addrPL4)) return false;
         ReadEmergencyTemperatureLimit();
         return _device.ReadByte(_addrPL1) == RegisterEncoding.EncodePL1(Minimum.PL1Watts) &&
             _device.ReadByte(_addrPL2) == RegisterEncoding.EncodePL1(Minimum.PL2Watts) &&
@@ -99,15 +104,31 @@ class CpuPowerControl
     }
 
     /// <summary>
-    /// Write CPU power limits as a group (PL1 + PL2 + PL4 + temp limit).
+    /// Preflight the complete CPU group before any of its writes.
     /// </summary>
-    public void ApplyCpuPower(int pl1Watts, int pl2Watts, int pl4Watts, int tempLimitC,
-        GpuTemperatureFailsafe.Restoration? restoration = null)
+    public void ValidatePower(int pl1Watts, int pl2Watts, int pl4Watts, int tempLimitC)
+    {
+        int effectivePl4 = RegisterEncoding.DecodePL4(RegisterEncoding.EncodePL4(pl4Watts, _pl4Doubled), _pl4Doubled);
+        if (_pl1Limit.Encoding != "direct" || _pl2Limit.Encoding != "direct" || _pl4Limit.Encoding is not ("direct" or "double") ||
+            pl1Watts < _pl1Limit.Min || pl1Watts > _pl1Limit.Max || RegisterEncoding.EncodePL1(pl1Watts) != pl1Watts ||
+            pl2Watts < _pl2Limit.Min || pl2Watts > _pl2Limit.Max || RegisterEncoding.EncodePL1(pl2Watts) != pl2Watts ||
+            pl4Watts < _pl4Limit.Min || pl4Watts > _pl4Limit.Max || effectivePl4 < _pl4Limit.Min || effectivePl4 > _pl4Limit.Max ||
+            effectivePl4 != (_pl4Doubled ? pl4Watts / 2 * 2 : pl4Watts))
+            throw new ArgumentOutOfRangeException("power", $"CPU request {pl1Watts}/{pl2Watts}/{pl4Watts} W exceeds model ranges " +
+                $"{_pl1Limit.Min}-{_pl1Limit.Max}/{_pl2Limit.Min}-{_pl2Limit.Max}/{_pl4Limit.Min}-{_pl4Limit.Max} W or supported encoding. Doubled PL4 rounds down to an even wattage within model limits.");
+        byte temp = _absoluteTemp ? RegisterEncoding.EncodeCpuTempLimitDirect(tempLimitC) : RegisterEncoding.EncodeCpuTempLimit(tempLimitC, _tjMax);
+        int effectiveTemp = _absoluteTemp ? temp & 0x7F : RegisterEncoding.DecodeCpuTempLimit((byte)(temp & 0x7F), _tjMax);
+        if (tempLimitC < _tempMin || tempLimitC > _tempMax || effectiveTemp != tempLimitC)
+            throw new ArgumentOutOfRangeException(nameof(tempLimitC), "CPU temperature limit exceeds model limits or supported encoding.");
+    }
+
+    // Null explicitly requests emergency minima with a fresh preserved temperature limit.
+    public void ApplyCpuPower(int pl1Watts, int pl2Watts, int pl4Watts, int? tempLimitC)
     {
         try
         {
             Failsafe?.CheckBeforeApply();
-            bool emergency = Failsafe?.Holds(ThermalAction.Cpu, restoration) == true;
+            bool emergency = tempLimitC == null || Failsafe?.Holds(ThermalAction.Cpu) == true;
             if (emergency)
             {
                 if (!CanApplyMinimum) throw new InvalidOperationException("Held CPU reduction unavailable; CPU changes blocked.");
@@ -116,22 +137,21 @@ class CpuPowerControl
                 pl4Watts = Minimum.PL4Watts;
                 tempLimitC = ReadEmergencyTemperatureLimit();
             }
+            ValidatePower(pl1Watts, pl2Watts, pl4Watts, tempLimitC!.Value);
             byte pl1 = RegisterEncoding.EncodePL1(pl1Watts);
             byte pl2 = RegisterEncoding.EncodePL1(pl2Watts);
             byte pl4 = RegisterEncoding.EncodePL4(pl4Watts, _pl4Doubled);
-            int tempClamped = Math.Clamp(tempLimitC, _tempMin, _tempMax);
             byte temp = _absoluteTemp
-                ? RegisterEncoding.EncodeCpuTempLimitDirect(tempClamped)
-                : RegisterEncoding.EncodeCpuTempLimit(tempClamped, _tjMax);
+                ? RegisterEncoding.EncodeCpuTempLimitDirect(tempLimitC.Value)
+                : RegisterEncoding.EncodeCpuTempLimit(tempLimitC.Value, _tjMax);
 
             if (!emergency) DiagnosticLog.Write($"[CPU Power] PL1=0x{pl1:X2}({pl1Watts}W) PL2=0x{pl2:X2}({pl2Watts}W) " +
-                $"PL4=0x{pl4:X2}({pl4Watts}W) Temp=0x{temp:X2}({tempClamped}C, {(_absoluteTemp ? "absolute" : $"offset, tjMax={_tjMax}")})");
+                $"PL4=0x{pl4:X2}({RegisterEncoding.DecodePL4(pl4, _pl4Doubled)}W effective) Temp=0x{temp:X2}({tempLimitC}C, {(_absoluteTemp ? "absolute" : $"offset, tjMax={_tjMax}")})");
 
             _guard.Write(_addrPL1, pl1);
             _guard.Write(_addrPL2, pl2);
             _guard.Write(_addrPL4, pl4);
             _guard.Write(_addrTempWrite, temp);
-            Failsafe?.ConfirmWrite(ThermalAction.Cpu, restoration);
         }
         catch (Exception ex) { Failsafe?.ReportWriteFailure(ThermalAction.Cpu, ex); throw; }
     }

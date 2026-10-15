@@ -226,21 +226,20 @@ class PowerTab : UserControl
         var failsafe = _gpuControl?.Failsafe ?? _cpuControl?.Failsafe;
         UiHelpers.TryUi(() =>
         {
-            void Apply(GpuTemperatureFailsafe.Restoration? restoration)
+            void Apply()
             {
                 if (_cpuEnabled && _cpuControl != null && _sliderPL1 != null)
                     _cpuControl.ApplyCpuPower(_sliderPL1.Value, _sliderPL2!.Value,
-                        _sliderPL4!.Value, _sliderTemp!.Value, restoration);
+                        _sliderPL4!.Value, _sliderTemp!.Value);
 
                 if (_gpuEnabled && _gpuControl != null && _sliderTgp != null)
                     _gpuControl.ApplyGpuPower(_sliderTgp.Value,
-                        _chkDynamicBoost!.Checked, _sliderDb!.Value, restoration);
+                        _chkDynamicBoost!.Checked, _sliderDb!.Value);
             }
-            if (failsafe != null) failsafe.ApplyExplicit(
-                (_cpuEnabled ? ThermalAction.Cpu : 0) | (_gpuEnabled ? ThermalAction.Gpu : 0), Apply);
-            else Apply(null);
+            if (failsafe != null) failsafe.ApplyExplicit(Apply);
+            else Apply();
         }, "apply power settings", "EC Write Error");
-        if (failsafe?.HasHold == true) RefreshFromEc();
+        if (failsafe?.IsTripped == true) RefreshFromEc();
     }
 
     private void BtnRead_Click(object? sender, EventArgs e)

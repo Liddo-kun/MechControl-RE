@@ -148,7 +148,7 @@ static partial class Program
         var f = new GpuTemperatureFailsafe(() => 40, _ => { if (fail) throw new IOException("write failed"); }, _ => { },
             describe: _ => { descriptions++; return "GPU minimum"; });
         f.Configure(new() { Enabled = true });
-        using var tab = new FailsafeTab(f, 95);
+        using var tab = new FailsafeTab(f);
         tab.RefreshConfiguration(saved: true);
         int before = descriptions;
         for (int i = 0; i < 20; i++) f.OnTemperatureSample(45);

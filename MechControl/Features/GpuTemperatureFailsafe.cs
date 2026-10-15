@@ -5,6 +5,12 @@ namespace MechControl.Features;
 // UI-thread state machine. Samples and retry cadence belong to the shared EC monitor.
 class GpuTemperatureFailsafe
 {
+    // Trip decisions use the mean of the last few one-second readings (at least
+    // MinimumSamples), so a single noisy sample cannot trip while a real cooler
+    // failure still trips within seconds.
+    public const int AverageWindow = 5;
+    public const int MinimumSamples = 3;
+
     private readonly Func<int> _readTemperature;
     private readonly Action<ThermalAction> _applyEmergency;
     private readonly Func<ThermalAction, bool>? _checkEmergency;
@@ -22,7 +28,7 @@ class GpuTemperatureFailsafe
     private string _subscriberError = "";
     private int _hardwareEpoch;
     private int _verifiedEpoch;
-    private int _enforcementGeneration;
+    private readonly Queue<int> _window = new();
 
     public bool Enabled => _settings.Enabled;
     public int ThresholdC => _settings.ThresholdC;
@@ -30,19 +36,15 @@ class GpuTemperatureFailsafe
     public bool Supports(ThermalAction action) => (_supported & action) == action;
     public ThermalAction HeldActions => _state.Held;
     public bool IsTripped => _state.Stage == ThermalStage.Tripped;
-    public bool NeedsPowerRestore => _state.Stage == ThermalStage.ResetPending;
-    public bool HasHold => _state.Stage != ThermalStage.None;
-    public bool RequiresMonitoring => Enabled || HasHold;
+    public bool RequiresMonitoring => Enabled || IsTripped;
     private ThermalAction VerifiedActions => _verifiedEpoch == Volatile.Read(ref _hardwareEpoch) ? _verified : ThermalAction.None;
-    public bool LimitsApplied => (VerifiedActions & _state.Held) == _state.Held && HasHold;
-    public bool ProtectionIncomplete => HasHold && (!LimitsApplied || !_persisted);
-    public bool NeedsAttention => HasHold;
+    public bool LimitsApplied => (VerifiedActions & _state.Held) == _state.Held && IsTripped;
+    public bool ProtectionIncomplete => IsTripped && (!LimitsApplied || !_persisted);
     public bool ShowMainWindow => _settings.ShowMainWindow;
-    public bool ConfigurationPartial { get; private set; }
     public int InvalidSamples { get; private set; }
     public int? TemperatureC { get; private set; }
     public int? PeakTemperatureC { get; private set; }
-    public int ResetBelowC => Math.Min(_state.ResetThresholdC ?? ThresholdC, Enabled ? ThresholdC : 95) - 3;
+    public double? AverageTemperatureC => _window.Count == 0 ? null : _window.Average();
     public string TripReason => IsTripped ? _state.LastTrip?.Reason ?? "Saved protection state uncertain" : "";
     public event Action? Changed;
     public event Action? TemperatureChanged;
@@ -52,17 +54,17 @@ class GpuTemperatureFailsafe
         ? "PROTECTION INCOMPLETE - " + string.Join(", ", Actions(_state.Held & ~VerifiedActions).Select(a => ActionName(a) + " not verified")
             .Concat(_persisted ? Array.Empty<string>() : new[] { "persistence not verified" }))
         : IsTripped ? "TRIPPED - emergency settings written and verified"
-        : NeedsPowerRestore ? "Reset - emergency settings retained; restore explicitly"
         : !Available ? "Unavailable - GPU power/temperature support not validated"
         : !Enabled ? "Disabled"
         : TemperatureC == null ? $"Temperature unavailable - {InvalidSamples}/5 failed checks"
-        : $"Armed - trips at {ThresholdC} C";
+        : $"Armed - trips when the {AverageWindow} s average reaches {ThresholdC} C";
 
-    public string Status => StateText + (HasHold ? $"\nHeld actions: {string.Join(", ", Actions(_state.Held).Select(ActionName))}. {TripReason}" : "") +
+    public string Status => StateText + (IsTripped ? $"\nHeld actions: {string.Join(", ", Actions(_state.Held).Select(ActionName))}. {TripReason}" : "") +
         string.Concat(_errors.Select(p => $"\n{ActionName(p.Key)} not verified: {p.Value}")) +
         (_persistenceError.Length > 0 ? "\nPersistence not verified: " + _persistenceError : "") +
         (_state.RecoveryDetails.Length > 0 ? "\n" + _state.RecoveryDetails : "") +
-        (IsTripped ? $"\nStop workloads if protection is incomplete. Reset requires a fresh GPU reading at or below {ResetBelowC} C." : "");
+        (IsTripped ? "\nStop workloads if protection is incomplete. To restore normal settings, Reset" +
+            (Enabled ? $" (GPU average must be below the {ThresholdC} C trigger)" : "") + " or load a profile that matches your cooling." : "");
 
     public string LastTripText => _state.LastTrip is not { } trip ? "--" :
         $"{(trip.Time.HasValue ? trip.Time.Value.ToLocalTime().ToString("g") : "Time unavailable")}: {trip.Reason}" +
@@ -72,7 +74,7 @@ class GpuTemperatureFailsafe
 
     public void EnsureCanSaveProfile()
     {
-        if (HasHold) throw new InvalidOperationException("Reset the failsafe and explicitly restore all held power/fan actions before saving a profile.");
+        if (IsTripped) throw new InvalidOperationException("Reset the thermal failsafe before saving a profile; the current power/fan values are emergency settings.");
     }
 
     public GpuTemperatureFailsafe(Func<int> readTemperature, Action<ThermalAction> applyEmergency,
@@ -84,7 +86,7 @@ class GpuTemperatureFailsafe
         _applyEmergency = applyEmergency;
         _checkEmergency = checkEmergency;
         _save = save;
-        _state = ThermalProtectionState.Recover(state, null, false);
+        _state = ThermalProtectionState.Recover(state, null, false, (supported & ThermalAction.Gpu) != 0);
         _settings.ShowMainWindow = _state.LastTrip?.ShowMainWindow ?? true;
         _supported = supported;
         _describe = describe ?? (a => "Emergency actions: " + a);
@@ -115,49 +117,59 @@ class GpuTemperatureFailsafe
     public void Configure(GpuFailsafeSettings settings)
     {
         ValidateSettings(settings);
-        bool newArm = settings.Enabled && !Enabled && !HasHold;
-        _settings = settings.Copy();
-        if (newArm) { PeakTemperatureC = null; InvalidSamples = 0; }
-        if (!RequiresMonitoring) TemperatureC = null;
+        SetConfiguration(settings);
         CheckBeforeApply();
         Notify();
     }
 
-    public void ApplyProfile(GpuFailsafeSettings destination, ThermalAction actions,
-        Action<Restoration?> applyAndSaveSlot, bool deliberate)
+    private void SetConfiguration(GpuFailsafeSettings settings)
+    {
+        bool newArm = settings.Enabled && !Enabled && !IsTripped;
+        _settings = settings.Copy();
+        if (newArm) { PeakTemperatureC = null; InvalidSamples = 0; _window.Clear(); }
+        if (!RequiresMonitoring) ClearTemperature();
+    }
+
+    private void ClearTemperature() { TemperatureC = null; _window.Clear(); }
+
+    private void AddSample(int temperature)
+    {
+        TemperatureC = temperature;
+        PeakTemperatureC = Math.Max(PeakTemperatureC ?? temperature, temperature);
+        InvalidSamples = 0;
+        _window.Enqueue(temperature);
+        if (_window.Count > AverageWindow) _window.Dequeue();
+    }
+
+    private bool OverThreshold => _window.Count >= MinimumSamples && AverageTemperatureC >= ThresholdC;
+    private void TripOverThreshold() => Trip($"GPU averaged {AverageTemperatureC:0.#} C over the last {_window.Count} readings " +
+        $"(threshold {ThresholdC} C, latest {TemperatureC} C).", (int)Math.Round(AverageTemperatureC!.Value));
+
+    // Choosing a profile is the user's decision about the current cooling, so a
+    // deliberate load clears an outstanding trip and arms that profile's own
+    // trigger (which may trip again). Automatic startup/recovery loads keep it.
+    public void ApplyProfile(GpuFailsafeSettings destination, Action apply, bool deliberate)
     {
         ValidateSettings(destination);
-        Configure(GpuFailsafeSettings.Transition(_settings, destination));
-        try
-        {
-            ApplyExplicit(actions, applyAndSaveSlot, deliberate);
-            // No second fresh read or weaker policy until hardware + slot save + release succeeded.
-            _settings = destination.Copy();
-            if (!RequiresMonitoring) TemperatureC = null;
-            ConfigurationPartial = false;
-        }
-        catch { ConfigurationPartial = true; throw; }
+        if (deliberate) Release("Cleared by loading a profile");
+        SetConfiguration(destination);
+        try { ApplyExplicit(apply, deliberate); }
         finally { Notify(); }
     }
 
     public void CheckBeforeApply()
     {
         if (!Enabled || IsTripped || _enforcing) return;
-        var temperature = ReadTemperature();
-        if (temperature == null)
+        // A deliberate fresh check is not a recurring monitor/retry tick. One
+        // failed read falls back to the recent average when there is one.
+        if (ReadTemperature() is int temperature) AddSample(temperature);
+        if (_window.Count == 0)
         {
             TemperatureC = null;
             Trip("GPU temperature unavailable before applying protected power settings.", null);
         }
-        else
-        {
-            // A deliberate fresh check is not a recurring monitor/retry tick.
-            TemperatureC = temperature;
-            PeakTemperatureC = Math.Max(PeakTemperatureC ?? temperature.Value, temperature.Value);
-            InvalidSamples = 0;
-            if (temperature >= ThresholdC) Trip($"GPU reached {temperature} C (threshold {ThresholdC} C).", temperature);
-            else Notify();
-        }
+        else if (OverThreshold) TripOverThreshold();
+        else Notify();
     }
 
     private int? ReadTemperature()
@@ -169,27 +181,20 @@ class GpuTemperatureFailsafe
     public void OnTemperatureSample(int? temperature)
     {
         if (!RequiresMonitoring) return;
-        TemperatureC = temperature is > 0 and < 128 ? temperature : null;
-        if (TemperatureC.HasValue) PeakTemperatureC = Math.Max(PeakTemperatureC ?? TemperatureC.Value, TemperatureC.Value);
+        if (temperature is > 0 and < 128) AddSample(temperature.Value);
+        else { TemperatureC = null; InvalidSamples++; }
         if (!IsTripped && Enabled)
         {
-            if (TemperatureC == null)
-            {
-                if (++InvalidSamples >= 5) { Trip("GPU temperature unavailable for 5 consecutive checks.", null); return; }
-            }
-            else
-            {
-                InvalidSamples = 0;
-                if (TemperatureC >= ThresholdC) { Trip($"GPU reached {TemperatureC} C (threshold {ThresholdC} C).", TemperatureC); return; }
-            }
+            if (InvalidSamples >= 5) { Trip("GPU temperature unavailable for 5 consecutive checks.", null); return; }
+            if (TemperatureC != null && OverThreshold) { TripOverThreshold(); return; }
         }
-        if (HasHold && ++_retryTicks >= 5) EnforceMinimum(checkExisting: true);
+        if (IsTripped && ++_retryTicks >= 5) EnforceMinimum(checkExisting: true);
         Notify(TemperatureChanged);
     }
 
     public void TestTrip()
     {
-        if (!Available || HasHold) throw new InvalidOperationException("Test unavailable until protection is supported and all outstanding actions are restored.");
+        if (!Available || IsTripped) throw new InvalidOperationException("Test unavailable while protection is unsupported or already tripped.");
         Trip("Manual failsafe test (real emergency settings requested).", null);
     }
 
@@ -198,7 +203,6 @@ class GpuTemperatureFailsafe
         if (IsTripped) return;
         _state.Stage = ThermalStage.Tripped;
         _state.Held |= EffectiveActions(_settings) | ThermalAction.Gpu;
-        _state.ResetThresholdC = Math.Min(_state.ResetThresholdC ?? ThresholdC, ThresholdC);
         _state.LastTrip = new()
         {
             Time = DateTimeOffset.Now, Reason = reason, TemperatureC = temperature, ThresholdC = ThresholdC,
@@ -228,10 +232,9 @@ class GpuTemperatureFailsafe
 
     private void EnforceMinimum(bool checkExisting)
     {
-        if (!HasHold || _enforcing) return;
+        if (!IsTripped || _enforcing) return;
         _enforcing = true;
         bool wasComplete = !ProtectionIncomplete;
-        _enforcementGeneration++;
         int epoch = Volatile.Read(ref _hardwareEpoch);
         var previousVerified = _verifiedEpoch == epoch ? _verified : ThermalAction.None;
         bool changed = !_persisted || previousVerified != _state.Held;
@@ -240,16 +243,18 @@ class GpuTemperatureFailsafe
         try
         {
             _retryTicks = 0;
-            bool intentSaved = _persisted || Persist(); // Disk failure never skips actions.
             foreach (var action in Actions(_state.Held))
             {
                 string result;
                 try
                 {
-                    // Never substitute readback for initial/recovery/restoration
-                    // writes, or trust an earlier hardware epoch's verification.
-                    if (!checkExisting || (previousVerified & action) == 0 ||
-                        epoch != Volatile.Read(ref _hardwareEpoch) || _checkEmergency?.Invoke(action) != true)
+                    // Never substitute readback for initial/recovery writes, or
+                    // trust an earlier hardware epoch's verification.
+                    bool matches = false;
+                    if (checkExisting && (previousVerified & action) != 0 && epoch == Volatile.Read(ref _hardwareEpoch))
+                        try { matches = _checkEmergency?.Invoke(action) == true; }
+                        catch { /* Failed readback loses confidence; the full guarded apply may recover. */ }
+                    if (!matches)
                         _applyEmergency(action);
                     if (epoch != Volatile.Read(ref _hardwareEpoch))
                         throw new IOException("EC reactivated during emergency writes; the complete group must be reverified.");
@@ -272,7 +277,9 @@ class GpuTemperatureFailsafe
                     changed = true;
                 }
             }
-            if (!_persisted && intentSaved) Persist();
+            // Lower power first. A crash before this save can lose the new trip
+            // record; hardware and durable state are not one atomic operation.
+            if (!_persisted) Persist();
         }
         finally { _enforcing = false; }
         if (changed || ProtectionIncomplete) Notify();
@@ -295,50 +302,53 @@ class GpuTemperatureFailsafe
     // epoch changes here; UI/enforcement still run on the existing UI thread.
     public void InvalidateVerification() => Interlocked.Increment(ref _hardwareEpoch);
 
+    // Clears the trip. Emergency values stay in hardware until something is
+    // applied; the UI reapplies the active profile straight after a reset.
+    // While enabled, a reading at or above the current trigger would trip again
+    // immediately, so the user is told how to get out instead.
     public void Reset()
     {
         if (!IsTripped) return;
-        TemperatureC = ReadTemperature();
-        if (TemperatureC == null || TemperatureC > ResetBelowC)
+        if (Enabled)
         {
-            Notify();
-            throw new InvalidOperationException($"Reset refused: GPU must report a valid temperature at or below {ResetBelowC} C.");
+            if (ReadTemperature() is int temperature) AddSample(temperature);
+            else TemperatureC = null;
+            if (TemperatureC == null || OverThreshold)
+            {
+                Notify();
+                throw new InvalidOperationException((TemperatureC == null ? "Reset refused: GPU temperature unavailable"
+                    : $"Reset refused: GPU averages {AverageTemperatureC:0.#} C, at or above the {ThresholdC} C trigger") +
+                    ", so the failsafe would trip again. Load a profile that matches your cooling, or raise the trigger / disable the failsafe and Apply, then Reset.");
+            }
         }
-        EnforceMinimum();
-        if (ProtectionIncomplete) throw new InvalidOperationException("Reset refused. " + Status);
-        var next = _state.Copy();
-        next.Stage = ThermalStage.ResetPending;
-        try { _save(next); }
-        catch (Exception ex) { _persistenceError = ex.Message; _persisted = false; Notify(); throw; }
-        _state = next;
-        InvalidSamples = 0;
-        PeakTemperatureC = TemperatureC;
-        DiagnosticLog.Write("[GPU Failsafe] Manually reset; emergency settings held until explicit restoration.");
+        Release("Manually reset");
+        if (!RequiresMonitoring) ClearTemperature();
         Notify();
     }
 
-    // A short-lived, per-operation permit. Not a global bypass flag; ordinary
-    // startup/recovery/emergency writes can neither obtain nor complete a release.
-    public sealed class Restoration
+    private void Release(string reason)
     {
-        internal GpuTemperatureFailsafe Owner { get; }
-        internal ThermalAction Allowed { get; }
-        internal ThermalAction Verified { get; set; }
-        internal bool Active { get; set; } = true;
-        internal Restoration(GpuTemperatureFailsafe owner, ThermalAction allowed) { Owner = owner; Allowed = allowed; }
+        if (!IsTripped) return;
+        var next = _state.Copy();
+        next.Stage = ThermalStage.None;
+        next.Held = ThermalAction.None;
+        next.RecoveryDetails = "";
+        try { _save(next); }
+        catch (Exception ex) { _persistenceError = ex.Message; _persisted = false; Notify(); throw; }
+        _state = next;
+        _persisted = true;
+        _persistenceError = "";
+        _errors.Clear();
+        InvalidSamples = 0;
+        PeakTemperatureC = TemperatureC;
+        DiagnosticLog.Write($"[GPU Failsafe] {reason}; emergency hold released.");
     }
 
-    public bool Holds(ThermalAction action, Restoration? permit = null) => (_state.Held & action) != 0 &&
-        !(NeedsPowerRestore && permit is { Active: true } && permit.Owner == this && (permit.Allowed & action) == action);
-
-    public void ConfirmWrite(ThermalAction action, Restoration? permit)
-    {
-        if (permit is { Active: true } && permit.Owner == this && !IsTripped) permit.Verified |= action & permit.Allowed;
-    }
+    public bool Holds(ThermalAction action) => IsTripped && (_state.Held & action) != 0;
 
     public void ReportWriteFailure(ThermalAction action, Exception error)
     {
-        if (_enforcing || (_state.Held & action) == 0) return;
+        if (_enforcing || !Holds(action)) return;
         bool wasComplete = !ProtectionIncomplete;
         _verified &= ~action;
         _errors[action] = error.Message;
@@ -348,56 +358,29 @@ class GpuTemperatureFailsafe
         if (wasComplete) NotifyAlert();
     }
 
-    public void ApplyExplicit(ThermalAction actions, Action<Restoration?> apply, bool deliberate = true)
+    // Deliberate user writes are refused while tripped. Automatic startup/recovery
+    // writes proceed; the controllers substitute the held emergency values.
+    public void ApplyExplicit(Action apply, bool deliberate = true)
     {
+        bool wasTripped = IsTripped;
         CheckBeforeApply();
-        if (deliberate && IsTripped) throw new InvalidOperationException("Reset the thermal failsafe before restoring settings. " + Status);
-        var permit = deliberate && NeedsPowerRestore ? new Restoration(this, actions & _state.Held) : null;
+        if (deliberate && IsTripped)
+            throw new InvalidOperationException(wasTripped ? "Thermal failsafe is tripped. Reset it or load a profile first."
+                : "Not applied: the thermal failsafe tripped. " + TripReason);
         int epoch = Volatile.Read(ref _hardwareEpoch);
-        int generation = _enforcementGeneration;
         try
         {
-            apply(permit);
+            apply();
             if (deliberate && IsTripped) throw new InvalidOperationException("Failsafe tripped during application; emergency settings retained.");
             if (epoch != Volatile.Read(ref _hardwareEpoch))
                 throw new InvalidOperationException("EC reactivated during application; the complete settings must be reapplied.");
-            if (permit == null || permit.Allowed == ThermalAction.None) return;
-            if (IsTripped || (permit.Verified & permit.Allowed) != permit.Allowed)
-                throw new InvalidOperationException("Restoration incomplete: not all requested actions were verified.");
-            if (generation != _enforcementGeneration)
-                throw new InvalidOperationException("Emergency enforcement or EC reactivation interrupted restoration; reapply explicitly.");
-            var next = _state.Copy();
-            next.Held &= ~permit.Allowed;
-            if (next.Held == ThermalAction.None) { next.Stage = ThermalStage.None; next.ResetThresholdC = null; }
-            // Hardware first, durable release second. Failed persistence retains
-            // the old hold and reasserts emergency requests in the catch path.
-            _save(next);
-            if (epoch != Volatile.Read(ref _hardwareEpoch))
-                throw new IOException("EC reactivated while saving restoration; retaining the emergency hold.");
-            _state = next;
-            _persisted = true;
-            _persistenceError = "";
-            foreach (var action in Actions(permit.Allowed)) _errors.Remove(action);
-            if (!HasHold)
-            {
-                if (Enabled) { PeakTemperatureC = TemperatureC; InvalidSamples = 0; }
-                else TemperatureC = null;
-            }
         }
         catch
         {
-            if (permit != null) permit.Active = false;
-            _persisted = false;
-            EnforceMinimum();
+            EnforceMinimum(); // Reassert any hold an interrupted write sequence left behind.
             throw;
         }
-        finally { if (permit != null) permit.Active = false; Notify(); }
-    }
-
-    public void ApplyFirmwareDefaults(Action<Restoration?> apply)
-    {
-        if (Enabled || IsTripped) throw new InvalidOperationException("Reset the trip and disable temperature protection before restoring firmware defaults.");
-        ApplyExplicit(ThermalAction.All, apply);
+        finally { Notify(); }
     }
 
     private void Notify() => Notify(Changed);

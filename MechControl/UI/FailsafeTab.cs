@@ -5,47 +5,53 @@ namespace MechControl.UI;
 
 class FailsafeTab : UserControl
 {
-    private readonly GpuTemperatureFailsafe? _failsafe;
-    private readonly bool _available;
+    private readonly GpuTemperatureFailsafe _failsafe;
     private readonly CheckBox _enabled, _cpu, _fan, _window;
     private readonly TrackBar _threshold;
     private readonly Label _status, _temperature, _peak, _lastTrip, _preview, _saveHint;
+    private readonly Label _configurationWarning;
+    private readonly string _startupWarning;
     private readonly Button _reset, _test;
-    private GpuFailsafeSettings _saved = new();
+    private GpuFailsafeSettings? _saved;
     private bool _partial;
     private bool _loading;
 
-    public GpuTemperatureFailsafe? Controller => _failsafe;
-    public bool IsTripped => _failsafe?.IsTripped == true;
+    public GpuTemperatureFailsafe Controller => _failsafe;
+    public bool IsTripped => _failsafe.IsTripped;
     public bool HasPendingEdits => !PendingSettings().SameAs(ReadSettings());
+    public bool HasConfigurationWarning => !string.IsNullOrEmpty(_configurationWarning.Text);
+    public event Action? ConfigurationWarningChanged;
+    public event Action? ResetCompleted;
 
-    public FailsafeTab(GpuTemperatureFailsafe? failsafe, int? minimumTgp)
+    public FailsafeTab(GpuTemperatureFailsafe failsafe, string startupWarning = "")
     {
         _failsafe = failsafe;
-        _available = failsafe?.Available == true && minimumTgp.HasValue;
+        _startupWarning = startupWarning;
         Dock = DockStyle.Fill;
         Font = UiHelpers.FontNormal;
         var stack = UiHelpers.BuildSectionStack();
         var settings = UiHelpers.BuildSection("GPU Thermal Failsafe");
         var description = Hint("For machines that depend on an external / liquid cooler to run their high-power profile. " +
             "Set the trigger above the EC GPU temperature normally reached with the cooler working. " +
-            "If a reading reaches or exceeds the trigger, the failsafe latches, requests this model's minimum GPU power and alerts you. " +
-            "Optional actions also reduce CPU power and turn on fan boost. After checking cooling, manually reset the failsafe, " +
-            "then separately reapply your chosen profile or power/fan settings to restore normal operation.");
+            $"If the average of the last {GpuTemperatureFailsafe.AverageWindow} one-second readings reaches the trigger, the failsafe trips, " +
+            "requests this model's minimum GPU power and alerts you; single noisy readings are averaged out. " +
+            "Optional actions also reduce CPU power and turn on fan boost. To recover, press Reset (restores the active profile) " +
+            "or load the profile that matches your cooling, e.g. an air-cooling profile.");
         settings.Controls.Add(description);
-        _enabled = Check("Enable thermal failsafe", _available);
+        _enabled = Check("Enable thermal failsafe", failsafe.Available);
         _enabled.Font = UiHelpers.FontBold;
         settings.Controls.Add(_enabled);
         var sliderTable = UiHelpers.BuildSliderTable();
-        var slider = UiHelpers.BuildSliderRow("GPU trigger temperature", 30, 95, "\u00B0C", 62);
-        slider.Slider.Enabled = _available;
+        var slider = UiHelpers.BuildSliderRow("GPU trigger temperature", GpuFailsafeSettings.MinimumThreshold,
+            GpuFailsafeSettings.MaximumThreshold, "\u00B0C", GpuFailsafeSettings.DefaultThreshold);
+        slider.Slider.Enabled = failsafe.Available;
         slider.Slider.LargeChange = 1;
         _threshold = slider.Slider;
         UiHelpers.AddSliderRow(sliderTable, slider);
         settings.Controls.Add(sliderTable);
-        _cpu = Check("Also drop CPU power limits (PL1 / PL2 / PL4) to minimum", failsafe?.Supports(ThermalAction.Cpu) == true && _available);
-        _fan = Check("Turn on fan boost when tripped", failsafe?.Supports(ThermalAction.Fan) == true && _available);
-        _window = Check("Bring up the MechControl window when tripped (safety alert, tray alert and sound remain enabled)", _available);
+        _cpu = Check("Also drop CPU power limits (PL1 / PL2 / PL4) to minimum", failsafe.Supports(ThermalAction.Cpu) && failsafe.Available);
+        _fan = Check("Turn on fan boost when tripped", failsafe.Supports(ThermalAction.Fan) && failsafe.Available);
+        _window = Check("Bring up the MechControl window when tripped (safety alert, tray alert and sound remain enabled)", failsafe.Available);
         settings.Controls.Add(_cpu);
         settings.Controls.Add(_fan);
         settings.Controls.Add(_window);
@@ -54,10 +60,10 @@ class FailsafeTab : UserControl
         var buttons = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Top, WrapContents = true };
         var apply = UiHelpers.BuildApplyButton("Apply", (_, _) => UiHelpers.TryUi(() =>
         {
-            _failsafe?.Configure(PendingSettings());
+            _failsafe.Configure(PendingSettings());
             RefreshStatus();
         }, "configure thermal failsafe"));
-        apply.Enabled = _available;
+        apply.Enabled = failsafe.Available;
         buttons.Controls.Add(apply);
         _saveHint = Hint("");
         _saveHint.Margin = new Padding(UiMetrics.ButtonGap, UiMetrics.RowGap + 4, 0, 0);
@@ -67,10 +73,10 @@ class FailsafeTab : UserControl
         settings.Controls.Add(saveCopy);
         var detailsLink = new LinkLabel { Text = "Safety details and limitations", AutoSize = true, Margin = new Padding(0, 4, 0, 0) };
         settings.Controls.Add(detailsLink);
-        var details = Hint("EC temperature checks run approximately once per second, including in the tray; there is no intentional three-sample delay. " +
-            "Five unavailable/invalid samples trip protection; arming or applying protected power requires an immediately valid reading. " +
+        var details = Hint($"EC temperature checks run approximately once per second, including in the tray. A trip needs at least {GpuTemperatureFailsafe.MinimumSamples} readings " +
+            $"and uses their average (up to {GpuTemperatureFailsafe.AverageWindow}), adding about 2 s of delay. Five unavailable/invalid samples trip protection. " +
             "A sleeping GPU reporting zero can cause a conservative trip.\n\n" +
-            "Reset requires a fresh valid reading at least 3 C below the applicable threshold. Reset does not restore power or turn off emergency fan boost. " +
+            "While enabled, Reset requires the average to be below the trigger (otherwise it would trip again); loading a profile always clears the trip. " +
             "Minimum settings are verified EC requests, not proof of actual cooling or physical power enforcement. No shunt multiplier is assumed. " +
             "Fan boost is the laptop's onboard firmware mode, not the external cooler's pump or fans.\n\n" +
             "No protection while the application/OS cannot run or hardware cannot accept writes. UI-thread stalls can delay checks; this is not real-time protection. " +
@@ -87,33 +93,37 @@ class FailsafeTab : UserControl
         _temperature = UiHelpers.AddKeyValueRow(table, "GPU temperature (EC):");
         _peak = UiHelpers.AddKeyValueRow(table, "Peak since armed:");
         _lastTrip = UiHelpers.AddKeyValueRow(table, "Last trip:");
+        _configurationWarning = UiHelpers.AddKeyValueRow(table, "Configuration:", startupWarning);
+        _configurationWarning.ForeColor = UiColors.StatusWarn;
+        _configurationWarning.TextChanged += (_, _) => ConfigurationWarningChanged?.Invoke();
         statusSection.Controls.Add(table);
         var actions = new FlowLayoutPanel { AutoSize = true, WrapContents = true, Margin = new Padding(0) };
-        _reset = UiHelpers.BuildApplyButton("Re-arm", (_, _) =>
+        _reset = UiHelpers.BuildApplyButton("Reset", (_, _) =>
         {
-            if (MessageBox.Show(FindForm(), "Check cooling before acknowledging the trip.\n\nRe-arm resets the latch only. " +
-                "Emergency power settings and fan boost remain held, including after restart. Separately reapply your profile or power/fan settings to restore them.",
-                "Re-arm Thermal Failsafe", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) == DialogResult.OK)
-                UiHelpers.TryUi(() => _failsafe?.Reset(), "reset thermal failsafe");
+            if (MessageBox.Show(FindForm(), "Check cooling, then reset the failsafe and reapply the active profile's power and fan settings?",
+                "Reset Thermal Failsafe", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK) return;
+            bool reset = false;
+            UiHelpers.TryUi(() => { _failsafe.Reset(); reset = true; }, "reset thermal failsafe");
+            if (reset) ResetCompleted?.Invoke();
         });
         _test = UiHelpers.BuildApplyButton("Test Failsafe", (_, _) =>
         {
             var applied = ReadSettings();
-            string text = (_failsafe?.DescribeActions(applied) ?? "GPU protection unavailable.") +
+            string text = _failsafe.DescribeActions(applied) +
                 "\n\nThis really applies emergency settings and latches protection. " +
                 (HasPendingEdits ? "Unapplied control changes are NOT part of this test. " : "") + "Continue?";
             if (MessageBox.Show(FindForm(), text, "Test Failsafe", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes)
                 UiHelpers.TryUi(() =>
                 {
                     if (!applied.SameAs(ReadSettings())) throw new InvalidOperationException("Applied settings changed during confirmation. Review the actions and test again.");
-                    _failsafe?.TestTrip();
+                    _failsafe.TestTrip();
                 }, "test thermal failsafe");
         }, width: UiMetrics.ButtonReadWidth);
         _test.Margin = new Padding(UiMetrics.ButtonGap, UiMetrics.RowGap, 0, 0);
         actions.Controls.Add(_reset);
         actions.Controls.Add(_test);
         statusSection.Controls.Add(actions);
-        var resetCopy = Hint("Re-arm acknowledges only; restore power/fans separately.");
+        var resetCopy = Hint("Reset reapplies the active profile. Loading any profile also clears a trip.");
         statusSection.Controls.Add(resetCopy);
         stack.Controls.Add(statusSection);
         Controls.Add(stack);
@@ -140,7 +150,7 @@ class FailsafeTab : UserControl
             }
             int captionWidth = table.Controls[0].PreferredSize.Width;
             for (int i = 2; i < table.Controls.Count; i += 2) captionWidth = Math.Max(captionWidth, table.Controls[i].PreferredSize.Width);
-            foreach (var label in new[] { _status, _lastTrip }) label.MaximumSize = new Size(Math.Max(120, width - captionWidth - 32), 0);
+            foreach (var label in new[] { _status, _lastTrip, _configurationWarning }) label.MaximumSize = new Size(Math.Max(120, width - captionWidth - 32), 0);
             resetCopy.MaximumSize = new Size(width, 0);
         }
         // TableLayoutPanel can constrain child bounds during the parent's resize.
@@ -154,11 +164,8 @@ class FailsafeTab : UserControl
         DpiChangedAfterParent += WrapAfterLayout;
         _threshold.ValueChanged += (_, _) => EditsChanged();
         foreach (var check in new[] { _enabled, _cpu, _fan, _window }) check.CheckedChanged += (_, _) => EditsChanged();
-        if (failsafe != null)
-        {
-            failsafe.Changed += OnChanged;
-            failsafe.TemperatureChanged += OnTemperatureChanged;
-        }
+        failsafe.Changed += OnChanged;
+        failsafe.TemperatureChanged += OnTemperatureChanged;
         VisibleChanged += (_, _) => { if (Visible) RefreshStatus(); };
         RefreshConfiguration();
         Wrap();
@@ -182,12 +189,9 @@ class FailsafeTab : UserControl
         ReduceCpuPower = _cpu.Checked, FanBoost = _fan.Checked, ShowMainWindow = _window.Checked
     };
 
-    public void ValidateSettings(GpuFailsafeSettings settings)
-    {
-        settings.Validate();
-        if (!_available && settings.Enabled) throw new InvalidOperationException("This profile requires GPU protection, unavailable on this model.");
-        _failsafe?.ValidateSettings(settings);
-    }
+    // Profile success does not establish that startup recovery issues are resolved.
+    public void ShowConfigurationWarning(string message) => _configurationWarning.Text =
+        _startupWarning + (_startupWarning.Length > 0 && message.Length > 0 ? "\n" : "") + message;
 
     public void RefreshConfiguration(bool saved = false, bool partial = false)
     {
@@ -205,7 +209,7 @@ class FailsafeTab : UserControl
     }
 
     public void MarkSaved() { _saved = ReadSettings(); _partial = false; RefreshStatus(); }
-    public GpuFailsafeSettings ReadSettings() => _failsafe?.GetSettings() ?? new();
+    public GpuFailsafeSettings ReadSettings() => _failsafe.GetSettings();
     private void EditsChanged() { if (!_loading) RefreshStatus(); }
     private void OnChanged() { if (Visible) RefreshStatus(); }
     private void OnTemperatureChanged() { if (Visible) RefreshTelemetry(); }
@@ -215,31 +219,32 @@ class FailsafeTab : UserControl
         var pending = PendingSettings();
         var applied = ReadSettings();
         bool hasEdits = !pending.SameAs(applied);
-        bool unsaved = _partial || !applied.SameAs(_saved);
-        _preview.Text = _available ? _failsafe!.DescribeActions(pending) : "Unavailable: GPU presence, power registers, temperature register or model-specific minimum could not be validated.";
-        _saveHint.Text = hasEdits ? "Changes not applied" : unsaved
+        bool unsaved = _partial || _saved == null || !applied.SameAs(_saved);
+        _preview.Text = _failsafe.Available ? _failsafe.DescribeActions(pending) : "Unavailable: GPU presence, power registers, temperature register or model-specific minimum could not be validated.";
+        _saveHint.Text = hasEdits ? "Changes not applied" : _saved == null && !_partial ? "No saved profile loaded" : unsaved
             ? "Applied - not saved to profile" : "Settings match saved profile";
         _saveHint.ForeColor = hasEdits || unsaved ? UiColors.StatusWarn : UiColors.Hint;
-        _lastTrip.Text = _failsafe?.LastTripText ?? "--";
+        _lastTrip.Text = _failsafe.LastTripText;
         _reset.Enabled = IsTripped;
-        _test.Enabled = _available && _failsafe?.HasHold != true;
+        _test.Enabled = _failsafe.Available && !IsTripped;
         RefreshTelemetry();
     }
 
     private void RefreshTelemetry()
     {
-        _status.Text = _failsafe?.HasHold == true ? _failsafe.Status : _failsafe?.StateText ?? "Unavailable";
-        _status.ForeColor = IsTripped || _failsafe?.ProtectionIncomplete == true ? UiColors.StatusError
-            : _failsafe?.NeedsPowerRestore == true || (_failsafe?.Enabled == true && _failsafe.TemperatureC == null) ? UiColors.StatusWarn
-            : _failsafe?.Enabled == true ? UiColors.StatusOk : UiColors.StatusNeutral;
-        _status.Font = IsTripped || _failsafe?.ProtectionIncomplete == true ? UiHelpers.FontBold : UiHelpers.FontNormal;
-        _temperature.Text = _failsafe?.TemperatureC is int current ? $"{current}\u00B0C" : "--";
-        _peak.Text = _failsafe?.PeakTemperatureC is int peak ? $"{peak}\u00B0C" : "--";
+        _status.Text = IsTripped ? _failsafe.Status : _failsafe.StateText;
+        _status.ForeColor = IsTripped || _failsafe.ProtectionIncomplete ? UiColors.StatusError
+            : _failsafe.Enabled && _failsafe.TemperatureC == null ? UiColors.StatusWarn
+            : _failsafe.Enabled ? UiColors.StatusOk : UiColors.StatusNeutral;
+        _status.Font = IsTripped || _failsafe.ProtectionIncomplete ? UiHelpers.FontBold : UiHelpers.FontNormal;
+        _temperature.Text = _failsafe.TemperatureC is int current ? $"{current}\u00B0C" +
+            (_failsafe.AverageTemperatureC is double average ? $" ({GpuTemperatureFailsafe.AverageWindow} s average {average:0.#}\u00B0C)" : "") : "--";
+        _peak.Text = _failsafe.PeakTemperatureC is int peak ? $"{peak}\u00B0C" : "--";
     }
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing && _failsafe != null)
+        if (disposing)
         {
             _failsafe.Changed -= OnChanged;
             _failsafe.TemperatureChanged -= OnTemperatureChanged;

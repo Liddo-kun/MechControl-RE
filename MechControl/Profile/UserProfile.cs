@@ -5,6 +5,9 @@ namespace MechControl.Profile;
 
 class UserProfile
 {
+    [JsonIgnore]
+    public bool RequiresSave { get; set; }
+
     [JsonPropertyName("name")]
     public string Name { get; set; } = "";
 

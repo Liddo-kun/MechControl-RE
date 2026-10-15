@@ -305,18 +305,23 @@ class FanTab : UserControl
     public void SetLinkedEnabled(bool enabled)
     {
         if (_chkLinkFans == null || _linkedController == null) return;
-        if (_chkLinkFans.Checked != enabled)
+        try
         {
-            // Profile application needs real synchronous errors, not the UI
-            // handler's caught exception followed by a false success callback.
             if (enabled) _linkedController.Enable();
-            else _linkedController.Disable();
+            else if (_linkedController.IsEnabled) _linkedController.Disable();
+        }
+        finally
+        {
+            // Failed enable retains the last written curves, not an accidental
+            // Disable/rollback write caused by repairing the checkbox.
+            bool active = _linkedController.IsEnabled;
             _chkLinkFans.CheckedChanged -= OnLinkFansChanged;
-            try { _chkLinkFans.Checked = enabled; }
+            try { _chkLinkFans.Checked = active; }
             finally { _chkLinkFans.CheckedChanged += OnLinkFansChanged; }
-            SetLinkedControlsEnabled(enabled);
-            if (_linkedStatusBar != null) _linkedStatusBar.Visible = enabled;
-            if (_debugSection != null) _debugSection.Visible = enabled;
+            if (active) _chkFanCurve.Checked = true;
+            SetLinkedControlsEnabled(active);
+            if (_linkedStatusBar != null) _linkedStatusBar.Visible = active;
+            if (_debugSection != null) _debugSection.Visible = active;
         }
     }
 
@@ -487,61 +492,17 @@ class FanTab : UserControl
 
     private void OnLinkFansChanged(object? sender, EventArgs e)
     {
-        if (_linkedController == null || _chkLinkFans == null) return;
-
-        if (_chkLinkFans.Checked)
-        {
-            if (_cpuCurvePanel.Curve == null || _gpuCurvePanel.Curve == null)
-            {
-                MessageBox.Show("Load fan curves first (Read from EC).",
-                    "Link Fans", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                _chkLinkFans.Checked = false;
-                return;
-            }
-
-            _chkFanCurve.Checked = true;
-            SetLinkedControlsEnabled(true);
-            if (_linkedStatusBar != null) _linkedStatusBar.Visible = true;
-            if (_debugSection != null) _debugSection.Visible = true;
-
-            try
-            {
-                _linkedController.Enable();
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Failed to enable linked fans:\n{ex.Message}",
-                    "EC Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                _chkLinkFans.Checked = false;
-                SetLinkedControlsEnabled(false);
-                if (_linkedStatusBar != null) _linkedStatusBar.Visible = false;
-                if (_debugSection != null) _debugSection.Visible = false;
-                return;
-            }
-        }
-        else
-        {
-            try
-            {
-                _linkedController.Disable();
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Failed to restore fan curves:\n{ex.Message}",
-                    "EC Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            }
-            SetLinkedControlsEnabled(false);
-            if (_linkedStatusBar != null) _linkedStatusBar.Visible = false;
-            if (_debugSection != null) _debugSection.Visible = false;
-        }
+        if (_chkLinkFans != null)
+            UiHelpers.TryUi(() => SetLinkedEnabled(_chkLinkFans.Checked), "change linked fan mode", "EC Error");
     }
 
     private void BtnApplyBoost_Click(object? sender, EventArgs e) =>
         UiHelpers.TryUi(() =>
         {
-            if (_control.Failsafe is { } failsafe)
-                failsafe.ApplyExplicit(ThermalAction.Fan, permit => _control.SetFanBoost(_chkFanBoost.Checked, permit));
-            else _control.SetFanBoost(_chkFanBoost.Checked);
+            // Boost on is always allowed; only turning off an emergency boost waits for a reset.
+            if (!_chkFanBoost.Checked && _control.Failsafe?.Holds(ThermalAction.Fan) == true)
+                throw new InvalidOperationException("Fan boost is held on by the tripped thermal failsafe. Reset it or load a profile first.");
+            _control.SetFanBoost(_chkFanBoost.Checked);
         }, "set fan boost", "EC Write Error");
 
     private void BtnApply_Click(object? sender, EventArgs e)

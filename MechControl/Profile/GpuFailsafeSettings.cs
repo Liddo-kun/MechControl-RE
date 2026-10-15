@@ -4,9 +4,10 @@ namespace MechControl.Profile;
 
 class GpuFailsafeSettings
 {
-    public const int DefaultThreshold = 62;
-    public const int MinimumThreshold = 30;
+    public const int DefaultThreshold = 50;
+    public const int MinimumThreshold = 50;
     public const int MaximumThreshold = 95;
+    public const int LegacyMinimumThreshold = 30;
 
     [JsonPropertyName("enabled")]
     public bool Enabled { get; set; }
@@ -30,16 +31,6 @@ class GpuFailsafeSettings
     public void Validate()
     {
         if (ThresholdC < MinimumThreshold || ThresholdC > MaximumThreshold)
-            throw new ArgumentOutOfRangeException(nameof(ThresholdC), "Failsafe threshold must be between 30 and 95 C.");
+            throw new ArgumentOutOfRangeException(nameof(ThresholdC), $"Failsafe threshold must be between {MinimumThreshold} and {MaximumThreshold} C.");
     }
-
-    public static GpuFailsafeSettings Transition(GpuFailsafeSettings current, GpuFailsafeSettings destination) => new()
-    {
-        Enabled = current.Enabled || destination.Enabled,
-        ThresholdC = current.Enabled && destination.Enabled ? Math.Min(current.ThresholdC, destination.ThresholdC)
-            : current.Enabled ? current.ThresholdC : destination.ThresholdC,
-        ReduceCpuPower = (current.Enabled && current.ReduceCpuPower) || (destination.Enabled && destination.ReduceCpuPower),
-        FanBoost = (current.Enabled && current.FanBoost) || (destination.Enabled && destination.FanBoost),
-        ShowMainWindow = current.ShowMainWindow
-    };
 }

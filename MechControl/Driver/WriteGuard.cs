@@ -17,6 +17,8 @@ sealed class WriteGuard
         _verifyRedirect = profile.ExpandVerifyRedirect();
     }
 
+    public bool VerifiesSameAddress(int address) => !_skipVerify.Contains(address) && !_verifyRedirect.ContainsKey(address);
+
     // Redirect-verify backoff. The EC's 0x463 updates on its own polling cycle,
     // so a fresh write isn't immediately visible — empirical sampling showed
     // commits clustering at ~300/550/900ms. These delays cover all three

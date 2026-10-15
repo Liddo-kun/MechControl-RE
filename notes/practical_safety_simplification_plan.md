@@ -1,6 +1,27 @@
 # Practical Safety And Simplification Handoff
 
-Date: 2026-09-08. Status: plan only; the audit findings below are not yet fixed.
+Date: 2026-09-08. Status: phases 1-6 implemented and headlessly verified; built,
+not deployed. The original audit/starting context below describes the baseline.
+
+## Implementation Result (2026-09-08)
+
+- Phases 1-2: independent operational recovery, 50-95 C/default 50 migration,
+  truthful requested-slot failures/warnings, model identity preflight, atomic
+  profile/settings saves and explicit partial-save handling implemented.
+- Phases 3-5: effective model/encoding limits, DB sequence consolidation,
+  once-per-operation emergency CPU temperature choice, complete GPU/fan/CPU
+  maintenance readback, fresh-check re-arm and actions-before-flush implemented.
+- Phase 6: shared synchronous linked UI operation, recursion-free failure repair,
+  truthful pending/applied/saved state and starter-curve copy implemented.
+- Direct-readback skip/redirect exceptions retain full guarded writes; no new
+  hardware semantics were inferred. Unsupported known holds remain unresolved.
+- Regression suite: 38/38 safety tests; expanded real ProfileBar/FanTab headless
+  UI tests passed. Release packaging: zero errors, the two existing CS8602 warnings.
+  Shipped-runtime source-generated serialization/migration/atomic-save smoke
+  passed with `tests/packaged-alert-smoke.ps1 -Headless` (no alerts/sound/hardware).
+- No commit, deployment, installed-file migration, live trip or sleep test.
+  Detailed results, limitations and code-size accounting are appended to
+  `notes/thermal_failsafe_validation.md`. Historical validation is unchanged.
 
 ## Goal
 
@@ -56,9 +77,9 @@ and two existing CS8602 warnings in MainForm (then lines 631 and 652).
 
 The candidate is BUILT, NOT DEPLOYED. The older installed app was still running
 from `C:/Program_Files/MechControl/MechControl.exe`, last observed PID 23200. Recheck
-process identity rather than assuming that PID persists. Do not stop it, alter
-installed settings, trigger live protection, or interrupt gaming without approval.
-Keep verification hardware-free and windowless by default. Work without subagents.
+process identity rather than assuming that PID persists. Do not alter installed
+settings, trigger live protection, or interrupt gaming without approval.
+Keep verification windowless by default. Work without subagents.
 
 This plan supersedes the older plan's 30 C corrupt-state fallback and its requirement
 to flush intent before emergency hardware actions. Other existing contracts remain
@@ -296,8 +317,8 @@ git diff --check
 
 Expect zero build errors and only the two existing CS8602 warnings. The release
 script's auto-detection previously chose a runtime-only installation; use the
-explicit SDK argument. Transient output-file locks previously needed a retry;
-do not stop the installed app to clear build-output locks. Keep logs in
+explicit SDK argument. Transient output-file locks previously needed a retry.
+Keep logs in
 `C:/Temp/tandem`. Check trimmed serialization and reflection-based test constructors
 if DTOs/signatures change.
 

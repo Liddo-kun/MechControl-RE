@@ -5,7 +5,7 @@ using System.Runtime.Loader;
 internal static class Program
 {
     [STAThread]
-    private static int Main()
+    private static int Main(string[] args)
     {
         string root = AppContext.BaseDirectory;
         AssemblyLoadContext.Default.Resolving += (_, name) =>
@@ -15,14 +15,111 @@ internal static class Program
         };
         try
         {
-            Test(root);
-            File.WriteAllText(Path.Combine(root, "smoke-result.txt"), "PASS: packaged failsafe sound and nonmodal alert; message loop active; no hardware access.");
+            bool headless = Array.IndexOf(args, "--headless") >= 0;
+            if (headless) TestProfiles(root);
+            else Test(root);
+            File.WriteAllText(Path.Combine(root, "smoke-result.txt"), headless
+                ? "PASS: packaged settings/profile recovery, migration, atomic saves and shared warning/hold indicators; no windows, sound or hardware access."
+                : "PASS: packaged failsafe sound and nonmodal alert; message loop active; no hardware access.");
             return 0;
         }
         catch (Exception ex)
         {
             File.WriteAllText(Path.Combine(root, "smoke-result.txt"), "FAIL: " + ex);
             return 1;
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void TestProfiles(string root)
+    {
+        var assembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(Path.Combine(root, "MechControl.target.dll"));
+        var managerType = assembly.GetType("MechControl.Profile.UserProfileManager", true)!;
+        string directory = Path.Combine(root, "serialization-fixtures");
+        Directory.CreateDirectory(directory);
+        string settingsPath = Path.Combine(directory, "settings.json");
+        object Manager() => Activator.CreateInstance(managerType, new object[] { directory, true })!;
+        object? Get(object obj, string name) => obj.GetType().GetProperty(name)!.GetValue(obj);
+        foreach (string json in new[]
+        {
+            """{"thermalProtection":{"Stage":0,"Held":0,"LastTrip":{"Time":"bad","Reason":"Old history"}}}""",
+            """{"lastProfile":"bad","thermalProtection":{"Stage":0,"Held":0}}"""
+        })
+        {
+            File.WriteAllText(settingsPath, json);
+            var state = Get(Manager(), "ThermalProtection")!;
+            if (Convert.ToInt32(Get(state, "Held")) != 0) throw new Exception("Optional corruption manufactured a packaged hold.");
+        }
+        File.WriteAllText(settingsPath, """{"thermalProtection":{"Stage":2,"Held":7,"ResetThresholdC":30,"LastTrip":{"Time":"bad","ThresholdC":30,"Reason":"Original event"}}}""");
+        var manager = Manager();
+        var held = Get(manager, "ThermalProtection")!;
+        if (Convert.ToInt32(Get(held, "Held")) != 7 || Convert.ToInt32(Get(held, "Stage")) != 2)
+            throw new Exception("Packaged recovery lost holds.");
+        managerType.GetMethod("SaveThermalProtection")!.Invoke(manager, new[] { held });
+        var history = Get(Get(Manager(), "ThermalProtection")!, "LastTrip")!;
+        if (Get(history, "Time") != null || Convert.ToInt32(Get(history, "ThresholdC")) != 30)
+            throw new Exception("Packaged round trip fabricated history.");
+        File.WriteAllText(Path.Combine(directory, "userprofile_1.json"), """{"gpuFailsafe":{"enabled":false,"thresholdC":35,"fanBoost":true}}""");
+        var profile = managerType.GetMethod("LoadProfile")!.Invoke(manager, new object[] { 1 })!;
+        var protection = Get(profile, "GpuFailsafe")!;
+        if ((bool)Get(protection, "Enabled")! || !(bool)Get(protection, "FanBoost")! || Convert.ToInt32(Get(protection, "ThresholdC")) != 50)
+            throw new Exception("Packaged profile migration changed detection/options.");
+        managerType.GetMethod("SaveProfile")!.Invoke(manager, new[] { (object)1, profile });
+        profile = managerType.GetMethod("LoadProfile")!.Invoke(Manager(), new object[] { 1 })!;
+        if ((bool)Get(profile, "RequiresSave")! || File.Exists(settingsPath + ".tmp"))
+            throw new Exception("Packaged atomic save did not commit migrated profile/settings.");
+        TestIndicators(assembly, held);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void TestIndicators(Assembly assembly, object held)
+    {
+        const BindingFlags fields = BindingFlags.Instance | BindingFlags.NonPublic;
+        var mainType = assembly.GetType("MechControl.UI.MainForm", true)!;
+        var failsafeType = assembly.GetType("MechControl.Features.GpuTemperatureFailsafe", true)!;
+        var actionType = assembly.GetType("MechControl.Profile.ThermalAction", true)!;
+        var tabType = assembly.GetType("MechControl.UI.FailsafeTab", true)!;
+        var barType = assembly.GetType("MechControl.UI.ProfileBar", true)!;
+        for (int i = 0; i < 4; i++)
+        {
+            bool hasHold = i % 2 != 0;
+            string startupWarning = i >= 2 ? "Saved protection state uncertain" : "";
+            // No MainForm/ProfileBar constructor, shown window or visible tray icon.
+            var owner = RuntimeHelpers.GetUninitializedObject(mainType);
+            var bar = RuntimeHelpers.GetUninitializedObject(barType);
+            GC.SuppressFinalize(owner);
+            GC.SuppressFinalize(bar);
+            var failsafe = Activator.CreateInstance(failsafeType, new object?[]
+            {
+                (Func<int>)(() => throw new Exception("Unexpected sensor access")), NoOpFor(actionType), NoOpFor(held.GetType()),
+                hasHold ? held : null, Enum.ToObject(actionType, 0), null, null
+            })!;
+            using var tab = (Control)Activator.CreateInstance(tabType, new object[] { failsafe, startupWarning })!;
+            using var page = new TabPage();
+            using var tray = new NotifyIcon();
+            mainType.GetField("_gpuFailsafe", fields)!.SetValue(owner, failsafe);
+            mainType.GetField("_failsafeTab", fields)!.SetValue(owner, tab);
+            mainType.GetField("_failsafePage", fields)!.SetValue(owner, page);
+            mainType.GetField("_profileBar", fields)!.SetValue(owner, bar);
+            mainType.GetField("_defaultTrayIcon", fields)!.SetValue(owner, SystemIcons.Application);
+            var update = (Action)mainType.GetMethod("UpdateTrayIcon", fields)!.CreateDelegate(typeof(Action), owner);
+            tabType.GetEvent("ConfigurationWarningChanged")!.AddEventHandler(tab, update);
+            var warn = tabType.GetMethod("ShowConfigurationWarning")!;
+            update(); // MainForm initializes indicators before constructing the tray.
+            if (startupWarning.Length > 0 && !page.Text.Contains(hasHold ? "(!)" : "configuration"))
+                throw new Exception("Initial startup warning/hold title missing.");
+            warn.Invoke(tab, new object[] { "Requested profile failed" }); // Tray not constructed yet.
+            if (!page.Text.Contains(hasHold ? "(!)" : "configuration")) throw new Exception("Early warning/hold title not updated.");
+            mainType.GetField("_trayIcon", fields)!.SetValue(owner, tray);
+            update();
+            if (!tray.Text.Contains(hasHold ? "THERMAL PROTECTION HOLD" : "CONFIGURATION WARNING"))
+                throw new Exception("Warning indicator or hold priority lost.");
+            warn.Invoke(tab, new object[] { "" });
+            if (page.Text != (hasHold ? "Thermal Failsafe (!)" : startupWarning.Length > 0 ? "Thermal Failsafe (configuration !)" : "Thermal Failsafe") ||
+                tray.Text != (hasHold ? "MechControl - THERMAL PROTECTION HOLD" : startupWarning.Length > 0 ? "MechControl - CONFIGURATION WARNING" : "MechControl"))
+                throw new Exception("Resolved warning was not cleared or incorrectly cleared the thermal hold indicator.");
+            if (tray.Icon!.Handle != (hasHold ? SystemIcons.Error : startupWarning.Length > 0 ? SystemIcons.Warning : SystemIcons.Application).Handle)
+                throw new Exception("Resolved warning left the wrong tray icon.");
         }
     }
 
@@ -45,8 +142,6 @@ internal static class Program
         var settingsType = assembly.GetType("MechControl.Profile.GpuFailsafeSettings", true)!;
         var actionType = assembly.GetType("MechControl.Profile.ThermalAction", true)!;
         var stateType = assembly.GetType("MechControl.Profile.ThermalProtectionState", true)!;
-        Delegate NoOpFor(Type valueType) => typeof(Program).GetMethod(nameof(NoOp), BindingFlags.Static | BindingFlags.NonPublic)!
-            .MakeGenericMethod(valueType).CreateDelegate(typeof(Action<>).MakeGenericType(valueType));
         var failsafe = Activator.CreateInstance(failsafeType, new object?[]
         {
             (Func<int>)(() => 35), NoOpFor(actionType), NoOpFor(stateType), null, Enum.ToObject(actionType, 1), null, null
@@ -85,4 +180,7 @@ internal static class Program
     }
 
     private static void NoOp<T>(T value) { }
+
+    private static Delegate NoOpFor(Type valueType) => typeof(Program).GetMethod(nameof(NoOp), BindingFlags.Static | BindingFlags.NonPublic)!
+        .MakeGenericMethod(valueType).CreateDelegate(typeof(Action<>).MakeGenericType(valueType));
 }
