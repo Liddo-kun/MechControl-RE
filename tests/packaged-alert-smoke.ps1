@@ -1,7 +1,8 @@
 param(
     [Parameter(Mandatory)][string]$Package,
     [Parameter(Mandatory)][string]$ScratchRoot,
-    [string]$DotnetPath = 'dotnet'
+    [string]$DotnetPath = 'dotnet',
+    [switch]$Headless
 )
 $ErrorActionPreference = 'Stop'
 $Package = (Resolve-Path $Package).Path
@@ -19,7 +20,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Smoke harness build failed.' }
 Copy-Item -LiteralPath $Package -Destination $testPackage -Recurse
 Move-Item (Join-Path $testPackage 'MechControl.dll') (Join-Path $testPackage 'MechControl.target.dll')
 Copy-Item (Join-Path $harness 'PackagedAlertSmoke.dll') (Join-Path $testPackage 'MechControl.dll')
-$process = Start-Process (Join-Path $testPackage 'MechControl.exe') -WorkingDirectory $testPackage -PassThru
+$process = Start-Process (Join-Path $testPackage 'MechControl.exe') -WorkingDirectory $testPackage -PassThru `
+    -ArgumentList $(if ($Headless) { '--headless' } else { '--alerts' })
 if (-not $process.WaitForExit(20000)) {
     $process.Kill()
     throw 'Packaged alert test timed out.'

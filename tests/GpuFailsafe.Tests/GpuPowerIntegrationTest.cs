@@ -26,7 +26,8 @@ static partial class Program
         power.Failsafe = failsafe;
         failsafe.Configure(new GpuFailsafeSettings { Enabled = true, ThresholdC = 62 });
 
-        device.Registers[GpuTemp] = 62;
+        Repeat(2, () => failsafe.OnTemperatureSample(61));
+        device.Registers[GpuTemp] = 80; // Fresh pre-write check lifts the average to 65.75 C.
         device.Writes.Clear();
         power.ApplyGpuPower(150, true, 25);
 
@@ -41,17 +42,12 @@ static partial class Program
         Assert.True(failsafe.IsTripped);
         AssertGpuWrites(device.Writes, 0xA5, 0, 0, repetitions: 1);
 
-        device.Registers[GpuTemp] = 59;
         device.Writes.Clear();
         failsafe.Reset();
-        AssertGpuWrites(device.Writes, 0xA5, 0, 0, repetitions: 1);
-        Assert.True(failsafe.NeedsPowerRestore);
+        Assert.Equal(0, device.Writes.Count);
+        Assert.False(failsafe.IsTripped);
 
-        power.ApplyGpuPower(150, true, 25);
-        Assert.True(failsafe.NeedsPowerRestore);
-        device.Writes.Clear();
-        failsafe.ApplyExplicit(ThermalAction.Gpu, permit => power.ApplyGpuPower(150, true, 25, permit));
-        Assert.False(failsafe.NeedsPowerRestore);
+        failsafe.ApplyExplicit(() => power.ApplyGpuPower(150, true, 25));
         AssertGpuWrites(device.Writes, 0xA7, 55, 25, repetitions: 1);
         GpuPowerValues restored = power.ReadGpuPower();
         Assert.Equal(150, restored.TgpWatts);

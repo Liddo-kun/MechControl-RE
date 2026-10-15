@@ -72,17 +72,18 @@ class FanControl
         catch { CanApplyBoost = false; }
     }
 
-    public void SetFanBoost(bool enabled, GpuTemperatureFailsafe.Restoration? restoration = null)
+    // Turning boost on only adds cooling, so it is never gated by the failsafe.
+    public void SetFanBoost(bool enabled)
     {
         try
         {
-            if (Failsafe?.Holds(ThermalAction.Fan, restoration) == true)
+            if (!enabled) Failsafe?.CheckBeforeApply();
+            if (Failsafe?.Holds(ThermalAction.Fan) == true)
             {
                 if (!CanApplyBoost) throw new InvalidOperationException("Held fan boost unavailable; fan boost changes blocked.");
                 enabled = true;
             }
             _guard.Write(_addrFanControlMode, enabled ? (byte)0x40 : (byte)0x00);
-            Failsafe?.ConfirmWrite(ThermalAction.Fan, restoration);
         }
         catch (Exception ex) { Failsafe?.ReportWriteFailure(ThermalAction.Fan, ex); throw; }
     }
@@ -114,6 +115,8 @@ class FanControl
         byte raw = _device.ReadByte(_addrFanControlMode);
         return raw == 0x40;
     }
+
+    public bool IsBoostRequested() => CanApplyBoost && _guard.VerifiesSameAddress(_addrFanControlMode) && ReadFanBoost();
 
     public FanCurveModel ReadCpuCurve() =>
         FanCurveModel.ReadFromEc(_device, _cpuTempUpBase, _cpuTempDownBase, _cpuDutyBase, _entriesPerArray, _activeEntries);

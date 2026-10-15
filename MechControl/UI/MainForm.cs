@@ -35,7 +35,7 @@ class MainForm : Form
     private readonly LiquidCoolerTab? _liquidCoolerTab;
     private readonly UserProfileManager _profileManager;
     private readonly ProfileBar _profileBar;
-    private readonly GpuTemperatureFailsafe? _gpuFailsafe;
+    private readonly GpuTemperatureFailsafe _gpuFailsafe;
     private readonly FailsafeTab _failsafeTab;
     private readonly TabPage _failsafePage;
     private bool _failsafeMonitoring;
@@ -162,7 +162,8 @@ class MainForm : Form
 
         // App-level settings are loaded before optional providers so disabling
         // GPU hotspot monitoring skips PawnIO DLL loading and driver access.
-        _profileManager = new UserProfileManager();
+        _profileManager = new UserProfileManager(gpuRecoverySupported: hwDetect?.ModuleIdGpu is > 0 and < 255 &&
+            !profile.TgpLimitIsFallback && profile.Registers.ContainsKey("gpuTemp") && profile.Registers.ContainsKey("tgp"));
         BlackwellGpuThermProvider? gpuThermProvider = null;
         string gpuThermStatusText;
 
@@ -397,7 +398,13 @@ class MainForm : Form
                     ThermalAction.Gpu => $"GPU TGP {_gpuControl?.MinimumTgpWatts} W, Dynamic Boost off",
                     ThermalAction.Cpu => $"CPU PL1/PL2/PL4 {_cpuControl?.Minimum.PL1Watts}/{_cpuControl?.Minimum.PL2Watts}/{_cpuControl?.Minimum.PL4Watts} W",
                     _ => "fan boost on"
-                })), checkEmergency: action => action == ThermalAction.Cpu && _cpuControl?.IsMinimumPowerRequested() == true);
+                })), checkEmergency: action => action switch
+                {
+                    ThermalAction.Cpu => _cpuControl?.IsMinimumPowerRequested() == true,
+                    ThermalAction.Gpu => _gpuControl?.IsMinimumPowerRequested() == true,
+                    ThermalAction.Fan => _fanControl?.IsBoostRequested() == true,
+                    _ => false
+                });
             if (_gpuControl != null) _gpuControl.Failsafe = _gpuFailsafe;
             if (_cpuControl != null) _cpuControl.Failsafe = _gpuFailsafe;
             if (_fanControl != null) _fanControl.Failsafe = _gpuFailsafe;
@@ -405,25 +412,25 @@ class MainForm : Form
         DiagnosticLog.Write(failsafeAvailable
             ? $"[GPU Failsafe] Available: model-specific minimum {_gpuControl!.MinimumTgpWatts} W; GPU power registers readable."
             : "[GPU Failsafe] Unavailable: GPU presence, temperature register, or model-specific power minimum not validated.");
-        _failsafeTab = new FailsafeTab(_gpuFailsafe, failsafeAvailable ? _gpuControl?.MinimumTgpWatts : null);
+        _failsafeTab = new FailsafeTab(_gpuFailsafe, _profileManager.ConfigurationWarning);
         _failsafePage = new TabPage("Thermal Failsafe");
         _failsafePage.Controls.Add(_failsafeTab);
         _tabs.TabPages.Add(_failsafePage);
+        _failsafeTab.ConfigurationWarningChanged += UpdateTrayIcon;
+        UpdateTrayIcon();
         _activateFailsafeWindow = () =>
         {
             ShowFromTray();
             _tabs.SelectedTab = _failsafePage;
             Activate();
         };
-        if (_gpuFailsafe != null)
+        _gpuFailsafe.Changed += OnFailsafeChanged;
+        _gpuFailsafe.Alert += ShowFailsafeAlert;
+        _failsafeTab.ResetCompleted += ReapplyProfileAfterReset;
+        if (_gpuFailsafe.IsTripped)
         {
-            _gpuFailsafe.Changed += OnFailsafeChanged;
-            _gpuFailsafe.Alert += ShowFailsafeAlert;
-            if (_gpuFailsafe.HasHold)
-            {
-                _gpuFailsafe.EnforceMinimum();
-                _pendingFailsafeAlert = _gpuFailsafe.Status;
-            }
+            _gpuFailsafe.EnforceMinimum();
+            _pendingFailsafeAlert = _gpuFailsafe.Status;
         }
 
         // Battery tab — conditional on validation
@@ -546,7 +553,7 @@ class MainForm : Form
         // custom curve mode off when the EC fan table is garbage.
         bool userProfileApplied = false;
         int lastSlot = _profileManager.LastUsedSlot;
-        if (lastSlot > 0 && _profileManager.SlotExists(lastSlot))
+        if (lastSlot > 0)
         {
             try
             {
@@ -557,6 +564,7 @@ class MainForm : Form
             catch (Exception ex)
             {
                 DiagnosticLog.Warn($"Auto-load slot {lastSlot} failed: {ex.Message}");
+                _failsafeTab.ShowConfigurationWarning($"Startup profile {lastSlot} failed: {ex.Message}\nIts protection settings were not successfully armed/applied. Existing protection is retained; select a valid profile.");
             }
         }
         else if (_fanControl != null && !fanSnapshot.IsValid())
@@ -603,7 +611,7 @@ class MainForm : Form
             MessageBox.Show(
                 "The EC fan table was in an uninitialized state (cold boot or wiped EC).\n\n" +
                 $"The fan curve panels have been seeded from {sourceText}.\n" +
-                "Custom fan curve mode is currently disabled.\n\n" +
+                "No user profile was successfully applied; check the current custom-mode setting.\n\n" +
                 "Review the curves in the Fan Control tab, then use the Apply buttons to write them to the EC and enable custom mode.",
                 "Fan Curves Seeded from Fallback",
                 MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -629,6 +637,8 @@ class MainForm : Form
         {
             _powerTab?.RefreshFromEc();
             _trayIcon.Visible = true;
+            if (_failsafeTab.HasConfigurationWarning)
+                _trayIcon.ShowBalloonTip(10000, "MechControl Configuration", "Review the persistent configuration warning on the Thermal Failsafe tab. Requested profile protection may not be armed.", ToolTipIcon.Warning);
             if (_pendingFailsafeAlert is string alert)
             {
                 _pendingFailsafeAlert = null;
@@ -685,6 +695,7 @@ class MainForm : Form
         // Tray profile submenu — refresh on profile load, save, or rename
         _profileBar.ProfileApplied += RefreshTrayProfileMenu;
         _profileBar.ProfileListChanged += RefreshTrayProfileMenu;
+        _profileBar.ProfileListChanged += UpdateTrayIcon;
         RefreshTrayProfileMenu();
         _profileBar.ProfileApplied += UpdateTrayIcon;
         UpdateTrayIcon();
@@ -708,7 +719,6 @@ class MainForm : Form
 
     private void OnFailsafeChanged()
     {
-        if (_gpuFailsafe == null) return;
         if (_failsafeMonitoring != _gpuFailsafe.RequiresMonitoring)
         {
             _failsafeMonitoring = _gpuFailsafe.RequiresMonitoring;
@@ -719,12 +729,22 @@ class MainForm : Form
             }
             else _monitor.GpuTemperatureSample -= _gpuFailsafe.OnTemperatureSample;
         }
-        _failsafePage.Text = _gpuFailsafe.NeedsAttention ? "Thermal Failsafe (!)" : "Thermal Failsafe";
-        if (_trayIcon != null && _failsafeTrayTripped != _gpuFailsafe.NeedsAttention)
+        if (_failsafeTrayTripped != _gpuFailsafe.IsTripped)
             UpdateTrayIcon();
-        if (_failsafeAlert is { IsDisposed: false } && _gpuFailsafe.HasHold)
+        if (_failsafeAlert is { IsDisposed: false } && _gpuFailsafe.IsTripped)
             foreach (var text in _failsafeAlert.Controls.OfType<TextBox>())
                 text.Text = _gpuFailsafe.Status + "\n\nCheck the cooler. Closing this alert does NOT reset the failsafe.";
+        else if (_failsafeAlert is { IsDisposed: false }) _failsafeAlert.Close(); // Trip cleared.
+    }
+
+    // Reset is one step: put the active profile's power/fan settings back. The
+    // trigger currently on the Failsafe tab is kept, in case it was just raised.
+    private void ReapplyProfileAfterReset()
+    {
+        int slot = _profileBar.ActiveSlot;
+        if (slot < 1 || !_profileManager.SlotExists(slot)) return;
+        UiHelpers.TryUi(() => _profileBar.LoadAndApplySlot(slot, preserveFailsafeSettings: true), "restore profile after failsafe reset");
+        RefreshAllTabs();
     }
 
     private void ShowFailsafeAlert(string message)
@@ -768,7 +788,7 @@ class MainForm : Form
         _failsafeAlert.Controls.Add(text);
         _failsafeAlert.Controls.Add(open);
         _failsafeAlert.Show();
-        if (_gpuFailsafe?.ShowMainWindow == true)
+        if (_gpuFailsafe.ShowMainWindow)
             _activateFailsafeWindow?.Invoke();
     }
 
@@ -840,7 +860,7 @@ class MainForm : Form
         if (slot < 1 || !_profileManager.SlotExists(slot))
             slot = _profileManager.LastUsedSlot;
 
-        if (slot >= 1 && _profileManager.SlotExists(slot))
+        if (slot >= 1)
         {
             try
             {
@@ -850,6 +870,7 @@ class MainForm : Form
             catch (Exception ex)
             {
                 DiagnosticLog.Warn($"Profile re-apply after EC re-activation failed: {ex.Message}");
+                _failsafeTab.ShowConfigurationWarning($"Profile recovery failed: {ex.Message}\nExisting protection is retained; select a valid profile.");
             }
             return;
         }
@@ -933,12 +954,21 @@ class MainForm : Form
 
     private void UpdateTrayIcon()
     {
+        _failsafePage.Text = _gpuFailsafe.IsTripped ? "Thermal Failsafe (!)"
+            : _failsafeTab.HasConfigurationWarning ? "Thermal Failsafe (configuration !)" : "Thermal Failsafe";
+        if (_trayIcon == null) return; // Warnings/holds can arrive before the tray is constructed.
         _trayAnimTimer?.Change(Timeout.Infinite, Timeout.Infinite);
-        _failsafeTrayTripped = _gpuFailsafe?.NeedsAttention == true;
+        _failsafeTrayTripped = _gpuFailsafe.IsTripped;
         _trayIcon.Text = _failsafeTrayTripped ? "MechControl - THERMAL PROTECTION HOLD" : "MechControl";
         if (_failsafeTrayTripped)
         {
             _trayIcon.Icon = SystemIcons.Error;
+            return;
+        }
+        if (_failsafeTab.HasConfigurationWarning)
+        {
+            _trayIcon.Text = "MechControl - CONFIGURATION WARNING";
+            _trayIcon.Icon = SystemIcons.Warning;
             return;
         }
         int slot = _profileBar.ActiveSlot;
@@ -975,7 +1005,7 @@ class MainForm : Form
         {
             BeginInvoke(() =>
             {
-                if (_profileBar.ActiveSlot == 5 && _gpuFailsafe?.NeedsAttention != true)
+                if (_profileBar.ActiveSlot == 5 && !_gpuFailsafe.IsTripped && !_failsafeTab.HasConfigurationWarning)
                     _trayIcon.Icon = _kekwaitFrames[frame];
             });
         }
@@ -1033,14 +1063,14 @@ class MainForm : Form
     private void RestoreDefaults_Click(object? sender, EventArgs e)
     {
         // This path hands GPU control back to firmware via direct register writes.
-        if (_gpuFailsafe?.Enabled == true || _gpuFailsafe?.IsTripped == true)
+        if (_gpuFailsafe.IsTripped)
         {
-            MessageBox.Show(this, "Disable GPU protection and reset any latched trip before restoring firmware defaults.",
+            MessageBox.Show(this, "Reset the thermal failsafe before restoring firmware defaults.",
                 "GPU Failsafe", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
         if (MessageBox.Show(
-            "This will restore firmware control of power and fans, releasing any acknowledged thermal hold. Confirm that cooling is working. Continue?",
+            "This will restore firmware control of power and fans. Continue?",
             "Restore Firmware Defaults",
             MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
             return;
@@ -1048,9 +1078,8 @@ class MainForm : Form
         UiHelpers.TryUi(() =>
         {
             void WriteReg(string name, byte value) => _guard.Write(_profile.GetRegister(name), value);
-            void Restore(GpuTemperatureFailsafe.Restoration? restoration)
+            void Restore()
             {
-
                 // CPU/GPU power: 0 = hand control back to EC firmware
                 WriteReg("PL1", 0);
                 WriteReg("PL2", 0);
@@ -1069,7 +1098,7 @@ class MainForm : Form
                 WriteReg("dbMaxTgp", 0);
 
                 // Fan: boost off, custom curve disabled (EC internal fan control)
-                if (_fanControl != null) _fanControl.SetFanBoost(false, restoration);
+                if (_fanControl != null) _fanControl.SetFanBoost(false);
                 else WriteReg("fanControlMode", 0);
                 if (_fanControl != null)
                 {
@@ -1087,10 +1116,8 @@ class MainForm : Form
                 {
                     _fanControl.ApplyCurves(FanCurveModelFromArrays(dfc.Cpu), FanCurveModelFromArrays(dfc.Gpu), false);
                 }
-                _gpuFailsafe?.ConfirmWrite(ThermalAction.All, restoration);
             }
-            if (_gpuFailsafe != null) _gpuFailsafe.ApplyFirmwareDefaults(Restore);
-            else Restore(null);
+            _gpuFailsafe.ApplyExplicit(Restore);
 
             // Battery: first mode (High Capacity)
             if (_profile.BatteryModes.Count > 0)
@@ -1143,7 +1170,7 @@ class MainForm : Form
 
         try
         {
-            void Apply(GpuTemperatureFailsafe.Restoration? restoration)
+            void Apply()
             {
                 // Apply CPU power limits
                 if (_cpuControl != null)
@@ -1151,7 +1178,7 @@ class MainForm : Form
                     var current = _cpuControl.ReadCpuPower();
                     int pl4 = mode.PL4 ?? current.PL4Watts;
                     int tempLimit = mode.TccOffset ?? current.TempLimitC;
-                    _cpuControl.ApplyCpuPower(mode.PL1, mode.PL2, pl4, tempLimit, restoration);
+                    _cpuControl.ApplyCpuPower(mode.PL1, mode.PL2, pl4, tempLimit);
                 }
 
                 // Apply GPU power (CTGP/DynamicBoost) if values provided
@@ -1159,7 +1186,7 @@ class MainForm : Form
                 {
                     bool dbEnabled = mode.DynamicBoost.HasValue && mode.DynamicBoost.Value > 0;
                     int dbWatts = mode.DynamicBoost ?? 0;
-                    _gpuControl.ApplyGpuPower(mode.CTGP.Value, dbEnabled, dbWatts, restoration);
+                    _gpuControl.ApplyGpuPower(mode.CTGP.Value, dbEnabled, dbWatts);
                 }
 
                 // Apply fan curves if provided (only from static profile data)
@@ -1175,9 +1202,7 @@ class MainForm : Form
                 }
 
             }
-            if (_gpuFailsafe != null) _gpuFailsafe.ApplyExplicit(
-                (_cpuControl != null ? ThermalAction.Cpu : 0) | (hasGpu && _gpuControl != null ? ThermalAction.Gpu : 0), Apply);
-            else Apply(null);
+            _gpuFailsafe.ApplyExplicit(Apply);
             RefreshAllTabs();
 
             MessageBox.Show($"{modeName} defaults applied successfully.",

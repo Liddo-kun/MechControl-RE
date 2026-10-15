@@ -152,7 +152,7 @@ class FanCurveModel
     /// <summary>
     /// Generic 10-point starter curve used as a last-resort cold-boot fallback
     /// when neither the EC snapshot nor a profile default is usable. Conservative
-    /// ramp that's safe on any laptop; the user is expected to review and edit
+    /// starter ramp, not validated for every model; the user must review and edit
     /// before applying. 10 points matches the typical active-entry count in
     /// real OEM fan tables, so the panels look familiar.
     /// </summary>

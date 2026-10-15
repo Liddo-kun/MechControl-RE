@@ -26,15 +26,16 @@ static partial class Program
             MonitorTests();
             LinkedFanTests();
             RefreshTests();
+            ProfileAndLinkedUiTests();
             if (args.Contains("--headless"))
             {
-                Console.WriteLine("PASS: shared monitor, linked-fan cadence/read/write counts and failures, hidden/unchanged UI refresh; no windows shown or hardware accessed.");
+                Console.WriteLine("PASS: shared monitor, linked fans and real checkbox orchestration, profile load/preflight/partial-save failures, hidden UI refresh; no windows shown or hardware accessed.");
                 return 0;
             }
             string output = args.FirstOrDefault() ?? @"C:\Temp\tandem\thermal-ui-validation";
             Directory.CreateDirectory(output);
             foreach (float scale in native ? new[] { 1f } : new[] { 1f, 1.5f, 2f })
-                foreach (string state in new[] { "disabled", "armed", "pending-edits", "applied-unsaved", "tripped", "incomplete", "reset-pending", "unsupported" })
+                foreach (string state in new[] { "disabled", "armed", "pending-edits", "applied-unsaved", "tripped", "incomplete", "reset", "unsupported" })
                     Capture(output, state, scale);
             Console.WriteLine("PASS: shared-monitor read counts/failures; UI state/edits/save/test controls; " +
                 (native ? "8 states at native system DPI." : "24 layout captures at 100/150/200% simulated scale."));
@@ -109,7 +110,7 @@ static partial class Program
             AutoScaleMode = AutoScaleMode.None, StartPosition = FormStartPosition.Manual, Location = new Point(10, 10) };
         float nativeScale = window.DeviceDpi / 96f;
         if (nativeScale > 1) window.ClientSize = new Size((int)(800 * nativeScale), (int)(580 * nativeScale));
-        using var tab = new FailsafeTab(f, state == "unsupported" ? null : 95);
+        using var tab = new FailsafeTab(f);
         var pages = new TabControl { Dock = DockStyle.Fill };
         pages.TabPages.Add("Power"); pages.TabPages.Add("Fan Control"); pages.TabPages.Add("Battery");
         pages.TabPages.Add("Lighting"); pages.TabPages.Add("Liquid Cooler");
@@ -161,13 +162,16 @@ static partial class Program
             Require(tab.HasPendingEdits, "Save silently applied pending edits");
             if (state == "applied-unsaved") { f.Configure(new() { Enabled = true, ThresholdC = 70 }); tab.RefreshConfiguration(); }
         }
-        if (state is "tripped" or "incomplete" or "reset-pending")
+        if (state is "tripped" or "incomplete" or "reset")
         {
             f.TestTrip();
             Require(!Field<Button>(tab, "_test").Enabled, "Test enabled during trip");
             Require(Field<Button>(tab, "_reset").Enabled, "Reset unavailable during trip");
-            if (state == "reset-pending") f.Reset();
-            Require(!Field<Button>(tab, "_test").Enabled, "Test enabled during restoration hold");
+            if (state == "reset")
+            {
+                f.Reset();
+                Require(Field<Button>(tab, "_test").Enabled && !Field<Button>(tab, "_reset").Enabled, "Reset did not fully clear the trip");
+            }
         }
         if (state == "unsupported") Require(!Field<CheckBox>(tab, "_enabled").Enabled, "Unsupported protection enabled");
         Require(Field<TrackBar>(tab, "_threshold").SmallChange == 1 && Field<TrackBar>(tab, "_threshold").TabStop, "Slider keyboard navigation unavailable");
