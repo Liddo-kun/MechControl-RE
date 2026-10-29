@@ -25,7 +25,7 @@
 
 Existing profiles without the block default to disabled. Missing CPU/fan options
 default **off**, including already-enabled GPU-only profiles. The foreground
-preference defaults **on**. No BLE cooler connection or hotspot driver is required.
+preference defaults **on**. No BLE cooler connection is required.
 
 Otherwise-valid legacy 30-49 C profile triggers and operational reset thresholds
 migrate to 50 C with a configuration warning. Enabled/options and actual held

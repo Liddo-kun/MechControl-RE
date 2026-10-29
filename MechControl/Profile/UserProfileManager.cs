@@ -13,12 +13,6 @@ class UserProfileSettings
     public List<string> ProfileNames { get; set; } = new()
         { "Profile 1", "Profile 2", "Profile 3", "Profile 4", "Profile 5" };
 
-    [JsonPropertyName("gpuHotspotEnabled")]
-    public bool GpuHotspotEnabled { get; set; } = true;
-
-    [JsonPropertyName("gpuHotspotDiagnosticLogging")]
-    public bool GpuHotspotDiagnosticLogging { get; set; }
-
     [JsonPropertyName("gpuFailsafeTripReason")]
     public string GpuFailsafeTripReason { get; set; } = "";
 
@@ -60,14 +54,6 @@ class UserProfileManager
             try { SaveSettings(); } catch { _settings.LastProfile = old; throw; }
         }
     }
-
-    public bool GpuHotspotEnabled
-    {
-        get => _settings.GpuHotspotEnabled;
-        set { _settings.GpuHotspotEnabled = value; SaveSettings(); }
-    }
-
-    public bool GpuHotspotDiagnosticLogging => _settings.GpuHotspotDiagnosticLogging;
 
     public ThermalProtectionState ThermalProtection => _settings.ThermalProtection!.Copy();
 
@@ -174,8 +160,6 @@ class UserProfileManager
                 if (settings.LastProfile is < 0 or > 5) { Warn("Invalid lastProfile; requested protection settings were not armed. Select a valid profile."); settings.LastProfile = 0; }
                 settings.ProfileNames = Read(root, "profileNames", context.ListString, settings.ProfileNames);
                 if (settings.ProfileNames.Count != 5 || settings.ProfileNames.Any(string.IsNullOrWhiteSpace)) Warn("Invalid profile names repaired; operational protection is unchanged.");
-                settings.GpuHotspotEnabled = Read(root, "gpuHotspotEnabled", context.Boolean, true);
-                settings.GpuHotspotDiagnosticLogging = Read(root, "gpuHotspotDiagnosticLogging", context.Boolean, false);
                 var state = new ThermalProtectionState();
                 if (root.TryGetProperty("thermalProtection", out var block))
                 {

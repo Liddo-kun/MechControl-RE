@@ -28,9 +28,6 @@
     <Content Include="Profiles\**\*.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
-    <!-- Phase 7 of notes/gpu_hotspot_pr77_plan.md adds a pinned, signed
-         Nvidia.bin from an official PawnIO.Modules release here. Never
-         package the zero-signature development artifact. -->
   </ItemGroup>
 
   <ItemGroup>

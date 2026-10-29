@@ -31,8 +31,7 @@ and the chronological session record below. The expanded build is not deployed.
 
 ## UI And Sampling
 
-`tests/ThermalUi.Tests` compiles the real `FailsafeTab` and `EcMonitor` with fake EC
-and hotspot dependencies. It never constructs the hardware application MainForm.
+`tests/ThermalUi.Tests` compiles the real `FailsafeTab` and `EcMonitor` with a fake EC. It never constructs the hardware application MainForm.
 
 - Visible/tray ticks use one shared GPU sample with protection, sampled first.
   Disabled/unheld tray mode adds no GPU read; ordinary visible telemetry still

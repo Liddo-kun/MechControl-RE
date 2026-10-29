@@ -16,10 +16,7 @@ class SystemInfoTab : UserControl
 
     public SystemInfoTab(
         string? systemName,
-        string? cpuName,
-        bool gpuHotspotEnabled = true,
-        string? gpuHotspotStatus = null,
-        Action<bool>? gpuHotspotSettingChanged = null)
+        string? cpuName)
     {
         Dock = DockStyle.Fill;
 
@@ -77,46 +74,6 @@ class SystemInfoTab : UserControl
         _lblDbMaxLive      = UiHelpers.AddKeyValueRow(powerLayout, "DB Max Live / NPCF AMAT [0x7D5]:");
         grpPower.Controls.Add(powerLayout);
         stack.Controls.Add(grpPower);
-
-        // ── Optional native GPU hotspot provider ─────────
-        if (gpuHotspotStatus != null)
-        {
-            var grpHotspot = UiHelpers.BuildSection("GPU Hot Spot Monitoring", fitContent: true);
-            var hotspotLayout = new TableLayoutPanel
-            {
-                AutoSize = true,
-                AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                ColumnCount = 1,
-            };
-            hotspotLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-
-            var enabled = new CheckBox
-            {
-                Text = "Enable native NVIDIA Blackwell GPU Hot Spot monitoring",
-                Checked = gpuHotspotEnabled,
-                AutoSize = true,
-                Font = UiHelpers.FontNormal,
-            };
-            var status = new Label
-            {
-                Text = gpuHotspotStatus,
-                AutoSize = true,
-                MaximumSize = new Size(680, 0),
-                ForeColor = UiColors.Hint,
-                Font = UiHelpers.FontNormal,
-                Margin = new Padding(3, 4, 0, 0),
-            };
-            enabled.CheckedChanged += (s, e) =>
-            {
-                gpuHotspotSettingChanged?.Invoke(enabled.Checked);
-                status.Text = "Setting saved. The change takes effect on the next MechControl launch.";
-            };
-
-            hotspotLayout.Controls.Add(enabled);
-            hotspotLayout.Controls.Add(status);
-            grpHotspot.Controls.Add(hotspotLayout);
-            stack.Controls.Add(grpHotspot);
-        }
 
         Controls.Add(stack);
     }

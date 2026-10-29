@@ -98,7 +98,7 @@ Compact details must still explain:
 - Five unavailable/invalid samples trip protection; arming or applying protected power requires an immediately valid reading. A sleeping GPU reporting zero can cause a conservative trip.
 - Reset requires a fresh valid reading at least 3 C below the applicable threshold and does not restore power or turn off emergency fan boost.
 - Minimum settings are verified EC requests, not proof of actual cooling or physical power enforcement. No shunt multiplier is assumed.
-- No protection while the application/OS cannot run or hardware cannot accept writes; a plausible frozen sensor cannot be detected from this register alone. No hotspot driver or BLE cooler connection is required.
+- No protection while the application/OS cannot run or hardware cannot accept writes; a plausible frozen sensor cannot be detected from this register alone. No BLE cooler connection is required.
 
 If Jon explicitly changes behavioral requirements when supplying screenshots, resolve that conflict with him. Otherwise screenshots govern appearance; this plan governs safety semantics and truthful copy.
 

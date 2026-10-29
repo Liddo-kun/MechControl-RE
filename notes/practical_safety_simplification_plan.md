@@ -287,7 +287,7 @@ Files: failsafe enforcement/persistence ordering and persistence tests.
 - Replace unsupported claims such as "safe on any laptop" for a generic starter
   fan curve. Keep the actual firmware-controlled ramp tails and existing UI warning.
 - Do not broaden this into a MainForm rewrite, remove epoch/permit protections,
-  change linked-fan cadence, or revive the shelved hotspot feature.
+  or change linked-fan cadence.
 
 ## Required Regression Coverage
 

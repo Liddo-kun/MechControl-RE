@@ -80,7 +80,7 @@ class FailsafeTab : UserControl
             "Minimum settings are verified EC requests, not proof of actual cooling or physical power enforcement. No shunt multiplier is assumed. " +
             "Fan boost is the laptop's onboard firmware mode, not the external cooler's pump or fans.\n\n" +
             "No protection while the application/OS cannot run or hardware cannot accept writes. UI-thread stalls can delay checks; this is not real-time protection. " +
-            "A plausible frozen sensor cannot be detected from this register alone. No hotspot driver or BLE cooler connection is required. " +
+            "A plausible frozen sensor cannot be detected from this register alone. No BLE cooler connection is required. " +
             "Notifications and sound are best-effort; closing the independent safety alert does not reset protection.");
         details.Visible = false;
         detailsLink.LinkClicked += (_, _) => details.Visible = !details.Visible;

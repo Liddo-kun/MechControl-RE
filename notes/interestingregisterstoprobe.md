@@ -11,7 +11,7 @@ Discovered by diffing `ec_snap_1.bin` vs `ec_snap_2.bin` (3072 bytes each, EC ad
 | Address | Snap 1 | Snap 2 | Near | Likely Function |
 |---|---|---|---|---|
 | **0x449** | 51 | 37 | `cpuTemp` (0x43E) | Secondary temp sensor (VRM? chipset?) |
-| **0x44C** | 78 | 71 | `gpuTemp` (0x44F) | GPU hotspot or VRM temp |
+| **0x44C** | 78 | 71 | `gpuTemp` (0x44F) | Secondary GPU temp sensor (VRM?) |
 | **0x701** | 89 | 71 | Control zone | Temp mirror (moves in lockstep with 0x703) |
 | **0x703** | 89 | 71 | Control zone | Another temp shadow register |
 
