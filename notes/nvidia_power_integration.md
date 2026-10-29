@@ -167,8 +167,10 @@ same day after review (lazy open, profile loading, F7 re-raise, live rail loweri
 
 ## UI
 
-- All three current sliders move in whole amps. An unmoved slider keeps the exact detected value
-  (e.g. 11.053 A for board input) and writes nothing. Unlocked range is up to 140% of the stock
+- NVVDD/MSVDD sliders move in whole amps, board input in 0.1 A (a whole amp would be ~10%,
+  ~20 W, of its ~11 A); none goes below 1 A. An unmoved slider keeps the exact detected
+  value (e.g. 11.053 A) and writes nothing, also when the slider had to be clamped one step
+  below it (11.053 A locked: maximum 11.0 A). Unlocked range is up to 140% of the stock
   default (UI policy, not a hardware rating).
 - Board input is optional: BIT P slot 9 must be type 3 / flags 1, and the driver
   must expose exactly one HW_THRESHOLD mA policy on a SENSOR_CLIENT_ALIGNED monitor
@@ -266,3 +268,6 @@ disables the feature.
   (defaults stock). Live maximums stay 273/78/11.053 A until the next GPU restart, so the
   first raise above them asks for one. **Not tested live**: that restart, a raised board
   input limit under load, driver 621+.
+  0.1 A board input steps: ThermalUi (12.3/15.1 A applied, locked clamp writes nothing),
+  release build, packaged smoke; deployed 19:39 (backup
+  `C:\tmp\MechControl-backup-20261029-193953`), startup as above, overrides unchanged.

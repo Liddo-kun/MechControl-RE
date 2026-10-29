@@ -166,9 +166,10 @@ class PowerTab : UserControl
 
             if (_gpuControl != null && (_gpuControl.CanUnlockTgp || _gpuControl.PowerOverride != null))
             {
-                _rowNvvdd = AddCurrentSlider(gpuLayout, "NVVDD / Core current limit");
-                _rowMsvdd = AddCurrentSlider(gpuLayout, "MSVDD / Fabric current limit");
-                _rowBoardInput = AddCurrentSlider(gpuLayout, "Board input current limit");
+                _rowNvvdd = AddCurrentSlider(gpuLayout, "NVVDD / Core current limit", 1000);
+                _rowMsvdd = AddCurrentSlider(gpuLayout, "MSVDD / Fabric current limit", 1000);
+                // Board input is ~10 A, so a whole amp would be a ~10% (~20 W) step.
+                _rowBoardInput = AddCurrentSlider(gpuLayout, "Board input current limit", 100);
                 _lblDriverLimits = new Label { AutoSize = true, ForeColor = UiColors.Hint, MaximumSize = new Size(600, 0) };
                 gpuLayout.Controls.Add(_lblDriverLimits);
                 gpuLayout.SetColumnSpan(_lblDriverLimits, 3);
@@ -312,40 +313,55 @@ class PowerTab : UserControl
         RefreshGpuFromHardware();
     }
 
-    // Whole amps. An unmoved slider keeps the exact detected request, which some BIOSes
-    // define in fractional amps, and writes nothing.
-    private UiHelpers.SliderRow AddCurrentSlider(TableLayoutPanel layout, string name)
+    // Positions are steps of stepMilliamps. An unmoved slider keeps the exact detected request,
+    // which some BIOSes define in fractional amps, and writes nothing.
+    private UiHelpers.SliderRow AddCurrentSlider(TableLayoutPanel layout, string name, int stepMilliamps)
     {
         UiHelpers.SliderRow? row = null;
         row = UiHelpers.BuildSliderRow(name, 1, 2, "A", formatter: v => FormatCurrent(row?.Slider, v));
+        row.Slider.Tag = new CurrentSlider(stepMilliamps);
         UiHelpers.AddSliderRow(layout, row);
         _tooltip.SetToolTip(row.Slider, $"Applies live within the active ceiling. The unlock allows up to {UniversalDefaults.GpuCurrentUnlockPercent}% of the stock current; raising an older ceiling restarts the GPU.");
         return row;
     }
 
-    private static int WholeAmps(int milliamps) => (int)Math.Round(milliamps / 1000.0);
+    // A current slider's Tag. Unmoved is the position SetCurrent chose for the detected request.
+    private sealed class CurrentSlider(int stepMilliamps)
+    {
+        public int StepMilliamps { get; } = stepMilliamps;
+        public GpuCurrentLimit? Limit { get; set; }
+        public int Unmoved { get; set; }
+    }
 
-    private static string FormatCurrent(TrackBar? slider, int amps) =>
-        slider?.Tag is GpuCurrentLimit limit && amps == WholeAmps(limit.CurrentMilliamps)
-            ? $"{limit.CurrentMilliamps / 1000.0:0.###} A" : $"{amps} A";
+    private static string FormatCurrent(TrackBar? slider, int position)
+    {
+        if (slider?.Tag is not CurrentSlider { Limit: { } limit } current) return "--";
+        int milliamps = position == current.Unmoved ? limit.CurrentMilliamps : position * current.StepMilliamps;
+        return $"{milliamps / 1000.0:0.###} A";
+    }
 
     private static int? SelectedMilliamps(UiHelpers.SliderRow? row) =>
-        row?.Slider.Tag is GpuCurrentLimit limit && row.Slider.Value != WholeAmps(limit.CurrentMilliamps)
-            ? row.Slider.Value * 1000 : null;
+        row?.Slider.Tag is CurrentSlider { Limit: not null } current && row.Slider.Value != current.Unmoved
+            ? row.Slider.Value * current.StepMilliamps : null;
 
     private static void SetCurrent(UiHelpers.SliderRow row, GpuCurrentLimit? limit, bool unlocked)
     {
-        row.Slider.Tag = limit;
+        var current = (CurrentSlider)row.Slider.Tag!;
+        int step = current.StepMilliamps;
+        current.Limit = limit;
         row.Slider.Enabled = limit != null;
         if (limit != null)
         {
-            int min = Math.Max(1, (limit.MinimumMilliamps + 999) / 1000);
-            int max = Math.Max(min, limit.AllowedMaximumMilliamps(unlocked) / 1000);
+            // Never below 1 A, whatever the step.
+            int min = (Math.Max(1000, limit.MinimumMilliamps) + step - 1) / step;
+            int max = Math.Max(min, limit.AllowedMaximumMilliamps(unlocked) / step);
             row.Slider.SetRange(min, max);
-            row.Slider.Value = Math.Clamp(WholeAmps(limit.CurrentMilliamps), min, max);
+            // Clamped, the detected request can sit one step off its rounded position
+            // (11.053 A at an 11.0 A maximum); that position still means "unmoved".
+            row.Slider.Value = current.Unmoved = Math.Clamp((int)Math.Round(limit.CurrentMilliamps / (double)step), min, max);
             row.Slider.TickFrequency = row.Slider.LargeChange = Math.Max(1, (max - min) / 10);
         }
-        row.Value.Text = limit == null ? "--" : FormatCurrent(row.Slider, row.Slider.Value);
+        row.Value.Text = FormatCurrent(row.Slider, row.Slider.Value);
     }
 
     private void RefreshDriverControls()
