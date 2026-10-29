@@ -11,6 +11,8 @@ record GpuCurrentLimit(int MinimumMilliamps, int DefaultMilliamps, int MaximumMi
 record GpuCurrentLimits(GpuCurrentLimit Nvvdd, GpuCurrentLimit Msvdd);
 // Live driver ceiling, enforced limit and request (null when none is set, e.g. after a GPU restart).
 record GpuPowerLimits(int CeilingWatts, int EnforcedWatts, int? RequestedWatts);
+// The laptop GPU budget (F7) and the combined platform budget (TPP) firmware and Dynamic Boost publish to the driver.
+record GpuPowerBudget(int LaptopWatts, int PlatformWatts);
 
 interface IGpuPowerOverride
 {
@@ -27,6 +29,8 @@ interface IGpuPowerOverride
     bool IsPowerLimitAtMost(int watts);
     // False when the driver dropped this request or firmware reset the laptop budget below it.
     bool IsPowerLimitApplied(int watts);
-    // The laptop budget (F7) firmware and Dynamic Boost publish to the driver.
-    int ReadLaptopBudgetWatts();
+    GpuPowerBudget ReadPowerBudget();
+    // Windows' last device power state, without contacting the GPU. A driver read while it
+    // sleeps would wake it.
+    bool IsGpuAwake();
 }
