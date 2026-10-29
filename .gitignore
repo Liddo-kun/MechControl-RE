@@ -29,6 +29,9 @@ syncthing-backup/
 *.suo
 *.user
 
+# Decompiled OEM code: kept locally, never published
+decompilation/
+
 # OS
 Thumbs.db
 .DS_Store
