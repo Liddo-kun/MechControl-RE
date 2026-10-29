@@ -81,6 +81,7 @@ class MainForm : Form
         // Track which limits came from ECSpec — these are a stronger signal than raw
         // register spot-checks, so the validator won't disable enriched features.
         HashSet<string> enrichedLimits = new();
+        bool cpuTempEncodingConfirmed = false;
         if (hwDetect != null)
         {
             // ECSpec-derived limits override conservative defaults (unverified only;
@@ -120,6 +121,8 @@ class MainForm : Form
             {
                 DiagnosticLog.Write($"CPU temp encoding: inverted_offset (ECSpec byte[3]={hwDetect.EcSpecBytes[3]}, TjMax=105)");
             }
+            cpuTempEncodingConfirmed = ecSpecLimits != null && ecSpecLimits.TryGetValue("cpuTempLimit", out var specTemp)
+                && specTemp.Encoding == profile.CpuTempEncoding;
 
             // PL4 encoding (CPU_PL4_Double_Flag, 0x727 bit 7) is a hardware fact.
             if (profile.Limits.TryGetValue("PL4", out var pl4Limit))
@@ -279,7 +282,8 @@ class MainForm : Form
 
         // Startup validation — determines which features are safe to enable
         _validator = new StartupValidator(device, profile,
-            hwDetect?.ModuleIdGpu ?? 0xFF, profile.FanTable.HasGpuFan, enrichedLimits);
+            hwDetect?.ModuleIdGpu ?? 0xFF, profile.FanTable.HasGpuFan, enrichedLimits,
+            ProfileLoader.LastCpuVendor, cpuTempEncodingConfirmed);
         _validator.Validate();
 
         // Log disabled features for unverified profiles (no popup — check diagnostic log)
@@ -1081,17 +1085,21 @@ class MainForm : Form
             void WriteReg(string name, byte value) => _guard.Write(_profile.GetRegister(name), value);
             void Restore()
             {
-                // CPU/GPU power: 0 = hand control back to EC firmware
-                WriteReg("PL1", 0);
-                WriteReg("PL2", 0);
-                WriteReg("PL4", 0);
+                // CPU power: 0 = hand control back to EC firmware. Skipped when
+                // validation disabled CPU power (e.g. unconfirmed temp encoding).
+                if (_cpuControl != null)
+                {
+                    WriteReg("PL1", 0);
+                    WriteReg("PL2", 0);
+                    WriteReg("PL4", 0);
 
-                // CPU temp limit: max allowed = no throttling
-                var tl = _profile.Limits["cpuTempLimit"];
-                byte tempByte = tl.Encoding == "direct"
-                    ? RegisterEncoding.EncodeCpuTempLimitDirect(tl.Max)
-                    : RegisterEncoding.EncodeCpuTempLimit(tl.Max, _profile.TjMax);
-                WriteReg("cpuTempLimitWrite", tempByte);
+                    // CPU temp limit: max allowed = no throttling
+                    var tl = _profile.Limits["cpuTempLimit"];
+                    byte tempByte = tl.Encoding == "direct"
+                        ? RegisterEncoding.EncodeCpuTempLimitDirect(tl.Max)
+                        : RegisterEncoding.EncodeCpuTempLimit(tl.Max, _profile.TjMax);
+                    WriteReg("cpuTempLimitWrite", tempByte);
+                }
 
                 _guard.WriteBitfield(_profile.GetRegister("tgpDbCtrl"), _profile.Bitfields["dynamicBoostEn"].GetMask(), 0);
                 WriteReg("tgp", 0);
@@ -1100,7 +1108,7 @@ class MainForm : Form
 
                 // Fan: boost off, custom curve disabled (EC internal fan control)
                 if (_fanControl != null) _fanControl.SetFanBoost(false);
-                else WriteReg("fanControlMode", 0);
+                else _guard.WriteBitfield(_profile.GetRegister("fanControlMode"), _profile.Bitfields["fanBoost"].GetMask(), 0);
                 if (_fanControl != null)
                 {
                     _fanTab?.SetLinkedEnabled(false);

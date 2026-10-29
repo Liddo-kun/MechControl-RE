@@ -29,19 +29,22 @@ static class RegisterEncoding
     public static int DecodeDB(byte reg) => reg;
 
     // CPU Temp Limit (Intel, inverted_offset): bit 7 = enable, bits 0-6 = (tjMax - temp)
-    // Write to 0x786, read from 0x463 (no enable bit)
+    // Write to 0x786, read from 0x463.
     // Safety clamp is tjMax-relative: TccOffset must stay in 0..40 (the range
     // ECSpec byte[3] declares valid). Policy clamping to the profile's
     // cpuTempLimit min/max is the caller's job.
     public static byte EncodeCpuTempLimit(int tempC, int tjMax = 105) =>
         (byte)(0x80 | (tjMax - Math.Clamp(tempC, tjMax - 40, tjMax)));
-    public static int DecodeCpuTempLimit(byte reg, int tjMax = 105) =>
-        tjMax - reg;  // Use on 0x463 readback, NOT 0x786
 
     // CPU Temp Limit (AMD, direct): bit 7 = enable/commit, bits 0-6 = absolute temp C
-    // Write to 0x786, read from 0x463 (no enable bit)
+    // Write to 0x786, read from 0x463.
     public static byte EncodeCpuTempLimitDirect(int tempC) =>
         (byte)(0x80 | Math.Clamp(tempC, 80, 120));
+
+    // Use on 0x463 readback, NOT 0x786. Bit 7 at 0x463 is a "new value" flag the
+    // EC sets on every change and clears later, so it is masked off.
+    public static int DecodeCpuTempLimit(byte reg, bool direct, int tjMax = 105) =>
+        direct ? reg & 0x7F : tjMax - (reg & 0x7F);
 
     // Fan duty: raw/2 = percent (register 200 = 100%)
     public static byte EncodeFanDuty(int percent) =>

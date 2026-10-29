@@ -25,16 +25,21 @@ class StartupValidator
     private readonly byte _moduleIdGpu;
     private readonly bool _hasGpuFan;
     private readonly HashSet<string> _enrichedLimits;
+    private readonly string? _cpuVendor;
+    private readonly bool _cpuTempEncodingConfirmed;
 
     public StartupValidator(EcDevice device, MachineProfile profile,
         byte moduleIdGpu = 0xFF, bool hasGpuFan = true,
-        HashSet<string>? enrichedLimits = null)
+        HashSet<string>? enrichedLimits = null,
+        string? cpuVendor = null, bool cpuTempEncodingConfirmed = false)
     {
         _device = device;
         _profile = profile;
         _moduleIdGpu = moduleIdGpu;
         _hasGpuFan = hasGpuFan;
         _enrichedLimits = enrichedLimits ?? new();
+        _cpuVendor = cpuVendor;
+        _cpuTempEncodingConfirmed = cpuTempEncodingConfirmed;
     }
 
     /// <summary>
@@ -69,6 +74,7 @@ class StartupValidator
             EnabledFeatures.Add("lighting");
             ValidateBitfields(); // log-only for verified
             ValidateFeatureRegisters(); // log-only for verified
+            ValidateCpuTempEncoding();
             return;
         }
 
@@ -76,6 +82,7 @@ class StartupValidator
 
         ValidateBitfields();
         ValidateFeatureRegisters();
+        ValidateCpuTempEncoding();
 
         // Summarize
         DiagnosticLog.Section("Validation Summary");
@@ -145,12 +152,9 @@ class StartupValidator
         cpuOk &= ValidateRegister("PL1", v => RegisterEncoding.DecodePL1(v));
         cpuOk &= ValidateRegister("PL2", v => RegisterEncoding.DecodePL1(v));
         cpuOk &= ValidateRegister("PL4", v => RegisterEncoding.DecodePL4(v, _profile.Pl4Doubled));
-        cpuOk &= ValidateRegister("cpuTempLimit", v =>
-        {
-            if (_profile.CpuTempEncoding == "direct")
-                return v; // absolute temperature
-            return RegisterEncoding.DecodeCpuTempLimit(v, _profile.TjMax);
-        }, readRegister: "cpuTempLimitRead");
+        cpuOk &= ValidateRegister("cpuTempLimit",
+            v => RegisterEncoding.DecodeCpuTempLimit(v, _profile.CpuTempEncoding == "direct", _profile.TjMax),
+            readRegister: "cpuTempLimitRead");
 
         if (cpuOk && !DisabledFeatures.ContainsKey("cpuPower"))
             EnabledFeatures.Add("cpuPower");
@@ -191,6 +195,31 @@ class StartupValidator
         lightingOk &= ValidateLogoRegisters();
         if (lightingOk && !DisabledFeatures.ContainsKey("lighting"))
             EnabledFeatures.Add("lighting");
+    }
+
+    /// <summary>
+    /// The EC applies 0x786's low seven bits as an Intel TCC offset or an AMD
+    /// absolute temperature without a range check (X6FR5 EC firmware), so the
+    /// wrong encoding requests a very low limit: Intel 0x8A on AMD is 10 C.
+    /// When ECSpec hasn't confirmed the encoding, it must at least match the
+    /// CPU vendor; otherwise CPU power control stays off. Applies to verified
+    /// profiles too, since a profile can load on the wrong machine.
+    /// </summary>
+    private void ValidateCpuTempEncoding()
+    {
+        if (_cpuTempEncodingConfirmed || _cpuVendor == null) return;
+        string expected = _cpuVendor == "amd" ? "direct" : "inverted_offset";
+        string encoding = _profile.CpuTempEncoding;
+        if (encoding == expected)
+        {
+            DiagnosticLog.Write($"  [INFO] CPU temp encoding '{encoding}' not confirmed by ECSpec; matches {_cpuVendor} CPU");
+            return;
+        }
+        string reason = $"CPU temperature-limit encoding '{encoding}' does not match the {_cpuVendor} CPU " +
+            $"(expected '{expected}') and ECSpec did not confirm it";
+        DiagnosticLog.Write($"  [FAIL] {reason}");
+        EnabledFeatures.Remove("cpuPower");
+        DisabledFeatures["cpuPower"] = reason;
     }
 
     private bool ValidateRegister(string limitName, Func<byte, int> decode, string? readRegister = null)

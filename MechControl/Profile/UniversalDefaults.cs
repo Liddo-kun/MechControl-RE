@@ -17,6 +17,9 @@ static class UniversalDefaults
         ["batteryMode"]    = new BitfieldInfo { Register = "0x7A6", Mask = "0x38" },
         ["dynamicBoostEn"] = new BitfieldInfo { Register = "0x743", Mask = "0x07" },
         ["logoOnOff"]      = new BitfieldInfo { Register = "0x7AB", Bit = 7 },
+        // 0x751 is shared: the EC keeps temp-policy mode bits in bits 4 and 7
+        // and clears boost itself when the machine is cool (X6FR5 EC firmware).
+        ["fanBoost"]       = new BitfieldInfo { Register = "0x751", Bit = 6 },
     };
 
     // ── Bitfield validation: known-valid masked values ───────────
@@ -145,12 +148,9 @@ static class UniversalDefaults
     /// </summary>
     public static void ApplyToProfile(MachineProfile profile)
     {
-        // Bitfields: fill from defaults if empty
-        if (profile.Bitfields.Count == 0)
-        {
-            foreach (var kvp in Bitfields)
-                profile.Bitfields[kvp.Key] = kvp.Value;
-        }
+        // Bitfields: fill any the profile doesn't declare
+        foreach (var kvp in Bitfields)
+            profile.Bitfields.TryAdd(kvp.Key, kvp.Value);
 
         // Limits: fill from conservative defaults if empty
         if (profile.Limits.Count == 0)
