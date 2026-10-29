@@ -157,11 +157,19 @@ class EcActivationControl
             _guard.Write(AddrBiosCtrl, 0x41));
 
         // Post-init verification: check that EC is processing activation register.
-        // With 150ms inter-step sleeps, the 0x741 write happens ~900ms before
-        // this read, well past the ~250ms async transform window.
+        // The 0x741 write happens ~900ms before this read. The EC usually clears
+        // bit 2 within ~60ms but has taken longer, so poll for up to 3 s more.
         byte appe = _device.ReadByte(AddrActivation);
+        int waitedMs = 0;
+        while ((appe & (ActivationBit | ActivationPendingBit)) != ActivationBit && waitedMs < 3000)
+        {
+            Thread.Sleep(100);
+            waitedMs += 100;
+            appe = _device.ReadByte(AddrActivation);
+        }
         if ((appe & (ActivationBit | ActivationPendingBit)) == ActivationBit)
-            DiagnosticLog.Write($"EC init verified: 0x741 transformed (EC active, 0x{appe:X2})");
+            DiagnosticLog.Write($"EC init verified: 0x741 transformed (EC active, 0x{appe:X2}" +
+                (waitedMs > 0 ? $", after {waitedMs} ms extra wait)" : ")"));
         else
             DiagnosticLog.Warn($"EC init: 0x741 = 0x{appe:X2} (expected bit 0 set, bit 2 cleared — EC may not be applying power limits)");
 
