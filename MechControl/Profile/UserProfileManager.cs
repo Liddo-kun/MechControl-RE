@@ -81,6 +81,19 @@ class UserProfileManager
         try { SaveSettings(); } catch { _settings.ProfileNames[slot - 1] = old; throw; }
     }
 
+    public void ClearProfile(int slot)
+    {
+        int oldLast = _settings.LastProfile;
+        string oldName = _settings.ProfileNames[slot - 1];
+        // Settings first: a failed save leaves the slot intact, and startup
+        // auto-load never points at a deleted file.
+        if (oldLast == slot) _settings.LastProfile = 0;
+        _settings.ProfileNames[slot - 1] = $"Profile {slot}";
+        try { SaveSettings(); }
+        catch { _settings.LastProfile = oldLast; _settings.ProfileNames[slot - 1] = oldName; throw; }
+        File.Delete(GetSlotPath(slot));
+    }
+
     public bool SlotExists(int slot)
     {
         return File.Exists(GetSlotPath(slot));

@@ -30,7 +30,7 @@ class ProfileBar : UserControl
     /// <summary>Raised after a profile is loaded and applied to EC.</summary>
     public event Action? ProfileApplied;
 
-    /// <summary>Raised when a profile is saved or renamed (tray menu refresh).</summary>
+    /// <summary>Raised when a profile is saved, renamed or cleared (tray menu refresh).</summary>
     public event Action? ProfileListChanged;
 
     /// <summary>Raised when the Restore Defaults button is clicked.</summary>
@@ -121,11 +121,13 @@ class ProfileBar : UserControl
                 btn.ForeColor = UiColors.Disabled;
 
             btn.Click += (s, e) => OnSlotClick(slot);
-            btn.MouseUp += (s, e) =>
-            {
-                if (e.Button == MouseButtons.Right)
-                    OnSlotRightClick(slot);
-            };
+
+            var slotMenu = new ContextMenuStrip();
+            slotMenu.Items.Add("Rename...", null, (s, e) => OnRenameClick(slot));
+            var clearItem = slotMenu.Items.Add("Clear Profile", null, (s, e) => OnClearClick(slot));
+            slotMenu.Opening += (s, e) => clearItem.Enabled = _manager.SlotExists(slot)
+                || _manager.GetProfileNames()[slot - 1] != $"Profile {slot}";
+            btn.ContextMenuStrip = slotMenu;
 
             _slotButtons[i] = btn;
             flow.Controls.Add(btn);
@@ -245,7 +247,30 @@ class ProfileBar : UserControl
         DiagnosticLog.Write($"[UserProfile] Saved to slot {slot}");
     }
 
-    private void OnSlotRightClick(int slot)
+    private void OnClearClick(int slot)
+    {
+        string name = _manager.GetProfileNames()[slot - 1];
+        if (MessageBox.Show(FindForm(), $"Clear \"{name}\"? The saved settings for slot {slot} are deleted and its name is reset.\n\n" +
+            "Settings currently applied to the hardware are not changed.", "Clear Profile",
+            MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK) return;
+
+        UiHelpers.TryUi(() =>
+        {
+            _manager.ClearProfile(slot);
+            _slotButtons[slot - 1].Text = $"Profile {slot}";
+            if (_activeSlot == slot)
+            {
+                // Applied settings no longer match any saved profile.
+                HighlightSlot(0);
+                _failsafeTab.MarkUnsaved();
+            }
+            else HighlightSlot(_activeSlot);
+            ProfileListChanged?.Invoke();
+            DiagnosticLog.Write($"[UserProfile] Cleared slot {slot}");
+        }, "clear profile", "Clear Error");
+    }
+
+    private void OnRenameClick(int slot)
     {
         string currentName = _manager.GetProfileNames()[slot - 1];
 
