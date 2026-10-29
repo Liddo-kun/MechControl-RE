@@ -134,13 +134,13 @@ sealed class EcActivationWatchdog : IDisposable
         _disposed = true;
         SystemEvents.PowerModeChanged -= OnPowerModeChanged;
 
-        // Wait briefly for an in-flight tick so recovery (~1.2s worst case)
+        // Wait briefly for an in-flight tick so recovery (~4.2s worst case)
         // can't touch the EC device mid-shutdown.
         if (_timer != null)
         {
             using var done = new ManualResetEvent(false);
             if (_timer.Dispose(done))
-                done.WaitOne(3000);
+                done.WaitOne(5000);
         }
     }
 }
