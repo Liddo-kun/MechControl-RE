@@ -119,17 +119,17 @@ sealed class NvidiaPowerControl : IGpuPowerOverride, IDisposable
             Validate(nvvddMilliamps, live.Nvvdd); Validate(msvddMilliamps, live.Msvdd);
             bool restart = NeedsRestart(enabled, nvvddMilliamps, msvddMilliamps, live);
             if (restart && !allowRestart) throw new InvalidOperationException("These NVIDIA limits require a GPU restart. Apply them manually first.");
-            // The registry always holds exactly the chosen ceilings (paired DEFAULT/MAX), so
-            // the GPU starts at the user's current values after a reboot or driver reset.
-            // Raising above the active range needs a restart now; lowering applies live and
-            // the lower ceiling takes effect at the next GPU start.
-            uint? Ceiling(int? value, GpuCurrentLimit rail, NvidiaBiosField stock)
+            // Unlocked, the registry holds each rail's maximum at the top of the unlocked range,
+            // so every slider value applies live, and its default at the chosen current, so the
+            // GPU starts there after a reboot or driver reset. Besides toggling the unlock, only
+            // a value above a lower live maximum (staged by an older build) needs a restart.
+            NvidiaRailOverride Rail(int? value, GpuCurrentLimit rail)
             {
-                int chosen = value ?? Math.Min(rail.CurrentMilliamps, rail.AllowedMaximumMilliamps(enabled));
-                return chosen > stock.Maximum ? (uint)chosen : null;
+                int max = rail.AllowedMaximumMilliamps(true);
+                return new((uint)(value ?? Math.Min(rail.CurrentMilliamps, max)), (uint)max);
             }
             var request = enabled
-                ? new NvidiaOverrideRequest(UnlockedCeilingMw, Ceiling(nvvddMilliamps, live.Nvvdd, original.Nvvdd), Ceiling(msvddMilliamps, live.Msvdd, original.Msvdd))
+                ? new NvidiaOverrideRequest(UnlockedCeilingMw, Rail(nvvddMilliamps, live.Nvvdd), Rail(msvddMilliamps, live.Msvdd))
                 : new();
             var records = original.BuildOverrides(request);
             if (restart)
@@ -167,11 +167,16 @@ sealed class NvidiaPowerControl : IGpuPowerOverride, IDisposable
             uint target = checked((uint)watts * 1000);
             bool raise = Enabled && target > original.Power.Maximum;
             if (raise) RaiseBudget(target);
-            var result = api.SetPowerLimit(target);
+            api.SetPowerLimit(target);
             // Lowering never depends on the budget interfaces: F8 alone is enforced.
             if (!raise) RestoreBudget();
-            else DiagnosticLog.Write($"[NVIDIA Power] Requested {watts} W; enforced {result.EnforcedMw / 1000.0:0.###} W.");
+            else DiagnosticLog.Write($"[NVIDIA Power] Requested {watts} W.");
         }
+    }
+
+    public int ReadLaptopBudgetWatts()
+    {
+        using (Enter()) return checked((int)(api.ReadPowerBudget().F7Mw / 1000));
     }
 
     public bool IsPowerLimitAtMost(int watts)

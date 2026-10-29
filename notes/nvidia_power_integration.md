@@ -21,7 +21,7 @@ same day after review (lazy open, profile loading, F7 re-raise, live rail loweri
 ## Unlock, GPU restart and when it must be redone
 
 - Turning the unlock on stages software BIOS overrides in the GPU's registry key
-  (power ceiling = original max + 75 W; rail ceilings only when above stock) and
+  (power ceiling = original max + 75 W; rail maximums = 130% of stock default) and
   restarts that GPU. It is not a ROM flash.
 - **Before** the restart: the raised laptop budget (F7/platform) is returned, the
   original values at every patchable offset (power max, both rails' default/max) are
@@ -40,9 +40,20 @@ same day after review (lazy open, profile loading, F7 re-raise, live rail loweri
   VBIOS is replaced. Both are detected at open (BIOS version differs, or no records
   left and the original values active): owned records that no longer apply are
   removed with `originals.txt` and logged, and the unlock shows as off.
-- The registry always holds exactly the chosen ceilings. Raising a rail above its
-  live maximum needs a restart; lowering applies live and the lower ceiling is
-  staged for the next GPU start, without a restart.
+- Rails (2026-10-29 revision): while unlocked the registry holds each rail's maximum at
+  the top of the unlocked slider range (130% of stock default) and its default at the chosen
+  current, so any slider value applies live and the GPU starts at the chosen current.
+  Only toggling the unlock restarts the GPU. Before, default and maximum were both the
+  chosen value: lowering applied live, but raising above the last restart's value
+  restarted the GPU again (Jon's report). A live maximum staged by such a build still
+  needs one restart when exceeded; any apply restages the full range for the next start.
+  Stock BIOS here has default = maximum (210/210, 60/60 A). Unlocked range was 2x stock
+  default until 2026-10-29 (Jon: 130% is enough).
+  Live 2026-10-29 10:43 (`C:\Temp\tandem\rail-ceiling-test\run1.txt`, app stopped): old live
+  maximums 241/73 A; 250/75 A restarted the GPU once, which accepted default 250 < maximum
+  273 A (image verified); then 273/78 -> 230/65 -> 273/78 -> 210/60 A all live, no restart.
+  Registry afterwards: power 250 W, maximums 273/78 A, stock defaults. App restart: profile
+  slot 2 applied 210/60 A live, F8/F7/enforced 175 W.
 - Turning the unlock off restarts the GPU with no overrides and deletes `originals.txt`.
   Firmware Defaults does the same after the EC restore (best effort, separate error).
 
@@ -69,10 +80,37 @@ same day after review (lazy open, profile loading, F7 re-raise, live rail loweri
   (accepted: F8 and the CPU PLs still cap the actual draw).
 
 - **Open issue (Jon, 2026-10-29):** at 150 W + 25 W Dynamic Boost (a stock request,
-  F8 175 W) the GPU is now held about 20-25 W lower than before the unlock work. Probe:
-  F7 150 W (firmware value since boot), platform 345 W, enforced 150 W. The app only
-  raises F7 for requests above stock. Not yet investigated: compare with the unlock
-  off / the app stopped, and with HEAD (EC only).
+  F8 175 W) the GPU was held at 150 W (games and an OpenCL load), with the unlock off
+  too and with the app stopped. Cause: the Dynamic Boost driver (PnP device
+  `ACPI\NVDA0820\NPCF`, "NVIDIA Platform Controllers and Framework") had stopped adding
+  DB. Broken: F7 150 W, platform 345 W, enforced 150 W; EC changes (DB off/5/25) did not
+  revive it. `pnputil /restart-device "ACPI\NVDA0820\NPCF"` (app stopped) revived it at
+  once: F7 175 W, platform 350 W, enforced 175 W, ~170 W drawn. With DB working, none of
+  these broke it again (each followed by a 10 s load at enforced 175 W): NVAPI/platform
+  reads, GPU restart, same-value F7 and TPP writes, F7/platform raise to 185 W and
+  restore, EC failsafe minimum and back, F8 175 W, app restart, charger unplug/replug,
+  sleep/resume, reboot. With DB working, F7 = 95 + EC 788 (cTGP) + EC 7D5 (DB): boot
+  defaults 788=50, 7D5=5 give 150 W. Writing F7 = 150 caps enforced at 150 W only until
+  the next EC change republishes (then 175 W). Timeline evidence: it was already broken
+  at 8:45 (charger test while F7 was raised to 185 W by the app: replug gave 124 W with
+  EC 160+25, which should be 185 W) and at 9:4x (replug gave 150 W, same EC). Also not
+  reproduced with the current build: app at 185 W, unplug (re-raise on battery), replug,
+  back to 150+25; F7/platform raise to 250 W and restore; GPU restart while raised (F7
+  republished 175 W after the restart). Trigger unknown; possibly a pre-simplification
+  build (budget journal/rollback, blocking re-raise loop) or a morning event not repeated.
+  Manual recovery: `pnputil /restart-device "ACPI\NVDA0820\NPCF"` (GPU keeps running).
+  Draw figures in these runs may include a game sharing the GPU; enforced/F7 are the
+  measure.
+- Log check (added after the above): while the NVIDIA driver is open, the delayed check
+  runs after every apply (not only above stock), after a power-source change and after
+  resume. On AC it warns in `mechcontrol.log` when F7 is below EC TGP + DB ("Dynamic
+  Boost may be stuck"). Log only; no automatic device restart. Stock users who never
+  opened NVIDIA get no check.
+- Full power cycle (boot type 0x0, deployed log-check build, app not started at boot):
+  EC boot defaults 743=02, 788=50, 7D5=5 -> F7 150 W, enforced 150 W, game ~147.5 W.
+  App start (profile 150+25) -> EC 788=55, 7D5=25, F7 175 W, enforced 175 W within ~2 s,
+  game ~170 W; no stuck warning. Boot does not break Dynamic Boost.
+  Probe ops `loadsmi` (no NVAPI), `tppsame`, `f7same`, `raise`; `C:\Temp\tandem\boot-check.ps1`.
 
 ## Thermal failsafe
 
@@ -117,15 +155,15 @@ same day after review (lazy open, profile loading, F7 re-raise, live rail loweri
   turn the unlock on or restart the GPU.
 - A profile that doesn't need the unlock behaves like stock while unlocked: power is
   capped by its own TGP + DB, and currents it didn't save (legacy/stock-saved
-  profiles) are set to the stock defaults, live. The lower rail ceilings are staged,
-  so after a reboot an unlocked profile's higher currents need a manual load (GPU
-  restart) again. Power-tab Apply is not a profile and keeps unmoved currents.
+  profiles) are set to the stock defaults, live. The rail maximums stay at the unlocked
+  range, so a later unlocked profile applies its currents live. Power-tab Apply is not a
+  profile and keeps unmoved currents.
 - TGP values beyond even the unlocked range are refused as before.
 
 ## UI
 
 - Rail sliders move in whole amps. An unmoved slider keeps the exact detected value
-  (e.g. 70.313 A) and writes nothing. Unlocked range is up to twice the stock
+  (e.g. 70.313 A) and writes nothing. Unlocked range is up to 130% of the stock
   default (UI policy, not a hardware rating).
 
 ## Compatibility and recovery

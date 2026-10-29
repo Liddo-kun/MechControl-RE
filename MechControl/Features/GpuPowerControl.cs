@@ -28,8 +28,8 @@ class GpuPowerControl
     public string? PowerOverrideUnavailableReason { get; private set; }
     // Runs a GPU restart; the app shows progress and keeps its UI thread (and failsafe) alive.
     public Action<string, Action> RunBlocking { get; set; } = (_, work) => work();
-    // Firmware resets its laptop budget about a second after the EC registers change. The app
-    // calls ReassertDriverRequest a few seconds after a request above stock.
+    // Firmware resets its laptop budget about a second after the EC registers change. While the
+    // NVIDIA driver is open, the app calls ReassertDriverRequest a few seconds after every apply.
     public Action? ScheduleDriverCheck { get; set; }
     // Why the last profile load could not apply all of its NVIDIA settings ("" when it did).
     public string ProfileNotice { get; private set; } = "";
@@ -105,27 +105,35 @@ class GpuPowerControl
             // While unlocked, the raised driver request (F8) would otherwise stay above the
             // EC request. Every EC request, including the thermal hold, is mirrored.
             int? request = driver == null ? null : Math.Min(driver.ReadPowerLimits().CeilingWatts, checked(tgpWatts + (dynamicBoostEnabled ? dbWatts : 0)));
-            if (request is int watts)
-            {
-                driver!.ApplyPowerLimit(watts);
-                if (watts > driver.StockPowerLimitWatts) ScheduleDriverCheck?.Invoke();
-            }
+            if (request is int watts) driver!.ApplyPowerLimit(watts);
             _driverWatts = request;
             _lastRequest = requested;
+            if (PowerOverride != null) ScheduleDriverCheck?.Invoke();
         }
         catch (Exception ex) { Failsafe?.ReportWriteFailure(ThermalAction.Gpu, ex); throw; }
     }
 
     /// <summary>
     /// Reapply the last unlocked request if the driver dropped it (sleep) or firmware reset
-    /// the laptop budget below it (EC changes, charger plugged in or out).
+    /// the laptop budget below it (EC changes, charger plugged in or out). On AC, log when the
+    /// laptop budget stays below the EC request: Dynamic Boost has been seen to stop adding
+    /// its boost until its driver (NVIDIA Platform Controllers and Framework) restarts.
     /// </summary>
-    public void ReassertDriverRequest()
+    public void ReassertDriverRequest(bool onAc)
     {
-        if (_lastRequest is not { } last || _driverWatts is not int watts || PowerOverride is not { Enabled: true } driver) return;
-        if (driver.IsPowerLimitApplied(watts)) return;
-        DiagnosticLog.Write($"[NVIDIA Power] Driver request or laptop budget below {watts} W; reapplying.");
-        ApplyGpuPower(last.Tgp, last.DynamicBoost, last.DbWatts);
+        if (PowerOverride is not { } driver) return;
+        if (_lastRequest is { } last && _driverWatts is int watts && driver.Enabled && !driver.IsPowerLimitApplied(watts))
+        {
+            DiagnosticLog.Write($"[NVIDIA Power] Driver request or laptop budget below {watts} W; reapplying.");
+            ApplyGpuPower(last.Tgp, last.DynamicBoost, last.DbWatts);
+            return; // The reapply schedules another check.
+        }
+        if (!onAc) return;
+        var ec = ReadEcPower();
+        int expected = ec.TgpWatts + (ec.DynamicBoostEnabled ? ec.DbWatts : 0), budget = driver.ReadLaptopBudgetWatts();
+        if (budget < expected)
+            DiagnosticLog.Warn($"[NVIDIA Power] Laptop budget {budget} W is below the EC request {expected} W on AC; Dynamic Boost may be stuck. " +
+                "Restarting the \"NVIDIA Platform Controllers and Framework\" device restores it.");
     }
 
     public void ValidatePower(int tgpWatts, bool dynamicBoostEnabled, int dbWatts, bool? unlocked = null)

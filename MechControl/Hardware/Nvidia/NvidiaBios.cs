@@ -3,7 +3,8 @@ using System.Buffers.Binary;
 namespace MechControl.Hardware.Nvidia;
 
 internal sealed record NvidiaBiosField(int Offset, uint Minimum, uint Default, uint Maximum);
-internal sealed record NvidiaOverrideRequest(uint? PowerMaximumMw = null, uint? NvvddMaximumMa = null, uint? MsvddMaximumMa = null);
+internal sealed record NvidiaRailOverride(uint DefaultMa, uint MaximumMa);
+internal sealed record NvidiaOverrideRequest(uint? PowerMaximumMw = null, NvidiaRailOverride? Nvvdd = null, NvidiaRailOverride? Msvdd = null);
 internal sealed record NvidiaOverrideRecord(string Name, byte[] Data);
 
 /// <summary>Validated BIT P power-policy layout. Offsets are image coordinates, not logical BIT addresses.</summary>
@@ -156,17 +157,16 @@ internal sealed class NvidiaBios
     public IReadOnlyList<NvidiaOverrideRecord> BuildOverrides(NvidiaOverrideRequest request)
     {
         var patches = new SortedDictionary<int, uint>();
-        void Add(NvidiaBiosField f, uint? value, bool paired)
+        void Add(NvidiaBiosField f, uint def, uint max)
         {
-            if (!value.HasValue) return;
-            uint v = value.Value;
-            if (v < f.Minimum || v == 0 || v > int.MaxValue) throw new ArgumentOutOfRangeException(nameof(request));
-            if (!paired && v < f.Default) throw new ArgumentOutOfRangeException(nameof(request), "Power maximum is below BIOS default.");
-            if (paired && v != f.Default) patches.Add(f.Offset + 4, v);
-            if (v != f.Maximum) patches.Add(f.Offset + 8, v);
+            if (def < f.Minimum || def == 0 || max > int.MaxValue) throw new ArgumentOutOfRangeException(nameof(request));
+            if (def > max) throw new ArgumentOutOfRangeException(nameof(request), "BIOS default is above its maximum.");
+            if (def != f.Default) patches.Add(f.Offset + 4, def);
+            if (max != f.Maximum) patches.Add(f.Offset + 8, max);
         }
-        Add(Power, request.PowerMaximumMw, false);
-        Add(Nvvdd, request.NvvddMaximumMa, true); Add(Msvdd, request.MsvddMaximumMa, true);
+        if (request.PowerMaximumMw is uint power) Add(Power, Power.Default, power);
+        if (request.Nvvdd is { } nv) Add(Nvvdd, nv.DefaultMa, nv.MaximumMa);
+        if (request.Msvdd is { } ms) Add(Msvdd, ms.DefaultMa, ms.MaximumMa);
         return patches.Select((patch, i) =>
         {
             byte[] data = new byte[14]; version.CopyTo(data, 0);

@@ -106,8 +106,8 @@ static partial class Program
         power.ApplyGpuPower(150, true, 25);
         Assert.Equal(0, driver.PowerRequests);
 
-        // Unlocked: up to EC max + headroom, and no further. A request above stock schedules
-        // the check that re-raises it after firmware resets the laptop budget.
+        // Unlocked: up to EC max + headroom, and no further. Every apply schedules the check
+        // that re-raises a request after firmware resets the laptop budget.
         driver.Enabled = true;
         int checks = 0;
         power.ScheduleDriverCheck = () => checks++;
@@ -118,11 +118,14 @@ static partial class Program
         Assert.Equal(250, driver.PowerWatts);
         Assert.Equal(1, checks);
         int raised = driver.PowerRequests;
-        power.ReassertDriverRequest();
-        Assert.Equal(raised, driver.PowerRequests);
+        power.ReassertDriverRequest(onAc: true);
+        Assert.True(driver.PowerRequests == raised && driver.BudgetReads == 1);
         driver.BudgetReset = true;
-        power.ReassertDriverRequest();
+        power.ReassertDriverRequest(onAc: true);
         Assert.True(driver.PowerRequests == raised + 1 && !driver.BudgetReset && driver.PowerWatts == 250);
+        // The stuck-Dynamic-Boost log check reads the laptop budget only on AC.
+        power.ReassertDriverRequest(onAc: false);
+        Assert.Equal(1, driver.BudgetReads);
         Assert.Throws<ArgumentOutOfRangeException>(() => power.ValidatePower(226, false, 0));
 
         // Unlocked floor: 60% of the model minimum. Below it the EC stays at its minimum and
@@ -133,7 +136,7 @@ static partial class Program
         power.ApplyGpuPower(60, true, 10);
         AssertGpuWrites(device.Writes, 0x07, 0, 10, repetitions: 1);
         Assert.Equal(70, driver.PowerWatts);
-        Assert.Equal(0, checks);
+        Assert.Equal(1, checks);
         Assert.Equal(60, power.ReadGpuPower().TgpWatts);
         Assert.Throws<ArgumentOutOfRangeException>(() => power.ValidatePower(56, false, 0));
         var lowSaved = new GpuProfileSettings { Tgp = 60 };
@@ -193,15 +196,17 @@ static partial class Program
         Assert.True(driver.Nvvdd == 210000 && driver.Restarts == 0);
         driver.Nvvdd = 205500;
 
-        // A higher current ceiling: manual loads restart, automatic loads clamp to the live ceiling.
+        // Above a lower live ceiling: manual loads restart (within 130% of the stock default),
+        // automatic loads clamp to the live ceiling.
         loaded.Gpu.NvvddMilliamps = 400000;
-        Assert.True(power.PlanProfile(loaded.Gpu, automatic: false).Restart);
+        plan = power.PlanProfile(loaded.Gpu, automatic: false);
+        Assert.True(plan.Restart && plan.Settings.NvvddMilliamps == 273000);
         plan = power.PlanProfile(loaded.Gpu, automatic: true);
         Assert.False(plan.Restart);
-        Assert.Equal(300000, plan.Settings.NvvddMilliamps!.Value);
+        Assert.Equal(250000, plan.Settings.NvvddMilliamps!.Value);
         Assert.Contains("restart", plan.Notice);
         power.ConfigureProfile(plan);
-        Assert.Equal(300000, driver.Nvvdd);
+        Assert.Equal(250000, driver.Nvvdd);
         Assert.Equal(0, driver.Restarts);
 
         // Locked: startup clamps to the normal range and still applies; a manual load unlocks.
@@ -241,10 +246,10 @@ static partial class Program
         Assert.Equal(60, lowDriver.PowerWatts);
         Assert.True(low.IsMinimumPowerRequested());
         int requests = lowDriver.PowerRequests;
-        low.ReassertDriverRequest();
+        low.ReassertDriverRequest(onAc: true);
         Assert.Equal(requests, lowDriver.PowerRequests);
         lowDriver.PowerWatts = 175; // Driver request lost.
-        low.ReassertDriverRequest();
+        low.ReassertDriverRequest(onAc: true);
         Assert.Equal(60, lowDriver.PowerWatts);
     }
 
@@ -258,8 +263,12 @@ static partial class Program
         Assert.True(power.CanUnlockTgp);
         Assert.False(power.TgpUnlocked);
 
-        // Stock use (apply, save, automatic loads) never initializes NVIDIA.
+        // Stock use (apply, save, automatic loads, checks) never initializes NVIDIA.
+        int checks = 0;
+        power.ScheduleDriverCheck = () => checks++;
         power.ApplyGpuPower(150, true, 25);
+        power.ReassertDriverRequest(onAc: true);
+        Assert.Equal(0, checks);
         var saved = new GpuProfileSettings { Tgp = 150 };
         power.CaptureDriverSettings(saved);
         Assert.True(saved.BiosOverrideEnabled == null && saved.NvvddMilliamps == null);
@@ -293,7 +302,8 @@ static partial class Program
         public int PowerRequests, Restarts, Nvvdd = 205500, Msvdd = 60000;
         public bool BudgetReset; // Firmware reset the laptop budget below the request.
         public bool FailWrite { get; set; }
-        private int LiveNvvddMaximum => Enabled ? 300000 : 210000;
+        // Unlocked: a live ceiling below the 273 A unlocked range, as staged by an older build.
+        private int LiveNvvddMaximum => Enabled ? 250000 : 210000;
         public GpuCurrentLimits ReadCurrentLimits() => new(new(1000, 210000, LiveNvvddMaximum, Nvvdd, 210000), new(1000, 60000, 60000, Msvdd, 60000));
         public bool RequiresRestart(bool enabled, int? nvvddMilliamps, int? msvddMilliamps) =>
             enabled != Enabled || nvvddMilliamps > LiveNvvddMaximum;
@@ -317,6 +327,8 @@ static partial class Program
         }
         public bool IsPowerLimitAtMost(int watts) => PowerWatts <= watts;
         public bool IsPowerLimitApplied(int watts) => PowerWatts == watts && !BudgetReset;
+        public int BudgetReads;
+        public int ReadLaptopBudgetWatts() { BudgetReads++; return 175; }
     }
 
     private static GpuPowerControl CreatePower(EcDevice device, MachineProfile profile) =>

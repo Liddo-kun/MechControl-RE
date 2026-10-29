@@ -891,7 +891,7 @@ class MainForm : Form
 
     private void ReassertGpuRequest()
     {
-        try { _gpuControl?.ReassertDriverRequest(); }
+        try { _gpuControl?.ReassertDriverRequest(SystemInformation.PowerStatus.PowerLineStatus == PowerLineStatus.Online); }
         catch (Exception ex) { DiagnosticLog.Warn($"[NVIDIA Power] Request check failed: {ex.Message}"); }
     }
 

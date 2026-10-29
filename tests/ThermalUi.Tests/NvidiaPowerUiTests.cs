@@ -36,7 +36,7 @@ static partial class Program
         var unlock = Field<CheckBox>(tab, "_chkTgpUnlock");
         // Whole-amp steps; an unmoved slider shows (and keeps) the exact detected value.
         Require(core.Slider.Value == 188 && core.Value.Text == "187.5 A" && fabric.Slider.Value == 57, "Current sliders did not populate detected values");
-        Require(core.Slider.Maximum == 360 && core.Slider.Minimum == 1, "Current slider range did not follow the unlocked 2x-default policy");
+        Require(core.Slider.Maximum == 234 && core.Slider.Minimum == 1, "Current slider range did not follow the unlocked 130%-of-default policy");
         Require(unlock.Checked && backend.Configurations == 0, "Refreshing the checkbox caused hardware writes");
         Require(Field<TrackBar>(tab, "_sliderTgp").Maximum == 200, "TGP range did not follow alternate model/BIOS limits");
         void Apply() => typeof(PowerTab).GetMethod("BtnApply_Click", Private)!.Invoke(tab, new object?[] { null, EventArgs.Empty });
@@ -84,6 +84,7 @@ static partial class Program
         public void ApplyPowerLimit(int watts) => Requested = watts;
         public bool IsPowerLimitAtMost(int watts) => true;
         public bool IsPowerLimitApplied(int watts) => Requested == watts;
+        public int ReadLaptopBudgetWatts() => 175;
     }
 }
 

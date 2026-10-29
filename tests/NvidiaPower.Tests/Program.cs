@@ -12,7 +12,7 @@ static class Program
             ("generated BIOS discovers native limits and identity", NativeLimits),
             ("relocated different-model BIOS discovers its own limits and offsets", RelocatedModel),
             ("direct power record changes maximum only", PowerRecord),
-            ("rail changes pair default and maximum without changing other bytes", PairedRails),
+            ("rail changes set default and maximum independently without changing other bytes", RailOverrides),
             ("original requests emit no override records", OriginalValues),
             ("invalid requests are rejected", InvalidRequests),
             ("parser owns its ROM snapshot", SnapshotIsolation),
@@ -92,16 +92,16 @@ static class Program
         True(expected.AsSpan().SequenceEqual(Apply(f.Rom, records)));
     }
 
-    private static void PairedRails()
+    private static void RailOverrides()
     {
         foreach (bool relocated in new[] { false, true })
         {
             var f = new BiosFixture(relocated); var bios = NvidiaBios.Parse(f.Rom);
-            uint nv = f.NvDefault + 7000, ms = f.MsDefault + 3000;
-            var records = bios.BuildOverrides(new(null, nv, ms));
+            uint nv = f.NvDefault + 7000, nvMax = f.NvDefault * 2, ms = f.MsDefault + 3000;
+            var records = bios.BuildOverrides(new(null, new(nv, nvMax), new(ms, ms)));
             Equal(4, records.Count);
             int[] offsets = [f.Entry(13) + 17, f.Entry(13) + 21, f.Entry(14) + 17, f.Entry(14) + 21];
-            uint[] values = [nv, nv, ms, ms];
+            uint[] values = [nv, nvMax, ms, ms];
             byte[] expected = (byte[])f.Rom.Clone();
             for (int i = 0; i < records.Count; i++)
             {
@@ -110,9 +110,12 @@ static class Program
             }
             byte[] target = Apply(f.Rom, records); True(target.AsSpan().SequenceEqual(expected));
             var parsed = NvidiaBios.Parse(target);
-            Equal(nv, parsed.Nvvdd.Default); Equal(nv, parsed.Nvvdd.Maximum);
+            Equal(nv, parsed.Nvvdd.Default); Equal(nvMax, parsed.Nvvdd.Maximum);
             Equal(ms, parsed.Msvdd.Default); Equal(ms, parsed.Msvdd.Maximum);
             Equal(f.PowerMaximum, parsed.Power.Maximum);
+            // A maximum alone (default unchanged) patches one field.
+            var maximumOnly = bios.BuildOverrides(new(null, new(f.NvDefault, nvMax)));
+            Equal(1, maximumOnly.Count); Equal((uint)(f.Entry(13) + 21), Offset(maximumOnly[0]));
         }
     }
 
@@ -120,13 +123,15 @@ static class Program
     {
         var f = new BiosFixture(); var bios = NvidiaBios.Parse(f.Rom);
         Equal(0, bios.BuildOverrides(new()).Count);
-        Equal(0, bios.BuildOverrides(new(f.PowerMaximum, f.NvDefault, f.MsDefault)).Count);
+        Equal(0, bios.BuildOverrides(new(f.PowerMaximum, new(f.NvDefault, f.NvDefault), new(f.MsDefault, f.MsDefault))).Count);
     }
 
     private static void InvalidRequests()
     {
         var bios = NvidiaBios.Parse(new BiosFixture().Rom);
-        foreach (var request in new NvidiaOverrideRequest[] { new(0), new(bios.Power.Default - 1), new(uint.MaxValue), new(null, 0), new(null, null, 999), new(null, uint.MaxValue) })
+        uint nv = bios.Nvvdd.Default;
+        foreach (var request in new NvidiaOverrideRequest[] { new(0), new(bios.Power.Default - 1), new(uint.MaxValue), new(null, new(0, nv)),
+            new(null, null, new(999, bios.Msvdd.Default)), new(null, new(nv, uint.MaxValue)), new(null, new(nv + 1, nv)) })
             Throws<ArgumentOutOfRangeException>(() => bios.BuildOverrides(request));
     }
 
@@ -226,7 +231,7 @@ static class Program
         foreach (bool relocated in new[] { false, true })
         {
             var f = new BiosFixture(relocated); var bios = NvidiaBios.Parse(f.Rom); var recovery = Recovery(bios);
-            var records = bios.BuildOverrides(new(f.PowerMaximum + 1000, f.NvDefault + 7000, f.MsDefault + 3000));
+            var records = bios.BuildOverrides(new(f.PowerMaximum + 1000, new(f.NvDefault + 7000, f.NvDefault + 7000), new(f.MsDefault + 3000, f.MsDefault + 3000)));
             Equal(5, records.Count);
             StoreMethod("RequireOwned", Registry(records), recovery);
             StoreMethod("RequireOwned", Registry(records.Take(2)), recovery);
@@ -246,7 +251,7 @@ static class Program
         foreach (bool relocated in new[] { false, true })
         {
             var f = new BiosFixture(relocated); var bios = NvidiaBios.Parse(f.Rom);
-            byte[] patched = Apply(f.Rom, bios.BuildOverrides(new(f.PowerMaximum + 1000, f.NvDefault + 7000)));
+            byte[] patched = Apply(f.Rom, bios.BuildOverrides(new(f.PowerMaximum + 1000, new(f.NvDefault + 7000, f.NvDefault * 2))));
             var restored = (NvidiaBios)StoreMethod("Restore", patched, Recovery(bios))!;
             True(restored.GetImage().AsSpan().SequenceEqual(f.Rom));
             Equal(f.PowerMaximum, restored.Power.Maximum); Equal(f.NvDefault, restored.Nvvdd.Default);
