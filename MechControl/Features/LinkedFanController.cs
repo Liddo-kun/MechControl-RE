@@ -15,7 +15,10 @@ class LinkedFanController : IDisposable
     private int _lastCpuRampStart = -1;
     private int _lastGpuRampStart = -1;
 
-    private static readonly int[] FixedTemps = { 19, 29, 39, 49, 57, 65, 73, 81, 89, 97 };
+    // The EC applies duty[i] above tempUp[i-1], so the always-100% last point takes over
+    // above the second-to-last temp. Keep that above sustained load temperatures: at 89°C,
+    // a CPU held at 90°C by its temp limit ran its fan at 100% while the GPU fan stayed linked.
+    private static readonly int[] FixedTemps = { 19, 29, 39, 49, 57, 65, 73, 81, 97, 101 };
 
     // Ramp start must be at least this many degrees above the current sensor temp.
     // Without it, a sensor just below a grid point (e.g. 50°C vs the 51°C point)
@@ -196,8 +199,9 @@ class LinkedFanController : IDisposable
             {
                 curve.Points[i].DutyPercent = 0;
             }
-            // Last point always 100% — preserves the crash-safety tail even when the
-            // sensor is hot enough that FindRampStart returned no grid (rampCount <= 0).
+            // Last point always 100% (in effect above FixedTemps[^2]) — preserves the
+            // crash-safety tail even when the sensor is hot enough that FindRampStart
+            // left no ramp (rampCount <= 1).
             else if (i == FixedTemps.Length - 1)
             {
                 curve.Points[i].DutyPercent = 100;
@@ -205,10 +209,6 @@ class LinkedFanController : IDisposable
             else if (i < rampStart || rampCount <= 0)
             {
                 curve.Points[i].DutyPercent = dutyPercent;
-            }
-            else if (rampCount == 1)
-            {
-                curve.Points[i].DutyPercent = 100;
             }
             else
             {
