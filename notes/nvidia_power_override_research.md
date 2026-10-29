@@ -193,6 +193,9 @@ still required before implementing equivalent runtime writes in MechControl.
 https://github.com/b00nz/mVolt/issues/86 is separate VMIN/VFE-expression work;
 it is not needed for the power/current feature.
 
+The board input current limit (a separate HW_THRESHOLD current policy) is covered in
+`nvidia_board_input_current.md`.
+
 ## Integration implications
 
 The persistent power-ceiling mechanism is now hardware-confirmed on one driver/
