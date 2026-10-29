@@ -209,6 +209,7 @@ class FailsafeTab : UserControl
     }
 
     public void MarkSaved() { _saved = ReadSettings(); _partial = false; RefreshStatus(); }
+    public void MarkUnsaved() { _saved = null; _partial = false; RefreshStatus(); }
     public GpuFailsafeSettings ReadSettings() => _failsafe.GetSettings();
     private void EditsChanged() { if (!_loading) RefreshStatus(); }
     private void OnChanged() { if (Visible) RefreshStatus(); }
