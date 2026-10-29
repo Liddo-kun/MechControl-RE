@@ -17,6 +17,7 @@ sealed class BiosFixture
     public uint PowerMaximum { get; }
     public uint NvDefault { get; }
     public uint MsDefault { get; }
+    public uint InputDefault { get; }
     public string Version { get; }
     public int Entry(int index) => Table + 56 + index * 102;
 
@@ -35,6 +36,7 @@ sealed class BiosFixture
         PowerMaximum = relocated ? 120000u : 220000u;
         NvDefault = relocated ? 110000u : 150000u;
         MsDefault = relocated ? 25000u : 40000u;
+        InputDefault = relocated ? 8200u : 11000u;
         Version = relocated ? "96.05.06.07.08" : "97.01.02.03.04";
         Rom = new byte[LegacyLength + EfiLength + 0x3000];
         Image(0, LegacyLength, 0, false);
@@ -52,6 +54,7 @@ sealed class BiosFixture
         U32(PowerToken + 0xf4, (uint)logicalProfile);
         new byte[] { 0x40, 0x38, 0x66, 20 }.CopyTo(Rom, Table);
         Policy(2, 1, 2, 0, 10000, PowerDefault, PowerMaximum);
+        Policy(9, 3, 1, relocated ? (byte)17 : (byte)6, 1, InputDefault, InputDefault);
         byte nvChannel = relocated ? (byte)9 : (byte)3;
         byte msChannel = relocated ? (byte)10 : (byte)4;
         Policy(11, 6, 1, nvChannel, 1, 1000000, 1000000);

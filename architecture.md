@@ -50,7 +50,7 @@ MechControl/
     UefiSetup.cs                  One-time UEFI NVRAM flag setup (self-healing)
     CpuPowerControl.cs            PL1/PL2/PL4 + CPU temp limit
     GpuPowerControl.cs            TGP + Dynamic Boost toggle/value
-    NvidiaPowerControl.cs         BIOS ceilings, NVVDD/MSVDD currents, restart/readback coordination
+    NvidiaPowerControl.cs         BIOS ceilings, NVVDD/MSVDD/board-input currents, restart/readback coordination
     GpuTemperatureFailsafe.cs     Thermal trip/acknowledged holds, optional CPU/fan actions, scoped restoration
     FanControl.cs                 Fan boost, custom fan curve mode, fan table write
     FanSnapshot.cs                One-shot fan-table + curve-control register capture (see Section 5)

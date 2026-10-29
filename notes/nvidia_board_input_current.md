@@ -105,6 +105,28 @@ cards. RTX 40 laptops use the older 0x30 table, which `NvidiaBios` does not pars
 the existing power unlock is also unavailable there); their runtime policy type has not
 been read.
 
+## MechControl implementation (2026-10-29)
+
+A third current slider behind the existing unlock, with the same 140%-of-stock-default
+ceiling as NVVDD/MSVDD (all three raised from 130%; here 1-15 A unlocked, 1-11 A locked).
+The BIOS default stores the chosen current and the maximum stores the unlocked range;
+live changes use the existing compact current-policy SET with only the selected policy
+enabled. Recovery adds missing original offsets before writing. Details, verification
+and deployed state: `nvidia_power_integration.md`.
+
+Optional per GPU: offered only when slot 9 is class 3 / flags 1 and the driver exposes
+exactly one matching policy (same min/default/max). Variant-B boards, a driver that
+exposes it differently, or duplicates disable only this slider; the rest of the unlock
+works. A profile's board-input value on such a GPU is skipped with a notice.
+
+mVolt 0.50.9 notes / issue #89 (MSI 5090 desktop, driver 621.12, stuck at 80 A) give no
+technical detail; "change the limit and save again" means the fix is in the saved
+override, consistent with also writing the default, which MechControl does.
+
+Hardware-free tests cover alternate policy/channel indices, exact SET metadata
+preservation, failed readback, unavailable/duplicate driver policies, old recovery
+files and profile/UI behavior.
+
 ## Evidence
 
 - Decompiled: `C:\Temp\tandem\mvolt-bic\`, `C:\Temp\tandem\mvolt-bic2\`,

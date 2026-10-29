@@ -3,7 +3,7 @@ using System.Buffers.Binary;
 using System.Reflection;
 using System.Runtime.ExceptionServices;
 
-static class Program
+static partial class Program
 {
     private static int Main(string[] args)
     {
@@ -13,6 +13,8 @@ static class Program
             ("relocated different-model BIOS discovers its own limits and offsets", RelocatedModel),
             ("direct power record changes maximum only", PowerRecord),
             ("rail changes set default and maximum independently without changing other bytes", RailOverrides),
+            ("board input default/maximum use discovered offsets without unrelated changes", BoardInputOverrides),
+            ("unknown board input identities stay optional; recognized bad fields reject", OptionalBoardInput),
             ("original requests emit no override records", OriginalValues),
             ("invalid requests are rejected", InvalidRequests),
             ("parser owns its ROM snapshot", SnapshotIsolation),
@@ -22,7 +24,11 @@ static class Program
             ("external override is never implicitly owned", ExternalOwnership),
             ("only patches for the saved BIOS version and offsets are owned", OwnedRecords),
             ("saved originals rebuild the original BIOS from the patched image", RestoreOriginal),
+            ("legacy recovery appends board input originals and preserves ownership and stock restore", LegacyRecovery),
             ("firmware F7 resets never accumulate extra platform headroom", BudgetHeadroom),
+            ("board current discovers alternate policies and preserves exact GET packet metadata", CurrentPolicyPacket),
+            ("unsupported, ambiguous and out-of-range board current requests never SET; rails stay usable", CurrentPolicyRefusals),
+            ("board current SET rejects missing readback and changed unselected rails", CurrentPolicyReadback),
         ];
         int failed = 0;
         foreach (var (name, test) in tests)
@@ -65,6 +71,8 @@ static class Program
         Equal(10000u, bios.Power.Minimum); Equal(f.PowerDefault, bios.Power.Default); Equal(f.PowerMaximum, bios.Power.Maximum);
         Equal(f.NvDefault, bios.Nvvdd.Default); Equal(f.NvDefault, bios.Nvvdd.Maximum);
         Equal(f.MsDefault, bios.Msvdd.Default); Equal(f.MsDefault, bios.Msvdd.Maximum);
+        Equal(f.InputDefault, bios.BoardInput!.Default); Equal(f.InputDefault, bios.BoardInput.Maximum);
+        Equal(7, bios.PatchOffsets.Length);
     }
 
     private static void RelocatedModel()
@@ -123,7 +131,63 @@ static class Program
     {
         var f = new BiosFixture(); var bios = NvidiaBios.Parse(f.Rom);
         Equal(0, bios.BuildOverrides(new()).Count);
-        Equal(0, bios.BuildOverrides(new(f.PowerMaximum, new(f.NvDefault, f.NvDefault), new(f.MsDefault, f.MsDefault))).Count);
+        Equal(0, bios.BuildOverrides(new(f.PowerMaximum, new(f.NvDefault, f.NvDefault), new(f.MsDefault, f.MsDefault), new(f.InputDefault, f.InputDefault))).Count);
+    }
+
+    private static void BoardInputOverrides()
+    {
+        foreach (bool relocated in new[] { false, true })
+        {
+            var f = new BiosFixture(relocated); var bios = NvidiaBios.Parse(f.Rom);
+            uint def = f.InputDefault + 1000, max = f.InputDefault + 4000;
+            var records = bios.BuildOverrides(new(BoardInput: new(def, max)));
+            Equal(2, records.Count);
+            Equal((uint)(f.Entry(9) + 17), Offset(records[0])); Equal((uint)(f.Entry(9) + 21), Offset(records[1]));
+            byte[] expected = (byte[])f.Rom.Clone();
+            BinaryPrimitives.WriteUInt32LittleEndian(expected.AsSpan(f.Entry(9) + 17), def);
+            BinaryPrimitives.WriteUInt32LittleEndian(expected.AsSpan(f.Entry(9) + 21), max);
+            byte[] target = Apply(f.Rom, records); True(target.AsSpan().SequenceEqual(expected));
+            var parsed = NvidiaBios.Parse(target);
+            Equal(def, parsed.BoardInput!.Default); Equal(max, parsed.BoardInput.Maximum);
+            var maximumOnly = bios.BuildOverrides(new(BoardInput: new(f.InputDefault, max)));
+            Equal(1, maximumOnly.Count); Equal((uint)(f.Entry(9) + 21), Offset(maximumOnly[0]));
+            foreach (var invalid in new NvidiaRailOverride[] { new(0, max), new(def, def - 1), new(def, uint.MaxValue) })
+                Throws<ArgumentOutOfRangeException>(() => bios.BuildOverrides(new(BoardInput: invalid)));
+        }
+    }
+
+    private static void OptionalBoardInput()
+    {
+        Action<BiosFixture>[] unknown =
+        [
+            f => f.Rom[f.Entry(9)] = 0,
+            f => f.Rom[f.Entry(9)] = 0x0b,
+            f => f.U32(f.Entry(9) + 1, 0x10001),
+        ];
+        foreach (var mutation in unknown)
+        {
+            var f = new BiosFixture(); mutation(f);
+            // Unknown fields are not range-validated or writable.
+            f.U32(f.Entry(9) + 21, 0);
+            var bios = NvidiaBios.Parse(f.Rom); True(bios.BoardInput == null); Equal(5, bios.PatchOffsets.Length);
+            var records = bios.BuildOverrides(new(f.PowerMaximum + 1000));
+            byte[] expected = (byte[])f.Rom.Clone(); f.U32(f.Entry(2) + 21, f.PowerMaximum + 1000);
+            True(Apply(expected, records).AsSpan().SequenceEqual(f.Rom));
+            Throws<InvalidOperationException>(() => bios.BuildOverrides(new(BoardInput: new(1000, 1000))));
+        }
+        Action<BiosFixture>[] malformed =
+        [
+            f => f.Rom[f.Entry(9) + 5] = 32,
+            f => f.U32(f.Entry(9) + 13, f.InputDefault + 1),
+            f => f.U32(f.Entry(9) + 21, f.InputDefault - 1),
+            f => { f.U32(f.Entry(9) + 13, 0); f.U32(f.Entry(9) + 17, 0); f.U32(f.Entry(9) + 21, 0); },
+            f => f.U32(f.Entry(9) + 21, uint.MaxValue),
+        ];
+        foreach (var mutation in malformed)
+        {
+            var f = new BiosFixture(); mutation(f);
+            Throws<InvalidDataException>(() => NvidiaBios.Parse(f.Rom));
+        }
     }
 
     private static void InvalidRequests()
@@ -264,6 +328,41 @@ static class Program
         var bios = NvidiaBios.Parse(original);
         True(Apply(original, bios.BuildOverrides(new(target))).AsSpan().SequenceEqual(active));
         Equal(target, NvidiaBios.Parse(active).Power.Maximum);
+    }
+
+    private static void LegacyRecovery()
+    {
+        foreach (bool relocated in new[] { false, true })
+        {
+            var f = new BiosFixture(relocated); var stock = NvidiaBios.Parse(f.Rom);
+            var legacy = new NvidiaOverrideRecovery(stock.Version, stock.PatchOffsets.Take(5).ToDictionary(o => o, stock.ValueAt));
+            var oldRecords = stock.BuildOverrides(new(f.PowerMaximum + 1000, new(f.NvDefault + 1000, f.NvDefault + 1000), new(f.MsDefault + 1000, f.MsDefault + 1000)));
+            Equal(5, oldRecords.Count);
+            StoreMethod("RequireOwned", Registry(oldRecords), legacy);
+            byte[] active = Apply(f.Rom, oldRecords);
+            var recovered = (NvidiaBios)StoreMethod("Restore", active, legacy)!;
+            var complete = (NvidiaOverrideRecovery)StoreMethod("CompleteRecovery", recovered, legacy)!;
+            Equal(7, complete.Originals.Count); Equal(5, legacy.Originals.Count);
+            foreach (var (offset, value) in legacy.Originals) Equal(value, complete.Originals[offset]);
+            Equal(f.InputDefault, complete.Originals[f.Entry(9) + 17]);
+            Equal(f.InputDefault, complete.Originals[f.Entry(9) + 21]);
+            StoreMethod("RequireOwned", Registry(oldRecords), complete);
+            var newRecords = recovered.BuildOverrides(new(f.PowerMaximum + 1000, new(f.NvDefault + 1000, f.NvDefault + 1000),
+                new(f.MsDefault + 1000, f.MsDefault + 1000), new(f.InputDefault + 1000, f.InputDefault + 1000)));
+            Equal(7, newRecords.Count);
+            Throws<InvalidOperationException>(() => StoreMethod("RequireOwned", Registry(newRecords), legacy));
+            StoreMethod("RequireOwned", Registry(newRecords), complete);
+            var restored = (NvidiaBios)StoreMethod("Restore", Apply(f.Rom, newRecords), complete)!;
+            True(restored.GetImage().AsSpan().SequenceEqual(f.Rom));
+            // Even a conflicting caller snapshot must never replace saved values.
+            var preserved = (NvidiaOverrideRecovery)StoreMethod("CompleteRecovery", NvidiaBios.Parse(active), legacy)!;
+            foreach (var (offset, value) in legacy.Originals) Equal(value, preserved.Originals[offset]);
+            var again = (NvidiaOverrideRecovery)StoreMethod("CompleteRecovery", restored, complete)!;
+            Equal(7, again.Originals.Count);
+            foreach (var (offset, value) in complete.Originals) Equal(value, again.Originals[offset]);
+            var fresh = (NvidiaOverrideRecovery)StoreMethod("CompleteRecovery", stock, null)!;
+            Equal(7, fresh.Originals.Count);
+        }
     }
     private static uint Offset(NvidiaOverrideRecord record) => BinaryPrimitives.ReadUInt32LittleEndian(record.Data.AsSpan(5));
     private static byte[] Apply(byte[] original, IReadOnlyList<NvidiaOverrideRecord> records)

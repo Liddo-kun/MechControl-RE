@@ -33,23 +33,49 @@ static partial class Program
         tab.RefreshFromEc();
         var core = Field<UiHelpers.SliderRow>(tab, "_rowNvvdd");
         var fabric = Field<UiHelpers.SliderRow>(tab, "_rowMsvdd");
+        var input = Field<UiHelpers.SliderRow>(tab, "_rowBoardInput");
         var unlock = Field<CheckBox>(tab, "_chkTgpUnlock");
         // Whole-amp steps; an unmoved slider shows (and keeps) the exact detected value.
         Require(core.Slider.Value == 188 && core.Value.Text == "187.5 A" && fabric.Slider.Value == 57, "Current sliders did not populate detected values");
-        Require(core.Slider.Maximum == 234 && core.Slider.Minimum == 1, "Current slider range did not follow the unlocked 130%-of-default policy");
+        Require(core.Slider.Maximum == 252 && fabric.Slider.Maximum == 77 && input.Slider.Maximum == 15 && core.Slider.Minimum == 1,
+            "The three current ranges did not follow the shared 140%-of-default policy");
+        Require(input.Slider.Value == 11 && input.Value.Text == "11.053 A", "Board input lost fractional stock milliamps");
+        var status = Field<Label>(tab, "_lblDriverLimits");
+        Require(status.Text.Contains("stock currents 180 / 55 / 11.053 A"), "Status did not list the stock board input current");
         Require(unlock.Checked && backend.Configurations == 0, "Refreshing the checkbox caused hardware writes");
         Require(Field<TrackBar>(tab, "_sliderTgp").Maximum == 200, "TGP range did not follow alternate model/BIOS limits");
         void Apply() => typeof(PowerTab).GetMethod("BtnApply_Click", Private)!.Invoke(tab, new object?[] { null, EventArgs.Empty });
         Apply();
-        Require(backend.Configurations == 0 && backend.Core == 187500, "Applying unmoved current sliders rewrote or rounded them");
+        Require(backend.Configurations == 0 && backend.Core == 187500 && backend.Input == 11053, "Applying unmoved current sliders rewrote or rounded them");
         core.Slider.Value = 186;
         Apply();
-        Require(backend.Configurations == 1 && backend.Core == 186000 && backend.Fabric == 57000, "Apply did not write the selected whole-amp current only");
+        Require(backend.Configurations == 1 && backend.Core == 186000 && backend.Fabric == 57000 && backend.Input == 11053,
+            "Apply did not write the selected whole-amp current only");
         Require(core.Slider.Value == 186 && core.Value.Text == "186 A", "Readback after apply did not show the new current");
         var saved = new GpuProfileSettings { Tgp = 125 };
         gpu.CaptureDriverSettings(saved);
-        Require(saved.NvvddMilliamps == 186000 && saved.MsvddMilliamps == 57000 && saved.BiosOverrideEnabled == false,
+        Require(saved.NvvddMilliamps == 186000 && saved.MsvddMilliamps == 57000 && saved.BoardInputMilliamps == 11053 && saved.BiosOverrideEnabled == false,
             "Profile capture lost current units or asked for an unneeded unlock");
+        // An already-unlocked user can raise the new input slider: one restart, then live changes.
+        input.Slider.Value = 12;
+        var selected = (GpuProfileSettings)typeof(PowerTab).GetMethod("ReadGpuSettings", Private)!.Invoke(tab, null)!;
+        var restartPlan = gpu.PlanProfile(selected, automatic: false);
+        Require(restartPlan.Restart, "Raising board input above the old ceiling did not request a restart");
+        gpu.ConfigureProfile(restartPlan); // Exercise the confirmed plan without opening a modal dialog.
+        tab.RefreshFromEc();
+        Require(backend.Input == 12000 && backend.Restarts == 1 && backend.Core == 186000 && backend.Fabric == 57000,
+            "Board input did not upgrade its old ceiling without changing the other currents");
+        input.Slider.Value = 15;
+        Apply();
+        Require(backend.Input == 15000 && backend.Restarts == 1, "Board input restarted inside the active range");
+        gpu.CaptureDriverSettings(saved);
+        Require(saved.BoardInputMilliamps == 15000 && saved.BiosOverrideEnabled == true, "Raised board input alone did not persist its unlock requirement");
+        backend.HasBoardInput = false;
+        tab.RefreshFromEc();
+        Require(!input.Slider.Enabled && input.Value.Text == "--" && core.Slider.Enabled, "An absent board policy disabled other controls or left its slider usable");
+        Require(status.Text.Contains("stock currents 180 / 55 A"), "Status listed an absent board input current");
+        backend.HasBoardInput = true;
+        tab.RefreshFromEc();
         // Unlocked: TGP below the EC minimum (60% of 80 W) is a driver request; the EC stays at its minimum.
         var tgp = Field<TrackBar>(tab, "_sliderTgp");
         Require(tgp.Minimum == 48, "Unlocked TGP floor was not 60% of the model minimum");
@@ -76,11 +102,19 @@ static partial class Program
         public int MinimumPowerLimitWatts => 5;
         public GpuPowerLimits ReadPowerLimits() => new(225, 80, Requested);
         public int? Requested;
-        public int Core = 187500, Fabric = 57000, Configurations;
-        public GpuCurrentLimits ReadCurrentLimits() => new(new(1, 180000, 220000, Core, 200000), new(1, 55000, 65000, Fabric, 60000));
-        public bool RequiresRestart(bool enabled, int? nvvddMilliamps, int? msvddMilliamps) => nvvddMilliamps > 220000 || msvddMilliamps > 65000;
-        public void Configure(bool enabled, int? nvvddMilliamps, int? msvddMilliamps, bool allowRestart)
-        { Configurations++; Core = nvvddMilliamps ?? Core; Fabric = msvddMilliamps ?? Fabric; }
+        public int Core = 187500, Fabric = 57000, Input = 11053, Configurations, Restarts;
+        public bool HasBoardInput = true;
+        private int InputMaximum => Restarts == 0 ? 11053 : 15474;
+        public GpuCurrentLimits ReadCurrentLimits() => new(new(1, 180000, 220000, Core, 200000), new(1, 55000, 65000, Fabric, 60000),
+            HasBoardInput ? new(1, 11053, InputMaximum, Input, 11053) : null);
+        public bool RequiresRestart(bool enabled, int? nvvddMilliamps, int? msvddMilliamps, int? boardInputMilliamps) =>
+            nvvddMilliamps > 220000 || msvddMilliamps > 65000 || boardInputMilliamps > InputMaximum;
+        public void Configure(bool enabled, int? nvvddMilliamps, int? msvddMilliamps, int? boardInputMilliamps, bool allowRestart)
+        {
+            if (RequiresRestart(enabled, nvvddMilliamps, msvddMilliamps, boardInputMilliamps))
+            { Require(allowRestart, "Unexpected automatic GPU restart"); Restarts++; }
+            Configurations++; Core = nvvddMilliamps ?? Core; Fabric = msvddMilliamps ?? Fabric; Input = boardInputMilliamps ?? Input;
+        }
         public void ApplyPowerLimit(int watts) => Requested = watts;
         public bool IsPowerLimitAtMost(int watts) => true;
         public bool IsPowerLimitApplied(int watts) => Requested == watts;

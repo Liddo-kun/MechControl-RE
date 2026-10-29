@@ -57,6 +57,7 @@ class GpuProfileSettings
     // Null on legacy profiles or when NVIDIA was not in use: leave currents alone.
     [JsonPropertyName("nvvddMilliamps")] public int? NvvddMilliamps { get; set; }
     [JsonPropertyName("msvddMilliamps")] public int? MsvddMilliamps { get; set; }
+    [JsonPropertyName("boardInputMilliamps")] public int? BoardInputMilliamps { get; set; }
 }
 
 class FanProfileSettings

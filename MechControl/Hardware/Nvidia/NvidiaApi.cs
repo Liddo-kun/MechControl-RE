@@ -13,7 +13,7 @@ internal sealed record NvidiaIdentity(ushort DeviceId, uint SubsystemId, uint Do
 internal sealed record NvidiaPowerLimits(uint MinimumMw, uint DefaultMw, uint MaximumMw,
     uint EnforcedMw, uint? RequestedMw);
 internal sealed record NvidiaCurrentLimit(uint MinimumMa, uint DefaultMa, uint MaximumMa, uint CurrentMa);
-internal sealed record NvidiaCurrentLimits(NvidiaCurrentLimit Nvvdd, NvidiaCurrentLimit Msvdd);
+internal sealed record NvidiaCurrentLimits(NvidiaCurrentLimit Nvvdd, NvidiaCurrentLimit Msvdd, NvidiaCurrentLimit? BoardInput);
 
 /// <summary>
 /// User-mode NVIDIA backend. No registry, EC, driver patching, restart or external tuning-tool dependency.
@@ -120,34 +120,39 @@ internal sealed partial class NvidiaApi : IDisposable
     {
         var rails = ReadRails();
         var control = ReadCurrentControl(rails.Mask);
-        return new(ReadRail(rails.Nv, control), ReadRail(rails.Ms, control));
+        return new(ReadRail(rails.Nv, control), ReadRail(rails.Ms, control),
+            rails.Input is { } input ? ReadRail(input, control) : null);
     }
 
-    public NvidiaCurrentLimits SetCurrentLimits(uint? nvvddMa, uint? msvddMa)
+    public NvidiaCurrentLimits SetCurrentLimits(uint? nvvddMa, uint? msvddMa, uint? boardInputMa)
     {
         var rails = ReadRails();
         var control = ReadCurrentControl(rails.Mask);
         var beforeNv = ReadRail(rails.Nv, control);
         var beforeMs = ReadRail(rails.Ms, control);
+        var beforeInput = rails.Input is { } input ? ReadRail(input, control) : null;
         uint selected = 0;
-        void Change(Rail rail, uint? value)
+        void Change(Rail? rail, uint? value)
         {
             if (!value.HasValue) return;
-            if (value.Value < rail.Min || value.Value > rail.Max) throw new ArgumentOutOfRangeException(nameof(value), "Current request is outside the live NVIDIA rail range.");
+            if (rail == null) throw Unsupported("board input current policy");
+            if (value.Value < rail.Min || value.Value > rail.Max) throw new ArgumentOutOfRangeException(nameof(value), "Current request is outside the live NVIDIA range.");
             Put(control, 0x20 + rail.Index * 0x28, value.Value);
             selected |= 1u << rail.Index;
         }
-        Change(rails.Nv, nvvddMa); Change(rails.Ms, msvddMa);
+        Change(rails.Nv, nvvddMa); Change(rails.Ms, msvddMa); Change(rails.Input, boardInputMa);
         if (selected == 0) return ReadCurrentLimits();
         // Preserve complete GET metadata; select only requested policies. The driver merges
         // this versioned compact control into native full control. Never construct a raw RM SET.
         Put(control, 4, selected);
         Call(0xaffc2279, control, "PowerPolicySetControl");
         var result = ReadCurrentLimits();
-        if ((nvvddMa.HasValue && result.Nvvdd.CurrentMa != nvvddMa.Value) || (msvddMa.HasValue && result.Msvdd.CurrentMa != msvddMa.Value))
+        if ((nvvddMa.HasValue && result.Nvvdd.CurrentMa != nvvddMa.Value) || (msvddMa.HasValue && result.Msvdd.CurrentMa != msvddMa.Value) ||
+            (boardInputMa.HasValue && result.BoardInput?.CurrentMa != boardInputMa.Value))
             throw new InvalidOperationException("NVIDIA current-policy readback did not retain the requested values.");
-        if ((!nvvddMa.HasValue && result.Nvvdd != beforeNv) || (!msvddMa.HasValue && result.Msvdd != beforeMs))
-            throw new InvalidOperationException("NVIDIA current-policy readback changed an unselected rail.");
+        if ((!nvvddMa.HasValue && result.Nvvdd != beforeNv) || (!msvddMa.HasValue && result.Msvdd != beforeMs) ||
+            (!boardInputMa.HasValue && result.BoardInput != beforeInput))
+            throw new InvalidOperationException("NVIDIA current-policy readback changed an unselected current limit.");
         return result;
     }
 
@@ -192,7 +197,7 @@ internal sealed partial class NvidiaApi : IDisposable
     }
 
     private sealed record Rail(int Index, uint Type, uint Min, uint Default, uint Max);
-    private (Rail Nv, Rail Ms, uint Mask) ReadRails()
+    private (Rail Nv, Rail Ms, Rail? Input, uint Mask) ReadRails()
     {
         // Layouts independently corroborated by mVolt FUN_1401fc9f0/1401fc540/
         // 1401fe260 and NV_GPU_POWER_POLICY_INFO_PARAMS_V4 / CONTROL_PARAMS_V2.
@@ -203,15 +208,25 @@ internal sealed partial class NvidiaApi : IDisposable
         var monitor = NewBuffer(0xca8, 0x30ca8);
         Call(0xc12eb19e, monitor, "PowerMonitorGetInfo(V3)");
         RequireVersion(monitor, 0x30ca8);
-        Rail? nv = null, ms = null;
+        Rail? nv = null, ms = null, input = null;
+        int inputs = 0;
         uint mask = U32(info, 4), channels = U32(monitor, 16);
         for (int i = 0; i < 32; i++)
         {
             if ((mask & (1u << i)) == 0) continue;
             int p = 0x3c + i * 0x58;
             uint type = U32(info, p), channel = U32(info, p + 4);
-            if (type != 19 || U32(info, p + 8) != 1 || channel >= 32 || (channels & (1u << (int)channel)) == 0) continue;
+            if ((type != 19 && type != 4) || U32(info, p + 8) != 1 || channel >= 32 || (channels & (1u << (int)channel)) == 0) continue;
             int m = 0x28 + (int)channel * 0x3c;
+            // mVolt FUN_1402373c0: HW_THRESHOLD in mA on SENSOR_CLIENT_ALIGNED.
+            // Identify the monitor kind, never this machine's channel number (8).
+            if (type == 4)
+            {
+                if (U32(monitor, m + 12) != 8 || U32(monitor, m + 16) == uint.MaxValue) continue;
+                input = new(i, type, U32(info, p + 12), U32(info, p + 16), U32(info, p + 20));
+                inputs++;
+                continue;
+            }
             if (U32(monitor, m + 12) != 6) continue; // SENSOR channel, rail from driver, never channel-number guesses.
             uint railId = U32(monitor, m + 16) & 255;
             if (railId != 1 && railId != 16) continue; // OUTPUT_NVVDD / OUTPUT_MSVDD
@@ -221,7 +236,10 @@ internal sealed partial class NvidiaApi : IDisposable
             else { if (ms != null) throw Unsupported("ambiguous MSVDD policies"); ms = rail; }
         }
         if (nv == null || ms == null) throw Unsupported("NVVDD/MSVDD sensor policies");
-        return (nv, ms, (1u << nv.Index) | (1u << ms.Index));
+        // Board input is optional: an ambiguous or out-of-range policy is never written
+        // and disables only that limit, not the rails.
+        if (inputs > 1 || (input != null && !ValidRange(input.Min, input.Default, input.Max))) input = null;
+        return (nv, ms, input, (1u << nv.Index) | (1u << ms.Index) | (input == null ? 0 : 1u << input.Index));
     }
 
     private byte[] ReadCurrentControl(uint mask)
@@ -274,7 +292,8 @@ internal sealed partial class NvidiaApi : IDisposable
     private static uint U32(byte[] b, int p) => BinaryPrimitives.ReadUInt32LittleEndian(b.AsSpan(p));
     private static void Put(byte[] b, int p, uint v) => BinaryPrimitives.WriteUInt32LittleEndian(b.AsSpan(p), v);
     private static void RequireVersion(byte[] b, uint v) { if (U32(b, 0) != v) throw Unsupported("structure version"); }
-    private static void RequireRange(uint min, uint def, uint max) { if (min > def || def > max || max == 0 || max > int.MaxValue) throw Unsupported("policy range"); }
+    private static bool ValidRange(uint min, uint def, uint max) => min <= def && def <= max && max != 0 && max <= int.MaxValue;
+    private static void RequireRange(uint min, uint def, uint max) { if (!ValidRange(min, def, max)) throw Unsupported("policy range"); }
     private static Exception Unsupported(string detail) => new NotSupportedException($"Unsupported NVIDIA {detail}.");
     private static void Check(int status, string name) { if (status != 0) throw new InvalidOperationException($"NVIDIA {name} failed (status {status})."); }
 

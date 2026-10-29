@@ -59,7 +59,7 @@ internal static class Program
         var history = Get(Get(Manager(), "ThermalProtection")!, "LastTrip")!;
         if (Get(history, "Time") != null || Convert.ToInt32(Get(history, "ThresholdC")) != 30)
             throw new Exception("Packaged round trip fabricated history.");
-        File.WriteAllText(Path.Combine(directory, "userprofile_1.json"), """{"gpuFailsafe":{"enabled":false,"thresholdC":35,"fanBoost":true},"gpu":{"tgp":180,"biosOverrideEnabled":true,"nvidiaAdapter":"test-gpu-bios","nvvddMilliamps":211500,"msvddMilliamps":61000}}""");
+        File.WriteAllText(Path.Combine(directory, "userprofile_1.json"), """{"gpuFailsafe":{"enabled":false,"thresholdC":35,"fanBoost":true},"gpu":{"tgp":180,"biosOverrideEnabled":true,"nvidiaAdapter":"test-gpu-bios","nvvddMilliamps":211500,"msvddMilliamps":61000,"boardInputMilliamps":11234}}""");
         var profile = managerType.GetMethod("LoadProfile")!.Invoke(manager, new object[] { 1 })!;
         var protection = Get(profile, "GpuFailsafe")!;
         if ((bool)Get(protection, "Enabled")! || !(bool)Get(protection, "FanBoost")! || Convert.ToInt32(Get(protection, "ThresholdC")) != 50)
@@ -69,7 +69,8 @@ internal static class Program
         var gpu = Get(profile, "Gpu")!;
         // The legacy "nvidiaAdapter" key above must be ignored without failing the load.
         if (!(bool)Get(gpu, "BiosOverrideEnabled")! ||
-            Convert.ToInt32(Get(gpu, "NvvddMilliamps")) != 211500 || Convert.ToInt32(Get(gpu, "MsvddMilliamps")) != 61000)
+            Convert.ToInt32(Get(gpu, "NvvddMilliamps")) != 211500 || Convert.ToInt32(Get(gpu, "MsvddMilliamps")) != 61000 ||
+            Convert.ToInt32(Get(gpu, "BoardInputMilliamps")) != 11234)
             throw new Exception("Packaged serialization lost NVIDIA override/current settings.");
         if ((bool)Get(profile, "RequiresSave")! || File.Exists(settingsPath + ".tmp"))
             throw new Exception("Packaged atomic save did not commit migrated profile/settings.");

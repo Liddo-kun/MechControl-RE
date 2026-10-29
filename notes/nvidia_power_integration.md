@@ -21,11 +21,14 @@ same day after review (lazy open, profile loading, F7 re-raise, live rail loweri
 ## Unlock, GPU restart and when it must be redone
 
 - Turning the unlock on stages software BIOS overrides in the GPU's registry key
-  (power ceiling = original max + 75 W; rail maximums = 130% of stock default) and
+  (power ceiling = original max + 75 W; all three current maximums = 140% of stock default,
+  never below the stock maximum) and
   restarts that GPU. It is not a ROM flash.
 - **Before** the restart: the raised laptop budget (F7/platform) is returned, the
-  original values at every patchable offset (power max, both rails' default/max) are
-  saved once to `originals.txt` with the BIOS version, the registry is written.
+  original values at every patchable offset (power max, NVVDD/MSVDD and supported
+  board-input default/max) are saved to `originals.txt` with the BIOS version,
+  then the registry is written. Missing original offsets from older builds are
+  appended atomically before any new overrides, preserving all existing originals.
 - Ownership: a `romOverride*` record is ours when it patches the saved BIOS version at
   a saved offset. Any other record (or a `vbios` value) is external and refused. The
   original BIOS is the active image with the saved values written back.
@@ -40,15 +43,15 @@ same day after review (lazy open, profile loading, F7 re-raise, live rail loweri
   VBIOS is replaced. Both are detected at open (BIOS version differs, or no records
   left and the original values active): owned records that no longer apply are
   removed with `originals.txt` and logged, and the unlock shows as off.
-- Rails (2026-10-29 revision): while unlocked the registry holds each rail's maximum at
-  the top of the unlocked slider range (130% of stock default) and its default at the chosen
+- Currents (2026-10-29 revision): while unlocked the registry holds each current maximum at
+  the top of the unlocked slider range (140% of stock default) and its default at the chosen
   current, so any slider value applies live and the GPU starts at the chosen current.
   Only toggling the unlock restarts the GPU. Before, default and maximum were both the
   chosen value: lowering applied live, but raising above the last restart's value
   restarted the GPU again (Jon's report). A live maximum staged by such a build still
   needs one restart when exceeded; any apply restages the full range for the next start.
   Stock BIOS here has default = maximum (210/210, 60/60 A). Unlocked range was 2x stock
-  default until 2026-10-29 (Jon: 130% is enough).
+  default until 2026-10-29, then 130%; the board-input addition uses 140% for all three.
   Live 2026-10-29 10:43 (`C:\Temp\tandem\rail-ceiling-test\run1.txt`, app stopped): old live
   maximums 241/73 A; 250/75 A restarted the GPU once, which accepted default 250 < maximum
   273 A (image verified); then 273/78 -> 230/65 -> 273/78 -> 210/60 A all live, no restart.
@@ -145,7 +148,7 @@ same day after review (lazy open, profile loading, F7 re-raise, live rail loweri
 
 ## Profiles
 
-- Profiles store TGP, Dynamic Boost, exact rail requests (mA) and
+- Profiles store TGP, Dynamic Boost, exact NVVDD/MSVDD/board-input requests (mA) and
   `biosOverrideEnabled` = the values need the unlock. Legacy keys (`nvidiaAdapter`)
   are ignored.
 - Loading never removes the unlock. Automatic loads (startup, EC re-activation,
@@ -158,13 +161,27 @@ same day after review (lazy open, profile loading, F7 re-raise, live rail loweri
   profiles) are set to the stock defaults, live. The rail maximums stay at the unlocked
   range, so a later unlocked profile applies its currents live. Power-tab Apply is not a
   profile and keeps unmoved currents.
+- A board-input value on a GPU without board input is skipped with a notice (manual
+  and automatic loads); the rest of the profile still applies.
 - TGP values beyond even the unlocked range are refused as before.
 
 ## UI
 
-- Rail sliders move in whole amps. An unmoved slider keeps the exact detected value
-  (e.g. 70.313 A) and writes nothing. Unlocked range is up to 130% of the stock
+- All three current sliders move in whole amps. An unmoved slider keeps the exact detected value
+  (e.g. 11.053 A for board input) and writes nothing. Unlocked range is up to 140% of the stock
   default (UI policy, not a hardware rating).
+- Board input is optional: BIT P slot 9 must be type 3 / flags 1, and the driver
+  must expose exactly one HW_THRESHOLD mA policy on a SENSOR_CLIENT_ALIGNED monitor
+  whose min/default/max equal the BIOS field. Channel numbers are discovered. Anything
+  else (no slot 9, no or duplicate driver policy, mismatched values, e.g. a driver that
+  exposes it differently) disables only this slider, logged once per open/restart; TGP
+  and NVVDD/MSVDD keep working, and no slot-9 record is staged. If the driver doesn't
+  take a staged board-input override after a GPU restart, the same applies and the
+  rails' requested values are still set. A recognized slot 9
+  with a bad range or channel still rejects the BIOS, like the other fields.
+  Its slider uses the same unlock/restart/live-current path as NVVDD and MSVDD;
+  checking the unlock expands its maximum without forcing its chosen current up.
+  The status line lists the stock board input after the rails when available.
 - System Info, Power Delivery: "EC" and "NVIDIA Driver" headings; the driver part shows
   the laptop GPU budget (F7) and the CPU+GPU platform budget (TPP; EC 0x7F7 reads 0 here,
   so it is not readable from the EC). Never opens NVIDIA (rows show "NVIDIA not
@@ -233,3 +250,19 @@ disables the feature.
   -> GPU restart, romOverride00 = 250 W, originals.txt recreated identical, F8 175 W.
   The "Requested ... enforced" log line right after a raise shows the enforced value
   before it settles (logged 150 W, measured 185 W a second later).
+- Board input revision (2026-10-29): NvidiaPower.Tests 20/20, GpuFailsafe.Tests 45/45,
+  ThermalUi headless, packaged headless smoke, release build 0 errors / 2 known
+  warnings. Read-only production-API check: BIOS and driver board input 1/11053/11053 mA,
+  rail maximums 273/78 A (`C:\Temp\tandem\board-current-readonly\result-fixed.txt`).
+  Live compact SET 11053 -> 11000 -> 11053 mA with an earlier variant of this change
+  (same SET path; CONTROL readback and enforced limit followed, rails unchanged;
+  `C:\Temp\tandem\bic-live\run1.txt`). That variant required board input for the whole
+  unlock; it was deployed 19:02 and reverted 19:06 (`C:\Temp\tandem\bic-revert\revert.ps1`).
+  This build deployed 19:34 (backup `C:\tmp\MechControl-backup-20261029-193405`; prior
+  registry values and 5-offset `originals.txt` in `C:\Temp\tandem\board-input-deploy\`):
+  EC init OK, validations PASS, profile slot 2 auto-loaded as 210/60/11.053 A without a
+  GPU restart; `originals.txt` gained 360188/360192 = 11053 (saved values unchanged) and
+  the registry now holds power 250 W, board input max 15474 mA, NVVDD/MSVDD max 294/84 A
+  (defaults stock). Live maximums stay 273/78/11.053 A until the next GPU restart, so the
+  first raise above them asks for one. **Not tested live**: that restart, a raised board
+  input limit under load, driver 621+.
