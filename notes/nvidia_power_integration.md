@@ -167,11 +167,12 @@ same day after review (lazy open, profile loading, F7 re-raise, live rail loweri
 
 ## UI
 
-- NVVDD/MSVDD sliders move in whole amps, board input in 0.1 A (a whole amp would be ~10%,
-  ~20 W, of its ~11 A); none goes below 1 A. An unmoved slider keeps the exact detected
-  value (e.g. 11.053 A) and writes nothing, also when the slider had to be clamped one step
-  below it (11.053 A locked: maximum 11.0 A). Unlocked range is up to 140% of the stock
-  default (UI policy, not a hardware rating).
+- NVVDD/MSVDD sliders move in whole amps. Board input positions are exact milliamps (a whole
+  amp would be ~10%, ~20 W, of its ~11 A; no round step divides 11053 mA), arrow keys 0.1 A;
+  a mouse drag moves ~30 mA per pixel. None goes below 1 A. Positions are rounded down, so
+  the detected value never lands above the slider maximum; an unmoved slider keeps that exact
+  value (e.g. 187.5 A at position 187) and writes nothing. Unlocked range is up to 140% of
+  the stock default (UI policy, not a hardware rating).
 - Board input is optional: BIT P slot 9 must be type 3 / flags 1, and the driver
   must expose exactly one HW_THRESHOLD mA policy on a SENSOR_CLIENT_ALIGNED monitor
   whose min/default/max equal the BIOS field. Channel numbers are discovered. Anything
@@ -271,3 +272,8 @@ disables the feature.
   0.1 A board input steps: ThermalUi (12.3/15.1 A applied, locked clamp writes nothing),
   release build, packaged smoke; deployed 19:39 (backup
   `C:\tmp\MechControl-backup-20261029-193953`), startup as above, overrides unchanged.
+  Replaced by milliamp positions with rounded-down slider positions (no stored "unmoved"
+  position): ThermalUi (exact 12.3/15.123 A, a 60.6 A rail at its locked ceiling
+  writes nothing; a round-to-nearest mutant fails), GpuFailsafe 45/45, NvidiaPower 20/20,
+  release build, packaged smoke. Deployed 19:52 (backup
+  `C:\tmp\MechControl-backup-20261029-195254`), startup as above, overrides unchanged.
