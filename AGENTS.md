@@ -42,7 +42,7 @@ All in `captures/`:
 
 - `tools/` — RE tool source code (.cs, .py, .js, .ps1). Compile .cs with `csc.exe -nologo <file>.cs`.
 - `captures/` — Frida logs, IOCTL dumps, EC snapshots, WMI traces.
-- `decompilation/` — Decompiled GCUService/GCUBridge/ACPIDriverDll output.
+- `decompilation/` — Decompiled GCUService/GCUBridge/ACPIDriverDll output. Local only (git-ignored; the repo is public and must not contain OEM code).
 - `acpi/` — DSDT/SSDT tables (.aml, .dat, .dsl).
 - `notes/` — Secondary RE notes (multi-model state in `other_machines.md`, dimming, ECSpec, startup, battery, etc.).
 - `screenshots/` — UI screenshots.
