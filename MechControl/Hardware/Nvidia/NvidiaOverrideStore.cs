@@ -51,6 +51,17 @@ internal sealed class NvidiaOverrideStore : IDisposable
         catch (Win32Exception) { return false; }
     }
 
+    /// <summary>PnP power data only: true when Windows last put this GPU in D0. Never wakes it.</summary>
+    public bool IsAwake()
+    {
+        if (CM_Locate_DevNodeW(out uint node, InstanceId, 0) != 0) return false;
+        var key = new DevPropKey { Fmtid = new("a45c254e-df1c-4efd-8020-67d146a850e0"), Pid = 32 }; // DEVPKEY_Device_PowerData
+        byte[] data = new byte[64];
+        uint size = (uint)data.Length;
+        // CM_POWER_DATA: PD_Size, then PD_MostRecentPowerState (PowerDeviceD0 = 1).
+        return CM_Get_DevNode_PropertyW(node, ref key, out _, data, ref size, 0) == 0 && size >= 8 && BitConverter.ToInt32(data, 4) == 1;
+    }
+
     /// <summary>
     /// The unmodified BIOS and whether owned overrides are staged. Refuses other tools'
     /// overrides. Owned overrides that can no longer apply (replaced VBIOS, or removed by a
@@ -185,6 +196,9 @@ internal sealed class NvidiaOverrideStore : IDisposable
     public void Dispose() => key.Dispose();
 
     [StructLayout(LayoutKind.Sequential)] private struct DeviceInfo { public uint Size; public Guid ClassGuid; public uint DevInst; public IntPtr Reserved; }
+    [StructLayout(LayoutKind.Sequential)] private struct DevPropKey { public Guid Fmtid; public uint Pid; }
+    [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode)] private static extern int CM_Locate_DevNodeW(out uint node, string id, uint flags);
+    [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode)] private static extern int CM_Get_DevNode_PropertyW(uint node, ref DevPropKey key, out uint type, byte[] buffer, ref uint size, uint flags);
     [DllImport("setupapi.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern IntPtr SetupDiGetClassDevsW(ref Guid guid, string enumerator, IntPtr parent, uint flags);
     [DllImport("setupapi.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool SetupDiEnumDeviceInfo(IntPtr set, uint index, ref DeviceInfo data);
     [DllImport("setupapi.dll", CharSet = CharSet.Unicode, SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool SetupDiGetDeviceInstanceIdW(IntPtr set, ref DeviceInfo data, [Out] char[] id, uint size, out uint required);

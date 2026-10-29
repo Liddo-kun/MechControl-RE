@@ -174,10 +174,16 @@ sealed class NvidiaPowerControl : IGpuPowerOverride, IDisposable
         }
     }
 
-    public int ReadLaptopBudgetWatts()
+    public GpuPowerBudget ReadPowerBudget()
     {
-        using (Enter()) return checked((int)(api.ReadPowerBudget().F7Mw / 1000));
+        using (Enter())
+        {
+            var budget = api.ReadPowerBudget();
+            return new(checked((int)(budget.F7Mw / 1000)), checked((int)(budget.PlatformMw / 1000)));
+        }
     }
+
+    public bool IsGpuAwake() => store.IsAwake();
 
     public bool IsPowerLimitAtMost(int watts)
     {

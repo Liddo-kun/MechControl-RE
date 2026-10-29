@@ -165,6 +165,14 @@ same day after review (lazy open, profile loading, F7 re-raise, live rail loweri
 - Rail sliders move in whole amps. An unmoved slider keeps the exact detected value
   (e.g. 70.313 A) and writes nothing. Unlocked range is up to 130% of the stock
   default (UI policy, not a hardware rating).
+- System Info, Power Delivery: "EC" and "NVIDIA Driver" headings; the driver part shows
+  the laptop GPU budget (F7) and the CPU+GPU platform budget (TPP; EC 0x7F7 reads 0 here,
+  so it is not readable from the EC). Never opens NVIDIA (rows show "NVIDIA not
+  connected" until the unlock or saved state opened it), and never reads a GPU Windows
+  reports asleep (`DEVPKEY_Device_PowerData` most recent state != D0; "GPU asleep, not
+  read"). Reads once when the tab is shown, then every 5 s while it is visible and the
+  window isn't minimized. A visible tab can still keep an awake but idle Optimus dGPU from
+  sleeping. The asleep path was not observed live (this GPU stayed in D0).
 
 ## Compatibility and recovery
 

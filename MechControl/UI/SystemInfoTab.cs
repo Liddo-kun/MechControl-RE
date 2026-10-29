@@ -14,9 +14,15 @@ class SystemInfoTab : UserControl
     private readonly Label _lblDbMaxLive;
     private readonly Label _lblTgpLive;
 
+    // NVIDIA driver budgets: read only while this tab is on screen, at most every 5 s.
+    private readonly Features.GpuPowerControl? _nvidiaBudget;
+    private readonly Label? _lblLaptopBudget, _lblPlatformBudget;
+    private long _nextBudgetRead;
+
     public SystemInfoTab(
         string? systemName,
-        string? cpuName)
+        string? cpuName,
+        Features.GpuPowerControl? nvidiaBudget = null)
     {
         Dock = DockStyle.Fill;
 
@@ -68,10 +74,27 @@ class SystemInfoTab : UserControl
         // ── Power Delivery ──────────────────────────────
         var grpPower = UiHelpers.BuildSection("Power Delivery", fitContent: true);
         var powerLayout = UiHelpers.BuildKeyValueTable();
+        // Source headings only when a second source (the NVIDIA driver) is shown.
+        void Heading(string text)
+        {
+            var heading = new Label { Text = text, AutoSize = true, Font = new Font(UiHelpers.FontBold, FontStyle.Bold | FontStyle.Underline),
+                Margin = new Padding(0, powerLayout.Controls.Count == 0 ? 0 : 8, 0, 0) };
+            powerLayout.Controls.Add(heading);
+            powerLayout.SetColumnSpan(heading, 2);
+        }
+        if (nvidiaBudget != null) Heading("EC");
         _lblAdapterCurrent = UiHelpers.AddKeyValueRow(powerLayout, "Adapter Current [0x449]:");
         _lblSystemPower    = UiHelpers.AddKeyValueRow(powerLayout, "System Power [0x60C-0x60D]:");
         _lblTgpLive        = UiHelpers.AddKeyValueRow(powerLayout, "TGP Live / NPCF ACBT [0x788]:");
         _lblDbMaxLive      = UiHelpers.AddKeyValueRow(powerLayout, "DB Max Live / NPCF AMAT [0x7D5]:");
+        if (nvidiaBudget != null)
+        {
+            _nvidiaBudget = nvidiaBudget;
+            Heading("NVIDIA Driver");
+            _lblLaptopBudget   = UiHelpers.AddKeyValueRow(powerLayout, "GPU Budget F7:");
+            _lblPlatformBudget = UiHelpers.AddKeyValueRow(powerLayout, "CPU+GPU Budget TPP:");
+            VisibleChanged += (_, _) => _nextBudgetRead = 0; // Fresh values as soon as the tab is shown.
+        }
         grpPower.Controls.Add(powerLayout);
         stack.Controls.Add(grpPower);
 
@@ -106,5 +129,14 @@ class SystemInfoTab : UserControl
         _lblDbMaxLive.Text = data.DbMaxLiveWatts > 0
             ? $"{data.DbMaxLiveWatts} W"
             : "off";
+
+        if (_nvidiaBudget != null && FindForm()?.WindowState != FormWindowState.Minimized &&
+            Environment.TickCount64 >= _nextBudgetRead)
+        {
+            _nextBudgetRead = Environment.TickCount64 + 5000;
+            var budget = _nvidiaBudget.ReadDisplayBudget(out string reason);
+            _lblLaptopBudget!.Text = budget != null ? $"{budget.LaptopWatts} W" : $"-- ({reason})";
+            _lblPlatformBudget!.Text = budget != null ? $"{budget.PlatformWatts} W" : $"-- ({reason})";
+        }
     }
 }

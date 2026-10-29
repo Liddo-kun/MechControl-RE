@@ -272,6 +272,7 @@ static partial class Program
         var saved = new GpuProfileSettings { Tgp = 150 };
         power.CaptureDriverSettings(saved);
         Assert.True(saved.BiosOverrideEnabled == null && saved.NvvddMilliamps == null);
+        Assert.True(power.ReadDisplayBudget(out string reason) == null && reason.Contains("not connected"));
         var unlockedProfile = new GpuProfileSettings { Tgp = 225, BiosOverrideEnabled = true, NvvddMilliamps = 250000 };
         var plan = power.PlanProfile(unlockedProfile, automatic: true);
         Assert.Equal(150, plan.Settings.Tgp);
@@ -282,6 +283,11 @@ static partial class Program
         plan = power.PlanProfile(unlockedProfile, automatic: false);
         Assert.True(plan.Unlock && plan.Restart);
         Assert.Equal(1, opens);
+
+        // The System Info display reads an open driver, but never a GPU Windows reports asleep.
+        Assert.True(power.ReadDisplayBudget(out reason) is { LaptopWatts: 175, PlatformWatts: 350 } && driver.BudgetReads == 1);
+        driver.Awake = false;
+        Assert.True(power.ReadDisplayBudget(out reason) == null && reason.Contains("asleep") && driver.BudgetReads == 1);
 
         // An unsupported GPU/driver stops offering the unlock and says why.
         GpuPowerControl unsupported = CreatePower(new EcDevice(), CreateGpuProfile(95, 95, 150));
@@ -328,7 +334,9 @@ static partial class Program
         public bool IsPowerLimitAtMost(int watts) => PowerWatts <= watts;
         public bool IsPowerLimitApplied(int watts) => PowerWatts == watts && !BudgetReset;
         public int BudgetReads;
-        public int ReadLaptopBudgetWatts() { BudgetReads++; return 175; }
+        public bool Awake = true;
+        public GpuPowerBudget ReadPowerBudget() { BudgetReads++; return new(175, 350); }
+        public bool IsGpuAwake() => Awake;
     }
 
     private static GpuPowerControl CreatePower(EcDevice device, MachineProfile profile) =>

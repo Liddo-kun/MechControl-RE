@@ -130,10 +130,23 @@ class GpuPowerControl
         }
         if (!onAc) return;
         var ec = ReadEcPower();
-        int expected = ec.TgpWatts + (ec.DynamicBoostEnabled ? ec.DbWatts : 0), budget = driver.ReadLaptopBudgetWatts();
+        int expected = ec.TgpWatts + (ec.DynamicBoostEnabled ? ec.DbWatts : 0), budget = driver.ReadPowerBudget().LaptopWatts;
         if (budget < expected)
             DiagnosticLog.Warn($"[NVIDIA Power] Laptop budget {budget} W is below the EC request {expected} W on AC; Dynamic Boost may be stuck. " +
                 "Restarting the \"NVIDIA Platform Controllers and Framework\" device restores it.");
+    }
+
+    /// <summary>
+    /// System Info display: the NVIDIA budgets, or why they weren't read. Never opens NVIDIA
+    /// (stock users) and never reads a GPU that Windows reports asleep.
+    /// </summary>
+    public GpuPowerBudget? ReadDisplayBudget(out string reason)
+    {
+        reason = "";
+        if (PowerOverride is not { } driver) { reason = "NVIDIA not connected"; return null; }
+        if (!driver.IsGpuAwake()) { reason = "GPU asleep, not read"; return null; }
+        try { return driver.ReadPowerBudget(); }
+        catch (Exception) { reason = "unavailable"; return null; }
     }
 
     public void ValidatePower(int tgpWatts, bool dynamicBoostEnabled, int dbWatts, bool? unlocked = null)

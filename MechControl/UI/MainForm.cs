@@ -460,7 +460,8 @@ class MainForm : Form
         // System Info tab — read-only, driven by EcMonitor
         _systemInfoTab = new SystemInfoTab(
             ProfileLoader.LastBaseboard,
-            ProfileLoader.LastCpuName);
+            ProfileLoader.LastCpuName,
+            _gpuControl?.OpenPowerOverride != null ? _gpuControl : null);
         _monitor.Updated += _systemInfoTab.OnMonitorUpdated;
         var sysInfoPage = new TabPage("System Info");
         _systemInfoTab.Dock = DockStyle.Fill;

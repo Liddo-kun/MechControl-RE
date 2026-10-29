@@ -84,7 +84,8 @@ static partial class Program
         public void ApplyPowerLimit(int watts) => Requested = watts;
         public bool IsPowerLimitAtMost(int watts) => true;
         public bool IsPowerLimitApplied(int watts) => Requested == watts;
-        public int ReadLaptopBudgetWatts() => 175;
+        public GpuPowerBudget ReadPowerBudget() => new(175, 350);
+        public bool IsGpuAwake() => true;
     }
 }
 
