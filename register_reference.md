@@ -4,6 +4,8 @@ Single source of truth for all register addresses, encodings, write sequences, a
 
 **How registers are used in code:** The app loads profiles from `MechControl/Profiles/MECHREVO/*.json` (compact ~35-line files with standardized names like `cpuFanDuty`). Do NOT confuse with `Profiles/MECHREVO/*.json` at the repo root — those are raw OEM extractions (~400 lines with names like `ADDR_EC_MAIN_FAN_L_DUTY_BYTE`) used only as RE reference. Code accesses registers by name via `profile.GetRegister("name")` — never by hardcoded address. The tables below show the canonical code name where applicable. See `architecture.md` section 6 for the full lookup flow.
 
+**Model-scope update (2026-10-29):** Static analysis of the PCSpecialist X6FR EC image found GPU RPM at **0x46C high / 0x46D low**, shared mode bits in **0x751/0x7C6**, and a **145 W preset at 0x7A7** that must not be universally labeled Battery Saver. It also identified a keyboard-history setter for **0x741 bit 7 in that image**. These qualify the generic/IDY-derived descriptions below; they do not establish new Intel X6AR mappings. Evidence, exact firmware hash/offsets, and pending application corrections: [`notes/lp3123079_ec_firmware_review.md`](notes/lp3123079_ec_firmware_review.md).
+
 ---
 
 ## 1. EC Driver Interface

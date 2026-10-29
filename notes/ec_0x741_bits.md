@@ -2,6 +2,8 @@
 
 ## Principal result
 
+**Firmware follow-up (2026-10-29):** The supplied PCSpecialist X6FR EC image has now yielded a concrete bit-7 setter: it latches sightings of keyboard-buffer bytes 0x14 and 0x32, then reasserts 0x741 bit 7. The same image independently sets bit 5 for its timed fan-RPM failure check. See [`lp3123079_ec_firmware_review.md`](lp3123079_ec_firmware_review.md), section 6, for exact offsets and lifecycle details. This is AMD X6FR evidence; the Intel X6AR bit-7 interpretation remains unconfirmed. The OEM-service investigation below predates that firmware result.
+
 Bit 7's exact meaning remains unproven. A significant new finding is that the recoverable OEM fan-alert implementation checks **bit 5 (0x20), not bit 7**. Therefore ADDR_FAN_ALERT_BYTE is not evidence that bit 7 means fan failure.
 
 This was proved by statically decrypting ConfuserEx-protected GCUService.exe from official Eluktronics ControlCenter 4.23.47.11. This is an older Uniwill software lineage, not proof that every later model uses the same bit assignment. The newer 5.23.51.56 package for HYDROC-16 G2 (275HX/5080/5090) was also obtained, but its protected GCUService method bodies were not recovered.
