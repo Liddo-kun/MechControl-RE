@@ -14,6 +14,7 @@ class FanControl
     private readonly WriteGuard _guard;
 
     private readonly int _addrFanControlMode;
+    private readonly byte _fanBoostMask;       // 0x40 (bit 6); other bits are EC mode bits
     private readonly int _addrFanCurveEnable;
     private readonly byte _fanCurveEnableMask; // 0x80 (bit 7)
 
@@ -48,6 +49,7 @@ class FanControl
         _guard = guard;
 
         _addrFanControlMode = profile.GetRegister("fanControlMode");
+        _fanBoostMask = profile.Bitfields["fanBoost"].GetMask();
         _addrFanCurveEnable = profile.GetRegister("fanCurveEnable");
         _fanCurveEnableMask = profile.Bitfields["fanCurveEnable"].GetMask();
 
@@ -68,7 +70,8 @@ class FanControl
 
     public void ValidateFailsafeRegisters()
     {
-        try { CanApplyBoost &= _device.ReadByte(_addrFanControlMode) is 0x00 or 0x40; }
+        // Any value is plausible (bits 4 and 7 are EC mode bits); 0xFF reads as unprogrammed.
+        try { CanApplyBoost &= _device.ReadByte(_addrFanControlMode) != 0xFF; }
         catch { CanApplyBoost = false; }
     }
 
@@ -83,7 +86,7 @@ class FanControl
                 if (!CanApplyBoost) throw new InvalidOperationException("Held fan boost unavailable; fan boost changes blocked.");
                 enabled = true;
             }
-            _guard.Write(_addrFanControlMode, enabled ? (byte)0x40 : (byte)0x00);
+            _guard.WriteBitfield(_addrFanControlMode, _fanBoostMask, enabled ? _fanBoostMask : (byte)0x00);
         }
         catch (Exception ex) { Failsafe?.ReportWriteFailure(ThermalAction.Fan, ex); throw; }
     }
@@ -113,7 +116,7 @@ class FanControl
     public bool ReadFanBoost()
     {
         byte raw = _device.ReadByte(_addrFanControlMode);
-        return raw == 0x40;
+        return (raw & _fanBoostMask) != 0;
     }
 
     public bool IsBoostRequested() => CanApplyBoost && _guard.VerifiesSameAddress(_addrFanControlMode) && ReadFanBoost();

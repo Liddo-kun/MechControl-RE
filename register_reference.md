@@ -78,7 +78,7 @@ Write(0x746, 0)
 
 Registers: `0x43E`-`0x46C` (sensors/RPM), `0x751` (boost), `0x75B`/`0x75C` (duty), `0x768` (status), `0x787` (switch speed), `0x7C5` (curve enable). See 13.2, 13.5.
 
-**Fan boost:** `Write(0x751, boost ? 0x40 : 0x00)`
+**Fan boost:** `WriteBitfield(0x751, 0x40, boost ? 0x40 : 0x00)` — bits 4 and 7 are EC temp-policy mode bits (X6FR5 EC firmware), so never write the whole byte. The EC also clears bit 6 by itself when the machine is cool.
 
 **Fan curve enable:** `WriteBitfield(0x7C5, 0x80, enable ? 0x80 : 0x00)`
 
@@ -379,6 +379,7 @@ Sent before keyboard OFF (other zones don't use this).
 | Register | Mask | Values |
 |----------|------|--------|
 | `0x7C5` | `0x80` | Fan curve: 0x80=on, 0x00=off |
+| `0x751` | `0x40` | Fan boost: 0x40=on (bits 4/7 are EC mode bits) |
 | `0x7C5` | `0x20` | Logo flag: 0x20=on |
 | `0x7A6` | `0x38` | Battery: 0x08=perf, 0x18=balanced, 0x28=stationary |
 | `0x743` | `0x07` | Dynamic Boost: 0x07=on, 0x05=off |
@@ -624,7 +625,7 @@ MyFan2/3 PWM levels, fan duty, RPM, control mode, status, fan switch speed, MyFa
 | `0x745` | RW | ADDR_MYFAN2_L3_PWM / ADDR_DynamicBoost_TotalProcessingPowerTarget_VALUE | MyFan2 level 3 PWM. Also DB total power target (255=on, 0=off). |
 | `0x746` | RW | ADDR_MYFAN2_L4_PWM / ADDR_DynamicBoost_MaxinumTGP_VALUE | MyFan2 level 4 PWM. Also DB max TGP (direct watts, 5-25). |
 | `0x747` | RW | ADDR_MYFAN2_L5_PWM | MyFan2 level 5 PWM |
-| `0x751` | RW | ADDR_MAFAN_CONTROL_BYTE | Fan control mode. 0x00=normal, 0x40=full blast (bit 6). |
+| `0x751` | RW | ADDR_MAFAN_CONTROL_BYTE | Fan control mode. Bit 6 = full blast (RMW; bits 4/7 are EC mode bits, the Fn key toggles bit 6). |
 | `0x75B` | R | ADDR_EC_MAIN_FAN_L_DUTY_BYTE | CPU fan duty (raw / 2 = percent, 0-200) |
 | `0x75C` | R | ADDR_EC_MAIN_FAN_R_DUTY_BYTE | GPU fan duty (raw / 2 = percent, 0-200) |
 | `0x75D` | RW | ADDR_TRIGGER_BYTE2 | Secondary trigger byte |

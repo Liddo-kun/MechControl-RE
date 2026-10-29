@@ -4,10 +4,8 @@ using MechControl.Driver;
 
 namespace MechControl.Profile;
 
-static class ProfileLoader
+static partial class ProfileLoader
 {
-
-
     /// <summary>
     /// Detection method used for the last successful load (for logging).
     /// </summary>
@@ -19,9 +17,14 @@ static class ProfileLoader
     /// <summary>CPU model name from WMI.</summary>
     public static string? LastCpuName { get; private set; }
 
+    /// <summary>CPU vendor from CPUID ("intel", "amd", or null).</summary>
+    public static string? LastCpuVendor { get; private set; }
+
     /// <summary>
     /// Detect the machine profile and load it. Returns null if user cancels manual selection.
     /// Applies universal defaults for unverified profiles.
+    /// Order: explicit baseboard pattern, EC project ID, baseboard/filename token, manual.
+    /// Profiles that declare a cpuVendor are skipped on other vendors' CPUs.
     /// </summary>
     public static MachineProfile? DetectAndLoad(EcDevice? device)
     {
@@ -32,11 +35,33 @@ static class ProfileLoader
         {
             LastBaseboard = GetBaseboardProduct();
             LastCpuName = GetCpuName();
+            LastCpuVendor = DetectCpuVendor();
             DiagnosticLog.LogBaseboard(LastBaseboard);
         }
         catch { }
 
-        // Try EC-based detection first (if device is available)
+        // Explicit baseboard patterns come first: EC project IDs collide across
+        // models (the X6FR AMD EC firmware hardcodes 0x740 = 0x1A, the same value
+        // as the Intel IDY_7Y), so a known board name is the stronger signal.
+        try
+        {
+            if (LastBaseboard != null)
+            {
+                DiagnosticLog.Write($"[Profile] Baseboard: {LastBaseboard}");
+                string? path = FindProfileByBaseboardPattern(profilesDir, LastBaseboard, LastCpuVendor);
+                if (path != null)
+                {
+                    LastDetectionMethod = $"WMI baseboard pattern ({LastBaseboard})";
+                    return LoadAndPrepare(path);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            DiagnosticLog.Warn($"[Profile] WMI detection failed: {ex.Message}");
+        }
+
+        // EC project ID (if device is available)
         if (device != null)
         {
             try
@@ -45,7 +70,7 @@ static class ProfileLoader
                 DiagnosticLog.Write($"[Profile] EC 0x740 = {raw} (0x{raw:X2})");
 
                 // Try direct match
-                string? path = FindProfileByProjectId(profilesDir, raw);
+                string? path = FindProfileByProjectId(profilesDir, raw, LastCpuVendor);
                 if (path != null)
                 {
                     DiagnosticLog.Write($"[Profile] Direct match: {Path.GetFileName(path)}");
@@ -55,7 +80,7 @@ static class ProfileLoader
 
                 // Try raw >> 1 (newer models store ProjectID * 2)
                 int shifted = raw >> 1;
-                path = FindProfileByProjectId(profilesDir, shifted);
+                path = FindProfileByProjectId(profilesDir, shifted, LastCpuVendor);
                 if (path != null)
                 {
                     DiagnosticLog.Write($"[Profile] Shifted match: {raw} >> 1 = {shifted} -> {Path.GetFileName(path)}");
@@ -69,14 +94,12 @@ static class ProfileLoader
             }
         }
 
-        // Try WMI baseboard name match
-
+        // Profile filename appearing in the baseboard name
         try
         {
             if (LastBaseboard != null)
             {
-                DiagnosticLog.Write($"[Profile] Baseboard: {LastBaseboard}");
-                string? path = FindProfileByBaseboard(profilesDir, LastBaseboard);
+                string? path = FindProfileByBaseboardFilename(profilesDir, LastBaseboard, LastCpuVendor);
                 if (path != null)
                 {
                     DiagnosticLog.Write($"[Profile] Baseboard match: {Path.GetFileName(path)}");
@@ -150,127 +173,6 @@ static class ProfileLoader
             dir = Path.GetDirectoryName(dir);
         }
         return null;
-    }
-
-    private static string? FindProfileByProjectId(string profilesDir, int projectIdValue)
-    {
-        foreach (string file in Directory.GetFiles(profilesDir, "*.json"))
-        {
-            try
-            {
-                string json = File.ReadAllText(file);
-                using var doc = JsonDocument.Parse(json, new JsonDocumentOptions
-                {
-                    CommentHandling = JsonCommentHandling.Skip,
-                    AllowTrailingCommas = true
-                });
-                if (doc.RootElement.TryGetProperty("projectIdValue", out var idElem) &&
-                    idElem.GetInt32() == projectIdValue)
-                {
-                    return file;
-                }
-            }
-            catch { }
-        }
-        return null;
-    }
-
-    private static string? FindProfileByBaseboard(string profilesDir, string baseboard)
-    {
-        return FindProfileByBaseboardPattern(profilesDir, baseboard)
-            ?? FindProfileByBaseboardFilename(profilesDir, baseboard);
-    }
-
-    /// <summary>
-    /// Match against explicit baseboardPatterns declared in profile JSONs.
-    /// Real MECHREVO baseboards (e.g. "YAOSHI Series-X6AR55xY" -> IDY_7Y)
-    /// don't contain the profile name at all, so filename matching can't
-    /// identify them — this explicit mapping, built up from field logs, is
-    /// the reliable path. Longest matching pattern wins.
-    /// </summary>
-    private static string? FindProfileByBaseboardPattern(string profilesDir, string baseboard)
-    {
-        string boardLower = baseboard.ToLowerInvariant();
-        string? bestFile = null;
-        int bestLen = -1;
-        foreach (string file in Directory.GetFiles(profilesDir, "*.json"))
-        {
-            try
-            {
-                using var doc = JsonDocument.Parse(File.ReadAllText(file), new JsonDocumentOptions
-                {
-                    CommentHandling = JsonCommentHandling.Skip,
-                    AllowTrailingCommas = true
-                });
-                if (!doc.RootElement.TryGetProperty("baseboardPatterns", out var patterns) ||
-                    patterns.ValueKind != JsonValueKind.Array)
-                    continue;
-                foreach (var pattern in patterns.EnumerateArray())
-                {
-                    string? p = pattern.GetString();
-                    if (string.IsNullOrWhiteSpace(p)) continue;
-                    if (boardLower.Contains(p.ToLowerInvariant()) && p.Length > bestLen)
-                    {
-                        bestFile = file;
-                        bestLen = p.Length;
-                    }
-                }
-            }
-            catch { }
-        }
-        if (bestFile != null)
-            DiagnosticLog.Write($"[Profile] Baseboard pattern match: {Path.GetFileName(bestFile)}");
-        return bestFile;
-    }
-
-    private static string? FindProfileByBaseboardFilename(string profilesDir, string baseboard)
-    {
-        // Token match: the profile filename must appear in the baseboard string
-        // bounded by non-alphanumerics (or the string edges). A raw substring
-        // match let short profile names (e.g. "GI") false-match any baseboard
-        // containing those letters, and enumeration order made ties
-        // nondeterministic. Prefer the longest (most specific) match.
-        string boardLower = baseboard.ToLowerInvariant();
-        var candidates = new List<(string file, string name)>();
-        foreach (string file in Directory.GetFiles(profilesDir, "*.json"))
-        {
-            string name = Path.GetFileNameWithoutExtension(file).ToLowerInvariant();
-            if (ContainsToken(boardLower, name))
-                candidates.Add((file, name));
-        }
-        if (candidates.Count == 0)
-            return null;
-
-        var best = candidates
-            .OrderByDescending(c => c.name.Length)
-            .ThenBy(c => c.name, StringComparer.Ordinal)
-            .First();
-        if (candidates.Count > 1)
-        {
-            DiagnosticLog.Write($"[Profile] Baseboard '{baseboard}' matched multiple profiles: " +
-                string.Join(", ", candidates.Select(c => Path.GetFileName(c.file))) +
-                $" -> chose {Path.GetFileName(best.file)} (longest match)");
-        }
-        return best.file;
-    }
-
-    /// <summary>
-    /// True if <paramref name="token"/> occurs in <paramref name="haystack"/>
-    /// with non-alphanumeric characters (or string edges) on both sides.
-    /// </summary>
-    private static bool ContainsToken(string haystack, string token)
-    {
-        if (token.Length == 0) return false;
-        int idx = 0;
-        while ((idx = haystack.IndexOf(token, idx, StringComparison.Ordinal)) >= 0)
-        {
-            bool startOk = idx == 0 || !char.IsLetterOrDigit(haystack[idx - 1]);
-            int end = idx + token.Length;
-            bool endOk = end == haystack.Length || !char.IsLetterOrDigit(haystack[end]);
-            if (startOk && endOk) return true;
-            idx++;
-        }
-        return false;
     }
 
     private static string? GetBaseboardProduct()

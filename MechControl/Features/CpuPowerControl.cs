@@ -78,7 +78,7 @@ class CpuPowerControl
     private int ReadEmergencyTemperatureLimit()
     {
         byte raw = _device.ReadByte(_addrTempRead);
-        int value = _absoluteTemp ? raw & 0x7F : RegisterEncoding.DecodeCpuTempLimit((byte)(raw & 0x7F), _tjMax);
+        int value = RegisterEncoding.DecodeCpuTempLimit(raw, _absoluteTemp, _tjMax);
         byte encoded = _absoluteTemp ? RegisterEncoding.EncodeCpuTempLimitDirect(value) : RegisterEncoding.EncodeCpuTempLimit(value, _tjMax);
         if (raw == 255 || value < _tempMin || value > _tempMax || (encoded & 0x7F) != (raw & 0x7F))
             throw new IOException("Current CPU temperature limit is invalid; refusing to replace it with a fallback.");
@@ -117,7 +117,7 @@ class CpuPowerControl
             throw new ArgumentOutOfRangeException("power", $"CPU request {pl1Watts}/{pl2Watts}/{pl4Watts} W exceeds model ranges " +
                 $"{_pl1Limit.Min}-{_pl1Limit.Max}/{_pl2Limit.Min}-{_pl2Limit.Max}/{_pl4Limit.Min}-{_pl4Limit.Max} W or supported encoding. Doubled PL4 rounds down to an even wattage within model limits.");
         byte temp = _absoluteTemp ? RegisterEncoding.EncodeCpuTempLimitDirect(tempLimitC) : RegisterEncoding.EncodeCpuTempLimit(tempLimitC, _tjMax);
-        int effectiveTemp = _absoluteTemp ? temp & 0x7F : RegisterEncoding.DecodeCpuTempLimit((byte)(temp & 0x7F), _tjMax);
+        int effectiveTemp = RegisterEncoding.DecodeCpuTempLimit(temp, _absoluteTemp, _tjMax);
         if (tempLimitC < _tempMin || tempLimitC > _tempMax || effectiveTemp != tempLimitC)
             throw new ArgumentOutOfRangeException(nameof(tempLimitC), "CPU temperature limit exceeds model limits or supported encoding.");
     }
@@ -171,7 +171,7 @@ class CpuPowerControl
             PL1Watts = RegisterEncoding.DecodePL1(pl1Raw),
             PL2Watts = RegisterEncoding.DecodePL1(pl2Raw),
             PL4Watts = RegisterEncoding.DecodePL4(pl4Raw, _pl4Doubled),
-            TempLimitC = _absoluteTemp ? tempRaw & 0x7F : RegisterEncoding.DecodeCpuTempLimit((byte)(tempRaw & 0x7F), _tjMax)
+            TempLimitC = RegisterEncoding.DecodeCpuTempLimit(tempRaw, _absoluteTemp, _tjMax)
         };
     }
 }

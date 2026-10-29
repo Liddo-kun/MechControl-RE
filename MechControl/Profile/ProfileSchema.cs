@@ -43,6 +43,13 @@ class MachineProfile
     [JsonPropertyName("baseboardPatterns")]
     public List<string> BaseboardPatterns { get; set; } = new();
 
+    /// <summary>
+    /// "intel" or "amd" if the profile is written for one CPU vendor; detection
+    /// then skips it on the other vendor's CPUs. Null = vendor-neutral.
+    /// </summary>
+    [JsonPropertyName("cpuVendor")]
+    public string? CpuVendor { get; set; }
+
     [JsonPropertyName("skipVerify")]
     public List<string> SkipVerify { get; set; } = new();
 

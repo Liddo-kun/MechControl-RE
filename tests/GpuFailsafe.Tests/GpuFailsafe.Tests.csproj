@@ -22,5 +22,7 @@
     <Compile Include="../../MechControl/Profile/ProfileSchema.cs" Link="Production/ProfileSchema.cs" />
     <Compile Include="../../MechControl/Profile/RegisterEncoding.cs" Link="Production/RegisterEncoding.cs" />
     <Compile Include="../../MechControl/Profile/UniversalDefaults.cs" Link="Production/UniversalDefaults.cs" />
+    <Compile Include="../../MechControl/Profile/ProfileLoader.Matching.cs" Link="Production/ProfileLoader.Matching.cs" />
+    <Compile Include="../../MechControl/Features/StartupValidator.cs" Link="Production/StartupValidator.cs" />
   </ItemGroup>
 </Project>

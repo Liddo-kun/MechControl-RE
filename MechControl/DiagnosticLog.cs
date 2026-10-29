@@ -107,6 +107,7 @@ static class DiagnosticLog
     {
         Write($"Baseboard:  {baseboard ?? "(not available)"}");
         Write($"CPU:        {Profile.ProfileLoader.LastCpuName ?? "(not available)"}");
+        Write($"CPU vendor: {Profile.ProfileLoader.LastCpuVendor ?? "(unknown)"}");
     }
 
     /// <summary>
@@ -275,14 +276,15 @@ static class DiagnosticLog
         LogRegister(device, profile, "PL4", v => $"{RegisterEncoding.DecodePL4(v, profile.Pl4Doubled)}W");
         LogRegister(device, profile, "cpuTempLimitRead", v =>
             profile.CpuTempEncoding == "direct"
-                ? $"{v}C (absolute)"
-                : $"{RegisterEncoding.DecodeCpuTempLimit(v, profile.TjMax)}C (tjMax={profile.TjMax})");
+                ? $"{RegisterEncoding.DecodeCpuTempLimit(v, direct: true)}C (absolute)"
+                : $"{RegisterEncoding.DecodeCpuTempLimit(v, direct: false, profile.TjMax)}C (tjMax={profile.TjMax})");
         LogRegister(device, profile, "tgpDbCtrl", v => $"bits: {Convert.ToString(v, 2).PadLeft(8, '0')}");
         LogRegister(device, profile, "tgp", v =>
             $"{RegisterEncoding.DecodeTGP(v, profile.TgpOffset)}W (offset={profile.TgpOffset})");
         LogRegister(device, profile, "dbTotalPower", v => $"raw={v}");
         LogRegister(device, profile, "dbMaxTgp", v => $"{RegisterEncoding.DecodeDB(v)}W");
-        LogRegister(device, profile, "fanControlMode", v => v == 0x40 ? "boost ON" : v == 0x00 ? "boost OFF" : $"unknown 0x{v:X2}");
+        LogRegister(device, profile, "fanControlMode", v =>
+            $"boost {((v & profile.Bitfields["fanBoost"].GetMask()) != 0 ? "ON" : "OFF")} (raw=0x{v:X2})");
         LogRegister(device, profile, "fanCurveEnable", v => $"bits: {Convert.ToString(v, 2).PadLeft(8, '0')}");
         LogRegister(device, profile, "batteryMode", v => $"raw=0x{v:X2}, mode={RegisterEncoding.DecodeBatteryMode(v)}");
         LogRegister(device, profile, "batterySoc", v => $"{v}%");

@@ -90,6 +90,32 @@ static partial class Program
             Tick();
             Require(device.Reads.Count(a => a == gpu) == (tray ? 0 : 1), "Disabled polling overhead");
         }
+
+        // 0x463 bit 7 is an EC "new value" flag; the monitor must decode the
+        // low seven bits with it set or clear, for both encodings.
+        monitor.Lightweight = false;
+        int limitAddr = profile.GetRegister("cpuTempLimitRead");
+        int? limit = null;
+        Action<MonitorData> capture = d => limit = d.CpuTempLimit;
+        monitor.Updated += capture;
+        foreach (byte raw in new byte[] { 0x0A, 0x8A })
+        {
+            device.Registers[limitAddr] = raw;
+            Tick();
+            Require(limit == 95, $"Offset readback 0x{raw:X2} decoded as {limit}");
+        }
+        monitor.Updated -= capture;
+        var absProfile = MonitorProfile();
+        absProfile.Limits["cpuTempLimit"] = new LimitInfo { Min = 80, Max = 98, Encoding = "direct" };
+        using var absMonitor = new EcMonitor(device, absProfile) { Lightweight = false };
+        absMonitor.Start();
+        absMonitor.Updated += capture;
+        foreach (byte raw in new byte[] { 0x5F, 0xDF })
+        {
+            device.Registers[limitAddr] = raw;
+            tick.Invoke(absMonitor, new object?[] { null, EventArgs.Empty });
+            Require(limit == 95, $"Absolute readback 0x{raw:X2} decoded as {limit}");
+        }
     }
 
     private static void Capture(string output, string state, float scale)

@@ -188,7 +188,7 @@ class EcMonitor : IDisposable
                 data.GpuFanPercent = RegisterEncoding.DecodeFanDuty(_device.ReadByte(_addrGpuFanDuty));
 
                 byte tempRaw = _device.ReadByte(_addrCpuTempLimitRead);
-                data.CpuTempLimit = _absoluteTemp ? tempRaw : RegisterEncoding.DecodeCpuTempLimit(tempRaw, _tjMax);
+                data.CpuTempLimit = RegisterEncoding.DecodeCpuTempLimit(tempRaw, _absoluteTemp, _tjMax);
                 data.BatterySoc = _device.ReadByte(_addrBatterySoc);
 
                 byte batteryRaw = _device.ReadByte(_addrBatteryMode);

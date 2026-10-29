@@ -23,6 +23,8 @@ This works for all 44 models. The 44 `projectIdValue` values range from 1 (GI) t
 
 X6FR5xxY (AMD CPU) matched IDY_7Y via shifted ProjectID 13, but it's a completely different machine. Same EC platform, different CPU. The verified IDY_7Y profile was applied, causing wrong temp limit encoding and hardcoded Intel fan curves to be written. ProjectID alone is insufficient for unique model identification when Intel/AMD variants share the same EC.
 
+**2026-10-29:** the X6FR EC firmware hardcodes `0x740 = 0x1A` (see `ec_firmware_X6FR5_findings.md`), so the collision is by design. Fixed by checking baseboard patterns before the EC ID, a `cpuVendor` field that detection checks against CPUID (IDY_7Y = `intel`), and an unverified `X6FR5xxY.json` (`cpuVendor: amd`, pattern `X6FR5`, GPU tach 0x46C/0x46D). Independently, `StartupValidator` disables CPU power when the temp encoding isn't confirmed by ECSpec and contradicts the CPU vendor.
+
 ### Known Baseboard Names
 
 | Baseboard (WMI) | Profile | CPU | Notes |

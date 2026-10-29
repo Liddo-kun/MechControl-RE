@@ -50,6 +50,10 @@ static partial class Program
             ("profile loading and atomic partial saves are truthful", PracticalProfiles),
             ("model limits and complete GPU maintenance readback", PracticalGpuLimits),
             ("all emergency actions precede durable persistence", PracticalPersistenceOrder),
+            ("CPU temp readback ignores the EC new-value flag", CpuTempReadbackMasksFlag),
+            ("unconfirmed CPU temp encoding must match the CPU vendor", CpuTempEncodingMustMatchVendor),
+            ("fan boost preserves shared 0x751 bits", FanBoostPreservesSharedBits),
+            ("profile detection separates Intel and AMD siblings", ProfileDetectionSeparatesCpuVendors),
         ];
 
         int failed = 0;

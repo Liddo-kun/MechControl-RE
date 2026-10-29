@@ -11,9 +11,9 @@
 # IMPORTANT!! WHEN MAKING ANY CHANGES, FIXING BUGS, OR ADDING FEATURES, KEEP IN MIND WE WANT TO CONSIDER COMPATABILITY WITH OTHER MODELS.  For example,  how is model detection done to choose which profile to load at startup? How do we know which features apply to that model? Don't make code changes that appear specific to my machine that we're testing on.
 
 Answers to the above (verify in `Profile/ProfileLoader.cs` if code has moved on):
-- **Detection order** (`ProfileLoader.DetectAndLoad`): EC 0x740 direct `projectIdValue` match → shifted match (`raw >> 1`) → WMI baseboard vs. profile `baseboardPatterns` (longest match wins) → baseboard vs. profile filename (token match) → manual picker. Real baseboards (e.g. `YAOSHI Series-X6AR55xY` = IDY_7Y) don't contain profile names — `baseboardPatterns` in the profile JSON is the reliable WMI mapping; add patterns as field logs come in.
+- **Detection order** (`ProfileLoader.DetectAndLoad`): WMI baseboard vs. profile `baseboardPatterns` (longest match wins) → EC 0x740 direct `projectIdValue` match → shifted match (`raw >> 1`) → baseboard vs. profile filename (token match) → manual picker. Every automatic step skips profiles whose `cpuVendor` (`intel`/`amd`) contradicts CPUID. Baseboard patterns go first because project IDs collide (the X6FR AMD EC firmware hardcodes 0x740 = 0x1A, same as IDY_7Y). Real baseboards (e.g. `YAOSHI Series-X6AR55xY` = IDY_7Y) don't contain profile names — add `baseboardPatterns` as field logs come in.
 - **Per-model behavior** flows from the profile JSON (registers, limits, encodings, TjMax, allowlist) + runtime `HardwareDetection` (support bytes, ECSpec limits, PL4 double flag, Intel/AMD temp encoding). Never hardcode values that belong in one of those two places.
-- Known trap: ProjectID collisions exist (X6FR5xxY AMD matches IDY_7Y via shifted ID 13). See `notes/other_machines.md`.
+- Known trap: ProjectID collisions exist (X6FR5xxY AMD and IDY_7Y both report shifted ID 13); resolved by `X6FR5xxY.json` (`baseboardPatterns` + `cpuVendor`). CPU power stays disabled if the temp-limit encoding is neither confirmed by ECSpec nor consistent with the CPU vendor (`StartupValidator.ValidateCpuTempEncoding`). See `notes/other_machines.md` and `notes/ec_firmware_X6FR5_findings.md`.
 
 ## Dev Workflow (tablet edits → Windows build)
 
