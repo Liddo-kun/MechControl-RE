@@ -23,12 +23,6 @@ MechControl/
     HidDevice.cs                  ITE USB HID enumeration + feature report sending (4 zones)
     BleDevice.cs                  WinRT BLE GATT: scan, connect (retry + cancellation), write, notify, disconnect
 
-  Hardware/PawnIo/
-    PawnIoClient.cs               Dynamic PawnIOLib interop, module load/execute/close (module-agnostic)
-    BlackwellGpuThermProvider.cs  Consumes upstream PawnIO.Modules Nvidia.bin (PR #77) six-channel thermal IOCTL
-    PciBdf.cs                     PCI bus/device/function candidate identity (consumer supplies BDF to the module)
-    NvidiaPciDeviceLocator.cs     Passive SetupAPI discovery of NVIDIA display-class PCI candidates (never NVAPI/NVML)
-
   Hardware/Nvidia/
     NvidiaApi.cs                   Versioned NVAPI BIOS/power/current requests; NVML enforced-limit readback
     NvidiaRuntimeNvml.cs           Selected-adapter PCI identity and enforced power telemetry
@@ -73,8 +67,8 @@ MechControl/
     LiquidCoolerState.cs          JSON persistence for saved device, auto-connect, last settings
 
   Monitoring/
-    EcMonitor.cs                  WinForms Timer (1s), shared EC sampler (telemetry, failsafe, linked fans)
-                                  + optional GPU hotspot provider, fires Updated event
+    EcMonitor.cs                  WinForms Timer (1s), shared EC sampler (telemetry, failsafe, linked fans),
+                                  fires Updated event
     PerfCounterPublisher.cs       Publishes CPU/GPU fan RPM as Windows perf counters from Updated (no extra EC reads)
 
   UI/
@@ -95,9 +89,8 @@ MechControl/
                                   positioned buttons — see "UI layout pattern" below.
     ProfileBar.cs                 5 profile slots + Save + Restore/Gaming/Office/Battery Saver Defaults, docked at top
                                   Exposes ActiveSlot, ProfileApplied, ProfileListChanged for tray menu sync
-    MonitorPanel.cs               Read-only status: fan speeds, CPU temp limit, battery, boost/curve status,
-                                  optional GPU hotspot
-    SystemInfoTab.cs              System identity, live sensor/power telemetry, GPU hotspot settings
+    MonitorPanel.cs               Read-only status: fan speeds, CPU temp limit, battery, boost/curve status
+    SystemInfoTab.cs              System identity, live sensor/power telemetry
     LiquidCoolerTab.cs            BLE cooler: scan/connect (15s timeout), fan/pump/RGB, auto-reconnect with BT retry
     Section.cs                    Custom labeled panel (title intersecting thin border); replaces GroupBox
     UiHelpers.cs                  Shared fonts + builders: BuildSection/SliderTable/KeyValueTable/RgbFlow/
@@ -481,31 +474,10 @@ Each tick, before any telemetry:
 Subscriber exceptions are caught and logged, so a UI fault can't stop safety work.
 
 Two telemetry modes:
-- **Lightweight** (tray-hidden): CPU/GPU fan RPM (4 bytes) + GPU hotspot provider.
+- **Lightweight** (tray-hidden): CPU/GPU fan RPM (4 bytes).
 - **Full** (window shown): additionally CPU/GPU fan %, CPU temp limit, battery SOC, battery mode, fan boost status, fan curve status, CPU/GPU temp, adapter current, system power, DB/TGP live mirrors (~18 EC bytes total).
 
 `PerfCounterPublisher` passively republishes `\MechControl\CPU Fan RPM` and `\MechControl\GPU Fan RPM` from `Updated` (no extra EC reads), e.g. for an MSI Afterburner overlay.
-
-When `settings.json` leaves `gpuHotspotEnabled` on and the PawnIO runtime gate
-passes, the same timer also reads all six NVIDIA GB20x thermal channels
-(`BAR0+0xAD0A90..0xAD0AA4`) with one call to the upstream PawnIO.Modules
-NVIDIA module's `ioctl_read_thermal_registers(bus, device, function)`
-(PR #77; see `notes/gpu_hotspot_pr77_plan.md`). The module returns raw DWORDs
-only; MechControl decodes (bit 30 validity, `(raw & 0xFFFF)/256.0`, plausible
-only when 0 < t < 130 C) and selects `0xAD0AA0` as the primary hot spot value, falling
-back to the max of the five individual channels if that aggregate is invalid.
-All-ones is treated as a normal power-gated GPU state (`Asleep`), and so is a
-`STATUS_NOT_SUPPORTED` failure after support was once proven (deep power-gating
-makes even PCI config space unreadable). Support is confirmed by the first
-successful IOCTL returning either a plausible channel or all-ones (reported as
-`Asleep`); successful reads with neither do not confirm support. Until then
-(e.g. IOCTL failing because the GPU is deep-asleep at startup) the provider is
-`Pending` and retries quietly every 15 monitor ticks; other read failures after
-confirmation are `Faulted`. Provider failures never count toward the EC monitor's
-consecutive-failure accounting. The provider is GPU-detected and does not use
-model profile JSON. The monitor row is created hidden and appears (without an
-app restart) once support is confirmed. Diagnostic raw-channel logging is
-available only through the default-off `gpuHotspotDiagnosticLogging` setting.
 
 After 5 consecutive telemetry read failures the monitor stops — but only when no failsafe or linked-fan subscriber is active. MainForm logs it, shows a tray balloon, and restarts the monitor after 60 s.
 
@@ -662,10 +634,7 @@ followed by a failed settings save is reported as partial, without false selecti
 saved bookkeeping or a pretend multi-file transaction. Migrated profiles remain
 marked unsaved until an explicit successful save.
 
-App-level `settings.json` also stores `gpuHotspotEnabled` (default `true`) and
-`gpuHotspotDiagnosticLogging` (default `false`). Disabling hotspot monitoring
-skips PawnIO DLL loading and driver access entirely on the next launch.
-It also holds the durable `thermalProtection` state plus legacy
+App-level `settings.json` also holds the durable `thermalProtection` state plus legacy
 `gpuFailsafeTripReason`/`gpuFailsafeTripThresholdC` fields (migration only).
 
 ### Startup Flow
@@ -677,7 +646,7 @@ Program.cs:
 
 MainForm constructor:
  2. Hardware detection + EC enrichment (Section 5)
- 3. Load settings (UserProfileManager); create GPU hotspot provider if enabled
+ 3. Load settings (UserProfileManager)
  4. Create EcMonitor + perf counters and start in lightweight mode (the timer
     only ticks once the message loop runs, i.e. after this constructor)
  5. EC init handshake (Section 4 startup-only table)
@@ -702,7 +671,7 @@ MainForm constructor:
 
 ### System Tray Behavior
 
-Minimize or close hides to tray. On hide: EcMonitor switches to lightweight mode (fan RPM + hotspot, plus failsafe/linked-fan temperature samples — see Section 7) and battery telemetry stops. On show: full mode resumes, battery telemetry restarts if applicable, and the monitor is restarted if it auto-stopped. Linked fans and the failsafe keep running off the shared sampler regardless of UI visibility. Status panel `Invalidate()` is guarded by `Visible` check (skips when minimized or on another tab).
+Minimize or close hides to tray. On hide: EcMonitor switches to lightweight mode (fan RPM, plus failsafe/linked-fan temperature samples — see Section 7) and battery telemetry stops. On show: full mode resumes, battery telemetry restarts if applicable, and the monitor is restarted if it auto-stopped. Linked fans and the failsafe keep running off the shared sampler regardless of UI visibility. Status panel `Invalidate()` is guarded by `Visible` check (skips when minimized or on another tab).
 
 **Tray context menu**: Show, 5 profile slots (checked = active, grayed = empty), Exit. Profile items call `ProfileBar.LoadAndApplySlot()` — same code path as the main UI. Menu rebuilds on profile load, save, or rename.
 
@@ -710,14 +679,14 @@ Minimize or close hides to tray. On hide: EcMonitor switches to lightweight mode
 
 ### Shutdown / Disposal Order
 
-On real exit, `FormClosing` hides the tray icon, closes the failsafe alert, stops battery telemetry, disposes the EC activation watchdog, lighting resume restore, monitor, GPU hotspot provider and perf counters, then closes the log.
+On real exit, `FormClosing` hides the tray icon, closes the failsafe alert, stops battery telemetry, disposes the EC activation watchdog, lighting resume restore, monitor and perf counters, then closes the log.
 
 `MainForm.Dispose` then:
 1. Disposes the failsafe alert.
 2. Runs `LiquidCoolerTab.ShutdownAsync()` (bounded to 3 s) while its reconnect timer is still live.
 3. Disposes the tray animation timer, tray icon/menu and profile icons.
 4. Calls `base.Dispose()`, which disposes child controls including FanTab → LinkedFanController.
-5. Disposes the GPU hotspot provider (idempotent), BLE device and HID device, and finally the EC device.
+5. Disposes the BLE device and HID device, and finally the EC device.
 
 LinkedFanController.Dispose intentionally does not touch the EC (see Linked Fan Mode shutdown note above), so EC-last is defensive — child controls may still write during disposal.
 
