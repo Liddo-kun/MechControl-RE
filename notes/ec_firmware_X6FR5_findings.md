@@ -105,11 +105,11 @@ buffer as the keyboard scan-code ring (writer `common:2cc6`, write index `0xBFE`
 spot-checked) and the bytes as set-2 Ctrl and B, so bit 7 = "Ctrl and B seen in keyboard
 history". EC-owned, consistent with the IDY_7Y measurements.
 
-### 9. Fixed-duty fan override (unverified candidate): 0x759 / 0x75A
+### 9. Fixed-duty fan override: 0x759 / 0x75A
 `bank2:93aa`: if `0x759 bit 7` is set, fan 1 duty = `(0x759 & 0x7F) * 2` (percent → raw,
 100 % if ≥ 100) and the curve is bypassed; same for `0x75A` and fan 2. Not in any OEM
-register list and not in the write allowlist. Needs read-only confirmation and careful
-testing before any use.
+register list and not in the write allowlist. Verified on IDY_7Y (Intel) hardware; see
+[`fan_duty_override.md`](fan_duty_override.md).
 
 ### 10. Other
 - High-temperature event: CPU `0x43E` ≥ 95 C or GPU `0x44F` ≥ 85 C sets `0x7A5 bit 3` and
@@ -137,8 +137,8 @@ Its findings this pass missed, each spot-checked here:
   can disable CPU power control on a startup read that catches the flag.
 - **GPU tach pair is 0x46C (high) / 0x46D (low)** in this image (`bank0:e90d` mirrors the CPU
   routine `e8ef` for 0x464/0x465). 0x46B is written from a power-control value
-  (`bank2:b347`). Profiles use 0x46B/0x46C. Needs a read-only check on IDY_7Y before
-  changing the Intel profile.
+  (`bank2:b347`). Confirmed on IDY_7Y 2026-10-29: 0x46B reads a constant 0xC3 while
+  0x46C:0x46D tracks the fan; `IDY_7Y.json` now uses 0x46D.
 - **0x751 is a shared bitfield.** Bits 4 and 7 are written by the EC from `0x7E8`
   (`bank0:caac/cab5`, `bank2:c4d4/eb5c`) and choose temp-limit table rows; the Fn hotkey
   toggles bit 6 with XOR. `FanControl` writes whole bytes 0x00/0x40, reads `== 0x40`,
@@ -167,8 +167,7 @@ and the AMD temperature-encoding fallback when ECSpec is unreadable.
    Restore Defaults use read-modify-write. `UniversalDefaults.ApplyToProfile` now adds any
    missing universal bitfield instead of only filling an empty set.
 
-Still open: 0x7C6 bit handling, "Battery Saver" mode naming, IDY_7Y GPU tach read-only check,
-extra identity logging.
+Still open: 0x7C6 bit handling, "Battery Saver" mode naming, extra identity logging.
 
 ## Reproducing
 

@@ -558,8 +558,9 @@ EC version, system ID, live sensor temps, BIOS info, fan RPM, silent mode.
 | `0x464` | R | ADDR_EC_MAIN_FAN_RPM_BYTE1 | CPU fan RPM high byte (pair with 0x465). RPM = `(0x464 << 8) \| 0x465` |
 | `0x465` | R | ADDR_EC_MAIN_FAN_RPM_BYTE2 | CPU fan RPM low byte (pair with 0x464) |
 | `0x466` | R | ADDR_EC_BIOS_INFO5 | BIOS info register 5 |
-| `0x46B` | R | ADDR_EC_SECOND_FAN_RPM_BYTE2 | GPU fan RPM low byte (pair with 0x46C). RPM = `(0x46C << 8) \| 0x46B` |
-| `0x46C` | R | ADDR_EC_SECOND_FAN_RPM_BYTE1 | GPU fan RPM high byte (pair with 0x46B) |
+| `0x46B` | R | ADDR_EC_SECOND_FAN_RPM_BYTE2 | **Not the GPU RPM low byte** despite the OEM name: reads a constant 0xC3 on IDY_7Y whether the fan is stopped or at 4,600 RPM (measured 2026-10-29). Written from a power-control value in X6FR firmware. |
+| `0x46C` | R | ADDR_EC_SECOND_FAN_RPM_BYTE1 | GPU fan RPM high byte. RPM = `(0x46C << 8) \| 0x46D` (verified on IDY_7Y and in X6FR firmware) |
+| `0x46D` | R | — | GPU fan RPM low byte (pair with 0x46C) |
 | `0x476` | R | BIOSFuncReg | BIOS function register |
 | `0x47D` | R | ecOEM_SUB_VER2 | EC sub-version 2 |
 | `0x49F` | R | ADDR_BIOS_INFO_3_BYTE | BIOS info byte 3 |
@@ -626,6 +627,8 @@ MyFan2/3 PWM levels, fan duty, RPM, control mode, status, fan switch speed, MyFa
 | `0x746` | RW | ADDR_MYFAN2_L4_PWM / ADDR_DynamicBoost_MaxinumTGP_VALUE | MyFan2 level 4 PWM. Also DB max TGP (direct watts, 5-25). |
 | `0x747` | RW | ADDR_MYFAN2_L5_PWM | MyFan2 level 5 PWM |
 | `0x751` | RW | ADDR_MAFAN_CONTROL_BYTE | Fan control mode. Bit 6 = full blast (RMW; bits 4/7 are EC mode bits, the Fn key toggles bit 6). |
+| `0x759` | RW | — | **Fixed-duty override, fan 1 (CPU).** Bit 7 = override on; bits 0-6 = duty percent (≥ 100 → 100 %). EC then drives 0x75B = percent × 2 and skips its curve, boost and safety logic for that fan; no temperature check of any kind. 0x00 = back to curve. Verified on IDY_7Y 2026-10-29 (see `notes/fan_duty_override.md`). Not in the write allowlist. |
+| `0x75A` | RW | — | Fixed-duty override, fan 2 (GPU). Same encoding as 0x759, drives 0x75C. |
 | `0x75B` | R | ADDR_EC_MAIN_FAN_L_DUTY_BYTE | CPU fan duty (raw / 2 = percent, 0-200) |
 | `0x75C` | R | ADDR_EC_MAIN_FAN_R_DUTY_BYTE | GPU fan duty (raw / 2 = percent, 0-200) |
 | `0x75D` | RW | ADDR_TRIGGER_BYTE2 | Secondary trigger byte |
