@@ -124,6 +124,15 @@ static partial class Program
                 "Failed re-enable retained a control subscription");
             linked.Enable();
         }
+        // EC right-point rule: duty[i] applies when tempUp[i-1] < temp <= tempUp[i].
+        static int EcDuty(FanCurveModel c, int t) => (c.Points.FirstOrDefault(p => t <= p.TempUp) ?? c.Points[^1]).DutyPercent;
+        foreach (byte hot in new byte[] { 90, 95 })
+        {
+            device.Registers[cpu] = hot; Tick();
+            Require(EcDuty(linked.WrittenCpuCurve!, hot) == linked.LinkedDuty,
+                $"CPU fan left the linked duty at a sustained {hot} C");
+            Require(EcDuty(linked.WrittenCpuCurve!, 98) == 100, "Crash-safety tail did not reach 100% above 97 C");
+        }
         device.Writes.Clear(); linked.Dispose();
         Require(device.Writes.Count == 0, "Disposal rewrote crash-safety curves");
         device.Reads.Clear(); Tick();
