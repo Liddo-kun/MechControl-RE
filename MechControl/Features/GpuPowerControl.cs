@@ -188,7 +188,8 @@ class GpuPowerControl
         var s = new GpuProfileSettings
         {
             Tgp = profile.Tgp, DynamicBoostEnabled = profile.DynamicBoostEnabled, DynamicBoostWatts = profile.DynamicBoostWatts,
-            BiosOverrideEnabled = profile.BiosOverrideEnabled, NvvddMilliamps = profile.NvvddMilliamps, MsvddMilliamps = profile.MsvddMilliamps
+            BiosOverrideEnabled = profile.BiosOverrideEnabled, NvvddMilliamps = profile.NvvddMilliamps, MsvddMilliamps = profile.MsvddMilliamps,
+            BoardInputMilliamps = profile.BoardInputMilliamps
         };
         string notice = "";
         bool unlock = TgpUnlocked;
@@ -200,7 +201,7 @@ class GpuPowerControl
             else
             {
                 s.Tgp = Math.Clamp(s.Tgp, NormalMinTgpWatts, NormalMaxTgpWatts);
-                s.NvvddMilliamps = s.MsvddMilliamps = null;
+                s.NvvddMilliamps = s.MsvddMilliamps = s.BoardInputMilliamps = null;
                 notice = automatic && CanUnlockTgp
                     ? "This profile uses the GPU unlock, which is off, so its GPU power was limited to the normal range. Load it manually to turn the unlock on."
                     : $"This profile uses the GPU unlock, which is unavailable ({PowerOverrideUnavailableReason ?? "no NVIDIA GPU found"}). Its GPU power was limited to the normal range.";
@@ -209,29 +210,38 @@ class GpuPowerControl
         ValidatePower(s.Tgp, s.DynamicBoostEnabled, s.DynamicBoostWatts, unlock);
         bool restart = unlock && !TgpUnlocked;
         var driver = PowerOverride;
-        if (driver == null) s.NvvddMilliamps = s.MsvddMilliamps = null; // Never open NVIDIA for stock-range currents.
-        else if (s.NvvddMilliamps != null || s.MsvddMilliamps != null || (unlock && s.BiosOverrideEnabled != true))
+        if (driver == null) s.NvvddMilliamps = s.MsvddMilliamps = s.BoardInputMilliamps = null; // Never open NVIDIA for stock-range currents.
+        else if (s.NvvddMilliamps != null || s.MsvddMilliamps != null || s.BoardInputMilliamps != null || (unlock && s.BiosOverrideEnabled != true))
         {
             var live = driver.ReadCurrentLimits();
+            // Saved on a GPU/driver with board input: skip only that value (Clamp drops it).
+            if (s.BoardInputMilliamps != null && live.BoardInput == null)
+                notice = "This GPU has no board input current limit, so this profile's board input setting was skipped.";
             if (unlock && s.BiosOverrideEnabled != true)
             {
                 // A profile that doesn't need the unlock runs at stock currents, even while unlocked.
                 // Legacy/stock-saved profiles have no currents; never leave raised ones in place.
                 s.NvvddMilliamps ??= live.Nvvdd.DefaultMilliamps;
                 s.MsvddMilliamps ??= live.Msvdd.DefaultMilliamps;
+                s.BoardInputMilliamps ??= live.BoardInput?.DefaultMilliamps;
             }
-            int? Clamp(int? value, GpuCurrentLimit rail, int maximum) => value is int v ? Math.Clamp(v, rail.MinimumMilliamps, maximum) : null;
+            int? Clamp(int? value, GpuCurrentLimit? rail, int? maximum) =>
+                value is int v && rail != null && maximum is int max ? Math.Clamp(v, rail.MinimumMilliamps, max) : null;
             s.NvvddMilliamps = Clamp(s.NvvddMilliamps, live.Nvvdd, live.Nvvdd.AllowedMaximumMilliamps(unlock));
             s.MsvddMilliamps = Clamp(s.MsvddMilliamps, live.Msvdd, live.Msvdd.AllowedMaximumMilliamps(unlock));
-            if (!restart && driver.RequiresRestart(unlock, s.NvvddMilliamps, s.MsvddMilliamps))
+            s.BoardInputMilliamps = Clamp(s.BoardInputMilliamps, live.BoardInput, live.BoardInput?.AllowedMaximumMilliamps(unlock));
+            if (!restart && driver.RequiresRestart(unlock, s.NvvddMilliamps, s.MsvddMilliamps, s.BoardInputMilliamps))
             {
                 if (!automatic) restart = true;
                 else
                 {
                     s.NvvddMilliamps = Clamp(s.NvvddMilliamps, live.Nvvdd, live.Nvvdd.MaximumMilliamps);
                     s.MsvddMilliamps = Clamp(s.MsvddMilliamps, live.Msvdd, live.Msvdd.MaximumMilliamps);
-                    if (driver.RequiresRestart(unlock, s.NvvddMilliamps, s.MsvddMilliamps)) s.NvvddMilliamps = s.MsvddMilliamps = null;
-                    notice = "This profile's GPU current limits need a GPU restart, so they were limited to the active ceilings. Load it manually to apply them.";
+                    s.BoardInputMilliamps = Clamp(s.BoardInputMilliamps, live.BoardInput, live.BoardInput?.MaximumMilliamps);
+                    if (driver.RequiresRestart(unlock, s.NvvddMilliamps, s.MsvddMilliamps, s.BoardInputMilliamps))
+                        s.NvvddMilliamps = s.MsvddMilliamps = s.BoardInputMilliamps = null;
+                    notice += (notice.Length > 0 ? " " : "") +
+                        "This profile's GPU current limits need a GPU restart, so they were limited to the active ceilings. Load it manually to apply them.";
                 }
             }
         }
@@ -248,14 +258,14 @@ class GpuPowerControl
     {
         ProfileNotice = plan.Notice;
         var s = plan.Settings;
-        if (!plan.Restart && s.NvvddMilliamps == null && s.MsvddMilliamps == null) return;
+        if (!plan.Restart && s.NvvddMilliamps == null && s.MsvddMilliamps == null && s.BoardInputMilliamps == null) return;
         if (Failsafe?.Holds(ThermalAction.Gpu) == true)
             return; // Automatic applies retain the existing hold; ApplyGpuPower writes the minimum.
         var driver = PowerOverride!;
         if (plan.Restart)
             RunBlocking("Restarting the GPU to apply its BIOS limits…",
-                () => driver.Configure(plan.Unlock, s.NvvddMilliamps, s.MsvddMilliamps, true));
-        else driver.Configure(plan.Unlock, s.NvvddMilliamps, s.MsvddMilliamps, false);
+                () => driver.Configure(plan.Unlock, s.NvvddMilliamps, s.MsvddMilliamps, s.BoardInputMilliamps, true));
+        else driver.Configure(plan.Unlock, s.NvvddMilliamps, s.MsvddMilliamps, s.BoardInputMilliamps, false);
     }
 
     /// <summary>Turn the unlock on/off from the Power tab. Restarts the GPU.</summary>
@@ -266,7 +276,7 @@ class GpuPowerControl
         var driver = EnsurePowerOverride();
         if (driver.Enabled == unlocked) return;
         RunBlocking(unlocked ? "Restarting the GPU to raise its limits…" : "Restarting the GPU to restore its original limits…",
-            () => driver.Configure(unlocked, null, null, true));
+            () => driver.Configure(unlocked, null, null, null, true));
         // The restart cleared the driver request; reassert the EC request within the new range.
         var ec = ReadGpuPower();
         ApplyGpuPower(Math.Clamp(ec.TgpWatts, MinTgpWatts, MaxTgpWatts), ec.DynamicBoostEnabled, ec.DbWatts);
@@ -278,11 +288,11 @@ class GpuPowerControl
         var driver = PowerOverride;
         if (driver == null) return;
         if (driver.Enabled)
-            RunBlocking("Restarting the GPU to restore its original limits…", () => driver.Configure(false, null, null, true));
+            RunBlocking("Restarting the GPU to restore its original limits…", () => driver.Configure(false, null, null, null, true));
         else
         {
             var limits = driver.ReadCurrentLimits();
-            driver.Configure(false, limits.Nvvdd.DefaultMilliamps, limits.Msvdd.DefaultMilliamps, false);
+            driver.Configure(false, limits.Nvvdd.DefaultMilliamps, limits.Msvdd.DefaultMilliamps, limits.BoardInput?.DefaultMilliamps, false);
         }
     }
 
@@ -292,10 +302,12 @@ class GpuPowerControl
         var limits = PowerOverride.ReadCurrentLimits();
         settings.NvvddMilliamps = limits.Nvvdd.CurrentMilliamps;
         settings.MsvddMilliamps = limits.Msvdd.CurrentMilliamps;
+        settings.BoardInputMilliamps = limits.BoardInput?.CurrentMilliamps;
         // Only a profile whose values need the unlock asks for it.
         settings.BiosOverrideEnabled = TgpUnlocked && (settings.Tgp > NormalMaxTgpWatts || settings.Tgp < NormalMinTgpWatts ||
             settings.Tgp + (settings.DynamicBoostEnabled ? settings.DynamicBoostWatts : 0) > PowerOverride.StockPowerLimitWatts ||
-            limits.Nvvdd.CurrentMilliamps > limits.Nvvdd.StockMaximumMilliamps || limits.Msvdd.CurrentMilliamps > limits.Msvdd.StockMaximumMilliamps);
+            limits.Nvvdd.CurrentMilliamps > limits.Nvvdd.StockMaximumMilliamps || limits.Msvdd.CurrentMilliamps > limits.Msvdd.StockMaximumMilliamps ||
+            (limits.BoardInput is { } input && input.CurrentMilliamps > input.StockMaximumMilliamps));
     }
 
     public bool IsMinimumPowerRequested() => CanApplyMinimumTgp &&

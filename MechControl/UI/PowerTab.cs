@@ -22,6 +22,7 @@ class PowerTab : UserControl
     private readonly CheckBox? _chkTgpUnlock;
     private readonly UiHelpers.SliderRow? _rowNvvdd;
     private readonly UiHelpers.SliderRow? _rowMsvdd;
+    private readonly UiHelpers.SliderRow? _rowBoardInput;
     private readonly Label? _lblDriverLimits;
     private bool _refreshing;
     private readonly CheckBox? _chkDynamicBoost;
@@ -167,6 +168,7 @@ class PowerTab : UserControl
             {
                 _rowNvvdd = AddCurrentSlider(gpuLayout, "NVVDD / Core current limit");
                 _rowMsvdd = AddCurrentSlider(gpuLayout, "MSVDD / Fabric current limit");
+                _rowBoardInput = AddCurrentSlider(gpuLayout, "Board input current limit");
                 _lblDriverLimits = new Label { AutoSize = true, ForeColor = UiColors.Hint, MaximumSize = new Size(600, 0) };
                 gpuLayout.Controls.Add(_lblDriverLimits);
                 gpuLayout.SetColumnSpan(_lblDriverLimits, 3);
@@ -317,7 +319,7 @@ class PowerTab : UserControl
         UiHelpers.SliderRow? row = null;
         row = UiHelpers.BuildSliderRow(name, 1, 2, "A", formatter: v => FormatCurrent(row?.Slider, v));
         UiHelpers.AddSliderRow(layout, row);
-        _tooltip.SetToolTip(row.Slider, "Applies live; changing the unlock restarts the GPU.");
+        _tooltip.SetToolTip(row.Slider, $"Applies live within the active ceiling. The unlock allows up to {UniversalDefaults.GpuCurrentUnlockPercent}% of the stock current; raising an older ceiling restarts the GPU.");
         return row;
     }
 
@@ -366,12 +368,14 @@ class PowerTab : UserControl
                     limits = driver.ReadCurrentLimits();
                     var power = driver.ReadPowerLimits();
                     status = $"Driver ceiling {power.CeilingWatts} W · enforced {power.EnforcedWatts} W · stock currents " +
-                        $"{limits.Nvvdd.DefaultMilliamps / 1000.0:0.###} / {limits.Msvdd.DefaultMilliamps / 1000.0:0.###} A";
+                        $"{limits.Nvvdd.DefaultMilliamps / 1000.0:0.###} / {limits.Msvdd.DefaultMilliamps / 1000.0:0.###}" +
+                        (limits.BoardInput is { } input ? $" / {input.DefaultMilliamps / 1000.0:0.###} A" : " A");
                 }
                 catch (Exception ex) { limits = null; status = "NVIDIA readback failed: " + ex.Message; }
             }
             SetCurrent(_rowNvvdd, limits?.Nvvdd, gpu.TgpUnlocked);
             SetCurrent(_rowMsvdd!, limits?.Msvdd, gpu.TgpUnlocked);
+            SetCurrent(_rowBoardInput!, limits?.BoardInput, gpu.TgpUnlocked);
             _lblDriverLimits!.Text = gpu.ProfileNotice.Length > 0 ? status + "\n" + gpu.ProfileNotice : status;
         }
         finally { _refreshing = false; }
@@ -385,7 +389,8 @@ class PowerTab : UserControl
         // Not a profile: works within the active unlock, so unmoved sliders keep their values.
         BiosOverrideEnabled = _gpuControl?.TgpUnlocked == true ? true : null,
         NvvddMilliamps = SelectedMilliamps(_rowNvvdd),
-        MsvddMilliamps = SelectedMilliamps(_rowMsvdd)
+        MsvddMilliamps = SelectedMilliamps(_rowMsvdd),
+        BoardInputMilliamps = SelectedMilliamps(_rowBoardInput)
     };
 
     private void BtnRead_Click(object? sender, EventArgs e)

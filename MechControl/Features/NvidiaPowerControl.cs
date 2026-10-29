@@ -15,6 +15,8 @@ sealed class NvidiaPowerControl : IGpuPowerOverride, IDisposable
     // before our first raise are returned when lowering; if firmware moved the platform budget
     // since our last write, the current values become the originals.
     private NvidiaBudgetSnapshot? budgetOriginal, budgetApplied;
+    // Board input is offered only while a driver policy matches the BIOS field (VerifyActive).
+    private bool boardInputVerified;
     private uint UnlockedCeilingMw => checked(original.Power.Maximum + (uint)Profile.UniversalDefaults.TgpUnlockHeadroomWatts * 1000);
     public bool Enabled { get; private set; }
     public int StockPowerLimitWatts => checked((int)(original.Power.Maximum / 1000));
@@ -49,7 +51,7 @@ sealed class NvidiaPowerControl : IGpuPowerOverride, IDisposable
             var bios = store.Open(active, out bool staged, out bool discarded);
             if (discarded)
                 DiagnosticLog.Warn("[NVIDIA Power] Removed MechControl GPU overrides that no longer apply (GPU BIOS replaced or driver reinstalled).");
-            if (bios.Nvvdd.Default > int.MaxValue / 2 || bios.Msvdd.Default > int.MaxValue / 2)
+            if (bios.Nvvdd.Default > int.MaxValue / 2 || bios.Msvdd.Default > int.MaxValue / 2 || bios.BoardInput?.Default > int.MaxValue / 2)
                 throw new NotSupportedException("The detected NVIDIA current ranges exceed supported slider units.");
             if (bios.DeviceId != id.DeviceId || !bios.Version.Equals(id.VbiosVersion, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("NVIDIA BIOS and GPU identity differ.");
@@ -60,7 +62,8 @@ sealed class NvidiaPowerControl : IGpuPowerOverride, IDisposable
                 throw new NotSupportedException("The NVIDIA driver cannot accept this model's minimum TGP.");
             DiagnosticLog.Write($"[NVIDIA Power] {id.Name}, driver {id.DriverVersion}, BIOS {id.VbiosVersion}: " +
                 $"stock ceiling {controller.StockPowerLimitWatts} W, active {limits.MaximumMw / 1000} W; " +
-                $"stock currents {bios.Nvvdd.Default / 1000.0:0.###}/{bios.Msvdd.Default / 1000.0:0.###} A. Recovery: {store.RecoveryPath}");
+                $"stock currents {bios.Nvvdd.Default / 1000.0:0.###}/{bios.Msvdd.Default / 1000.0:0.###} A; " +
+                $"board input {(controller.boardInputVerified && bios.BoardInput is { } input ? $"{input.Default / 1000.0:0.###} A" : "unavailable")}. Recovery: {store.RecoveryPath}");
             return controller;
         }
         catch { store?.Dispose(); api.Dispose(); throw; }
@@ -93,31 +96,34 @@ sealed class NvidiaPowerControl : IGpuPowerOverride, IDisposable
         GpuCurrentLimit Convert(NvidiaCurrentLimit rail, NvidiaBiosField stock) => new(
             checked((int)Math.Max(rail.MinimumMa, stock.Minimum)), checked((int)stock.Default), checked((int)rail.MaximumMa),
             checked((int)rail.CurrentMa), checked((int)stock.Maximum));
-        return new(Convert(rails.Nvvdd, original.Nvvdd), Convert(rails.Msvdd, original.Msvdd));
+        return new(Convert(rails.Nvvdd, original.Nvvdd), Convert(rails.Msvdd, original.Msvdd),
+            boardInputVerified && original.BoardInput is { } input && rails.BoardInput is { } liveInput ? Convert(liveInput, input) : null);
     }
 
-    public bool RequiresRestart(bool enabled, int? nvvddMilliamps, int? msvddMilliamps)
+    public bool RequiresRestart(bool enabled, int? nvvddMilliamps, int? msvddMilliamps, int? boardInputMilliamps)
     {
-        using (Enter()) return NeedsRestart(enabled, nvvddMilliamps, msvddMilliamps, Limits());
+        using (Enter()) return NeedsRestart(enabled, nvvddMilliamps, msvddMilliamps, boardInputMilliamps, Limits());
     }
 
-    private bool NeedsRestart(bool enabled, int? nv, int? ms, GpuCurrentLimits live) =>
+    private bool NeedsRestart(bool enabled, int? nv, int? ms, int? input, GpuCurrentLimits live) =>
         enabled != Enabled || (enabled && (api.ReadPowerLimits().MaximumMw < UnlockedCeilingMw ||
-            nv > live.Nvvdd.MaximumMilliamps || ms > live.Msvdd.MaximumMilliamps));
+            nv > live.Nvvdd.MaximumMilliamps || ms > live.Msvdd.MaximumMilliamps || input > live.BoardInput?.MaximumMilliamps));
 
-    public void Configure(bool enabled, int? nvvddMilliamps, int? msvddMilliamps, bool allowRestart)
+    public void Configure(bool enabled, int? nvvddMilliamps, int? msvddMilliamps, int? boardInputMilliamps, bool allowRestart)
     {
         lock (sync)
         {
             var live = Limits();
-            void Validate(int? value, GpuCurrentLimit rail)
+            void Validate(int? value, GpuCurrentLimit? rail)
             {
+                if (value.HasValue && rail == null) throw new NotSupportedException("Board input current control is unavailable.");
+                if (rail == null) return;
                 if (value is int v && (v < rail.MinimumMilliamps || v > rail.AllowedMaximumMilliamps(enabled)))
                     throw new ArgumentOutOfRangeException(nameof(value), $"Current must be within the detected range " +
                         $"{rail.MinimumMilliamps / 1000.0:0.###}–{rail.AllowedMaximumMilliamps(enabled) / 1000.0:0.###} A.");
             }
-            Validate(nvvddMilliamps, live.Nvvdd); Validate(msvddMilliamps, live.Msvdd);
-            bool restart = NeedsRestart(enabled, nvvddMilliamps, msvddMilliamps, live);
+            Validate(nvvddMilliamps, live.Nvvdd); Validate(msvddMilliamps, live.Msvdd); Validate(boardInputMilliamps, live.BoardInput);
+            bool restart = NeedsRestart(enabled, nvvddMilliamps, msvddMilliamps, boardInputMilliamps, live);
             if (restart && !allowRestart) throw new InvalidOperationException("These NVIDIA limits require a GPU restart. Apply them manually first.");
             // Unlocked, the registry holds each rail's maximum at the top of the unlocked range,
             // so every slider value applies live, and its default at the chosen current, so the
@@ -129,7 +135,8 @@ sealed class NvidiaPowerControl : IGpuPowerOverride, IDisposable
                 return new((uint)(value ?? Math.Min(rail.CurrentMilliamps, max)), (uint)max);
             }
             var request = enabled
-                ? new NvidiaOverrideRequest(UnlockedCeilingMw, Rail(nvvddMilliamps, live.Nvvdd), Rail(msvddMilliamps, live.Msvdd))
+                ? new NvidiaOverrideRequest(UnlockedCeilingMw, Rail(nvvddMilliamps, live.Nvvdd), Rail(msvddMilliamps, live.Msvdd),
+                    live.BoardInput is { } input ? Rail(boardInputMilliamps, input) : null)
                 : new();
             var records = original.BuildOverrides(request);
             if (restart)
@@ -145,16 +152,18 @@ sealed class NvidiaPowerControl : IGpuPowerOverride, IDisposable
                 if (!active.AsSpan().SequenceEqual(expected)) throw new IOException("NVIDIA did not consume the staged BIOS limits. Restart Windows to activate them.");
                 VerifyActive(active);
                 Enabled = enabled;
+                if (!boardInputVerified) boardInputMilliamps = null; // The driver didn't take its override; the rest still applies.
                 if (!enabled) store.DeleteRecovery();
                 // A restart clears the F8 request; the caller reapplies power through the
                 // EC/failsafe path so a hold that started meanwhile is respected.
             }
             else if (enabled && !store.Matches(records)) store.Stage(original, records);
-            if (nvvddMilliamps.HasValue || msvddMilliamps.HasValue)
-                api.SetCurrentLimits((uint?)nvvddMilliamps, (uint?)msvddMilliamps);
+            if (nvvddMilliamps.HasValue || msvddMilliamps.HasValue || boardInputMilliamps.HasValue)
+                api.SetCurrentLimits((uint?)nvvddMilliamps, (uint?)msvddMilliamps, (uint?)boardInputMilliamps);
             var now = Limits();
             DiagnosticLog.Write($"[NVIDIA Power] Override {(Enabled ? "on" : "off")}; currents {now.Nvvdd.CurrentMilliamps / 1000.0:0.###}/" +
-                $"{now.Msvdd.CurrentMilliamps / 1000.0:0.###} A (ceilings {now.Nvvdd.MaximumMilliamps / 1000.0:0.###}/{now.Msvdd.MaximumMilliamps / 1000.0:0.###} A); GPU restart {restart}.");
+                $"{now.Msvdd.CurrentMilliamps / 1000.0:0.###} A (ceilings {now.Nvvdd.MaximumMilliamps / 1000.0:0.###}/{now.Msvdd.MaximumMilliamps / 1000.0:0.###} A); " +
+                $"board input {(now.BoardInput is { } board ? $"{board.CurrentMilliamps / 1000.0:0.###} A (ceiling {board.MaximumMilliamps / 1000.0:0.###} A)" : "unavailable")}; GPU restart {restart}.");
         }
     }
 
@@ -260,6 +269,12 @@ sealed class NvidiaPowerControl : IGpuPowerOverride, IDisposable
             rails.Nvvdd.MinimumMa != bios.Nvvdd.Minimum || rails.Nvvdd.DefaultMa != bios.Nvvdd.Default || rails.Nvvdd.MaximumMa != bios.Nvvdd.Maximum ||
             rails.Msvdd.MinimumMa != bios.Msvdd.Minimum || rails.Msvdd.DefaultMa != bios.Msvdd.Default || rails.Msvdd.MaximumMa != bios.Msvdd.Maximum)
             throw new NotSupportedException("NVIDIA driver limits do not match the parsed BIOS policies.");
+        // Optional: a driver that exposes this policy differently (or not at all) loses only
+        // board input. Without it no slot-9 record is staged and the policy is never SET.
+        boardInputVerified = bios.BoardInput is { } input && rails.BoardInput is { } live &&
+            live.MinimumMa == input.Minimum && live.DefaultMa == input.Default && live.MaximumMa == input.Maximum;
+        if (bios.BoardInput != null && !boardInputVerified)
+            DiagnosticLog.Warn("[NVIDIA Power] Board input current limit unavailable: no driver policy matches the GPU BIOS.");
     }
 
     public void Dispose() { lock (sync) { store.Dispose(); api.Dispose(); } }

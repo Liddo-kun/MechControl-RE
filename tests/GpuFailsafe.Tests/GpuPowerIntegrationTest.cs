@@ -176,6 +176,7 @@ static partial class Program
             Assert.True(loaded.Gpu.BiosOverrideEnabled == true);
             Assert.Equal(205500, loaded.Gpu.NvvddMilliamps!.Value);
             Assert.Equal(60000, loaded.Gpu.MsvddMilliamps!.Value);
+            Assert.Equal(11053, loaded.Gpu.BoardInputMilliamps!.Value);
             var stock = new GpuProfileSettings { Tgp = 150 };
             power.CaptureDriverSettings(stock);
             Assert.True(stock.BiosOverrideEnabled == false);
@@ -191,16 +192,16 @@ static partial class Program
         // A profile that doesn't need the unlock (legacy: no currents) runs at stock currents, live.
         plan = power.PlanProfile(new GpuProfileSettings { Tgp = 150 }, automatic: true);
         Assert.True(!plan.Restart && plan.Notice == "");
-        Assert.True(plan.Settings.NvvddMilliamps == 210000 && plan.Settings.MsvddMilliamps == 60000);
+        Assert.True(plan.Settings.NvvddMilliamps == 210000 && plan.Settings.MsvddMilliamps == 60000 && plan.Settings.BoardInputMilliamps == 11053);
         power.ConfigureProfile(plan);
         Assert.True(driver.Nvvdd == 210000 && driver.Restarts == 0);
         driver.Nvvdd = 205500;
 
-        // Above a lower live ceiling: manual loads restart (within 130% of the stock default),
+        // Above a lower live ceiling: manual loads restart (within 140% of the stock default),
         // automatic loads clamp to the live ceiling.
         loaded.Gpu.NvvddMilliamps = 400000;
         plan = power.PlanProfile(loaded.Gpu, automatic: false);
-        Assert.True(plan.Restart && plan.Settings.NvvddMilliamps == 273000);
+        Assert.True(plan.Restart && plan.Settings.NvvddMilliamps == 294000);
         plan = power.PlanProfile(loaded.Gpu, automatic: true);
         Assert.False(plan.Restart);
         Assert.Equal(250000, plan.Settings.NvvddMilliamps!.Value);
@@ -209,12 +210,46 @@ static partial class Program
         Assert.Equal(250000, driver.Nvvdd);
         Assert.Equal(0, driver.Restarts);
 
+        // The new current follows the same automatic/manual profile and live-ceiling rules.
+        var boardOnly = new GpuProfileSettings { Tgp = 150, BiosOverrideEnabled = true, BoardInputMilliamps = 20000 };
+        plan = power.PlanProfile(boardOnly, automatic: false);
+        Assert.True(plan.Restart && plan.Settings.BoardInputMilliamps == 15474);
+        Assert.True(plan.Settings.NvvddMilliamps == null && plan.Settings.MsvddMilliamps == null);
+        plan = power.PlanProfile(boardOnly, automatic: true);
+        Assert.True(!plan.Restart && plan.Settings.BoardInputMilliamps == 11053);
+        power.ConfigureProfile(plan);
+        Assert.Equal(0, driver.Restarts);
+        Assert.Equal(250000, driver.Nvvdd);
+        driver.BoardInput = 15000;
+        var boardSaved = new GpuProfileSettings { Tgp = 150 };
+        power.CaptureDriverSettings(boardSaved);
+        Assert.True(boardSaved.BiosOverrideEnabled == true && boardSaved.BoardInputMilliamps == 15000);
+        driver.BoardInput = 11053;
+        driver.HasBoardInput = false;
+        // A GPU without board input skips only that value, with a notice; the rest still applies.
+        var boardAndCore = new GpuProfileSettings { Tgp = 150, BiosOverrideEnabled = true, NvvddMilliamps = 220000, BoardInputMilliamps = 15000 };
+        foreach (bool automatic in new[] { false, true })
+        {
+            plan = power.PlanProfile(boardAndCore, automatic);
+            Assert.True(!plan.Restart && plan.Settings.BoardInputMilliamps == null && plan.Settings.NvvddMilliamps == 220000);
+            Assert.Contains("board input", plan.Notice);
+        }
+        power.ConfigureProfile(plan);
+        Assert.True(driver.Nvvdd == 220000 && driver.BoardInput == 11053 && driver.Restarts == 0 && power.ProfileNotice.Contains("board input"));
+        driver.Nvvdd = 250000;
+        boardAndCore.NvvddMilliamps = 260000; // Both notices survive an automatic clamp.
+        plan = power.PlanProfile(boardAndCore, automatic: true);
+        Assert.True(plan.Settings.NvvddMilliamps == 250000 && plan.Notice.Contains("board input") && plan.Notice.Contains("restart"));
+        plan = power.PlanProfile(new GpuProfileSettings { Tgp = 150 }, automatic: true);
+        Assert.True(plan.Settings.BoardInputMilliamps == null && plan.Notice == "");
+        driver.HasBoardInput = true;
+
         // Locked: startup clamps to the normal range and still applies; a manual load unlocks.
         driver.Enabled = false;
         plan = power.PlanProfile(loaded.Gpu, automatic: true);
         Assert.True(!plan.Unlock && !plan.Restart && plan.Notice.Length > 0);
         Assert.Equal(150, plan.Settings.Tgp);
-        Assert.True(plan.Settings.NvvddMilliamps == null && plan.Settings.MsvddMilliamps == null);
+        Assert.True(plan.Settings.NvvddMilliamps == null && plan.Settings.MsvddMilliamps == null && plan.Settings.BoardInputMilliamps == null);
         plan = power.PlanProfile(new GpuProfileSettings { Tgp = 60, BiosOverrideEnabled = true }, automatic: true);
         Assert.True(!plan.Unlock && plan.Settings.Tgp == 95 && plan.Notice.Length > 0);
         Assert.Throws<ArgumentOutOfRangeException>(() => power.PlanProfile(new GpuProfileSettings { Tgp = 50 }, automatic: true));
@@ -305,17 +340,19 @@ static partial class Program
         public int MinimumPowerLimitWatts => 5;
         public GpuPowerLimits ReadPowerLimits() => new(Enabled ? 250 : 175, PowerWatts, PowerWatts);
         public int PowerWatts { get; set; } = 175;
-        public int PowerRequests, Restarts, Nvvdd = 205500, Msvdd = 60000;
+        public int PowerRequests, Restarts, Nvvdd = 205500, Msvdd = 60000, BoardInput = 11053;
+        public bool HasBoardInput = true;
         public bool BudgetReset; // Firmware reset the laptop budget below the request.
         public bool FailWrite { get; set; }
-        // Unlocked: a live ceiling below the 273 A unlocked range, as staged by an older build.
+        // Unlocked: a live ceiling below the 294 A unlocked range, as staged by an older build.
         private int LiveNvvddMaximum => Enabled ? 250000 : 210000;
-        public GpuCurrentLimits ReadCurrentLimits() => new(new(1000, 210000, LiveNvvddMaximum, Nvvdd, 210000), new(1000, 60000, 60000, Msvdd, 60000));
-        public bool RequiresRestart(bool enabled, int? nvvddMilliamps, int? msvddMilliamps) =>
-            enabled != Enabled || nvvddMilliamps > LiveNvvddMaximum;
-        public void Configure(bool enabled, int? nvvddMilliamps, int? msvddMilliamps, bool allowRestart)
+        public GpuCurrentLimits ReadCurrentLimits() => new(new(1000, 210000, LiveNvvddMaximum, Nvvdd, 210000), new(1000, 60000, 60000, Msvdd, 60000),
+            HasBoardInput ? new(1, 11053, 11053, BoardInput, 11053) : null);
+        public bool RequiresRestart(bool enabled, int? nvvddMilliamps, int? msvddMilliamps, int? boardInputMilliamps) =>
+            enabled != Enabled || nvvddMilliamps > LiveNvvddMaximum || boardInputMilliamps > 11053;
+        public void Configure(bool enabled, int? nvvddMilliamps, int? msvddMilliamps, int? boardInputMilliamps, bool allowRestart)
         {
-            if (RequiresRestart(enabled, nvvddMilliamps, msvddMilliamps))
+            if (RequiresRestart(enabled, nvvddMilliamps, msvddMilliamps, boardInputMilliamps))
             {
                 if (!allowRestart) throw new InvalidOperationException("restart required");
                 Restarts++;
@@ -323,6 +360,7 @@ static partial class Program
             }
             Nvvdd = nvvddMilliamps ?? Nvvdd;
             Msvdd = msvddMilliamps ?? Msvdd;
+            BoardInput = boardInputMilliamps ?? BoardInput;
         }
         public void ApplyPowerLimit(int watts)
         {

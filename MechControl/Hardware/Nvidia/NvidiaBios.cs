@@ -4,7 +4,7 @@ namespace MechControl.Hardware.Nvidia;
 
 internal sealed record NvidiaBiosField(int Offset, uint Minimum, uint Default, uint Maximum);
 internal sealed record NvidiaRailOverride(uint DefaultMa, uint MaximumMa);
-internal sealed record NvidiaOverrideRequest(uint? PowerMaximumMw = null, NvidiaRailOverride? Nvvdd = null, NvidiaRailOverride? Msvdd = null);
+internal sealed record NvidiaOverrideRequest(uint? PowerMaximumMw = null, NvidiaRailOverride? Nvvdd = null, NvidiaRailOverride? Msvdd = null, NvidiaRailOverride? BoardInput = null);
 internal sealed record NvidiaOverrideRecord(string Name, byte[] Data);
 
 /// <summary>Validated BIT P power-policy layout. Offsets are image coordinates, not logical BIT addresses.</summary>
@@ -17,16 +17,18 @@ internal sealed class NvidiaBios
     public NvidiaBiosField Power { get; }
     public NvidiaBiosField Nvvdd { get; }
     public NvidiaBiosField Msvdd { get; }
+    public NvidiaBiosField? BoardInput { get; }
     public byte[] GetImage() => (byte[])image.Clone();
-    // Every place BuildOverrides can patch: the power maximum and both rails' default/maximum.
-    public int[] PatchOffsets => [Power.Offset + 8, Nvvdd.Offset + 4, Nvvdd.Offset + 8, Msvdd.Offset + 4, Msvdd.Offset + 8];
+    // Every place BuildOverrides can patch: the power maximum and supported currents' default/maximum.
+    public int[] PatchOffsets => [Power.Offset + 8, Nvvdd.Offset + 4, Nvvdd.Offset + 8, Msvdd.Offset + 4, Msvdd.Offset + 8,
+        .. BoardInput is { } input ? new[] { input.Offset + 4, input.Offset + 8 } : Array.Empty<int>()];
     public uint ValueAt(int offset) => BinaryPrimitives.ReadUInt32LittleEndian(image.AsSpan(offset));
 
     private NvidiaBios(byte[] image, byte[] version, ushort deviceId, NvidiaBiosField power,
-        NvidiaBiosField nvvdd, NvidiaBiosField msvdd)
+        NvidiaBiosField nvvdd, NvidiaBiosField msvdd, NvidiaBiosField? boardInput)
     {
         this.image = image; this.version = version; DeviceId = deviceId;
-        Power = power; Nvvdd = nvvdd; Msvdd = msvdd;
+        Power = power; Nvvdd = nvvdd; Msvdd = msvdd; BoardInput = boardInput;
     }
 
     // Evidence: mVolt 0.50.8 FUN_14028cad0/14028c970/140291fb0/140292520/140293950.
@@ -135,6 +137,9 @@ internal sealed class NvidiaBios
                 throw Invalid("additional board-power policies are unsupported");
         }
         var nv = Field(13, 7, 1); var ms = Field(14, 7, 1);
+        // Only the evidenced native input-current identity is writable. Unknown
+        // slot-9 identities stay untouched; recognized but malformed fields reject.
+        NvidiaBiosField? input = b[Entry(9)] == 3 && U32(Entry(9) + 1) == 1 ? Field(9, 3, 1) : null;
         // Bind each current monitor to its corresponding REL companion policy,
         // not to this laptop's channel numbers (0x1b/0x1c).
         if (b[Entry(11)] != 6 || b[Entry(12)] != 6 || U32(Entry(11) + 1) != 1 || U32(Entry(12) + 1) != 1
@@ -151,7 +156,7 @@ internal sealed class NvidiaBios
             for (int i = 0; i < 16; i++)
                 if ((b[profile + 0xfe + i * 0x49] & 15) != 0) throw Invalid("active extended BIOS profiles are unsupported");
         }
-        return new(b, ver, U16(pcir + 6), board, nv, ms);
+        return new(b, ver, U16(pcir + 6), board, nv, ms, input);
     }
 
     public IReadOnlyList<NvidiaOverrideRecord> BuildOverrides(NvidiaOverrideRequest request)
@@ -167,6 +172,8 @@ internal sealed class NvidiaBios
         if (request.PowerMaximumMw is uint power) Add(Power, Power.Default, power);
         if (request.Nvvdd is { } nv) Add(Nvvdd, nv.DefaultMa, nv.MaximumMa);
         if (request.Msvdd is { } ms) Add(Msvdd, ms.DefaultMa, ms.MaximumMa);
+        if (request.BoardInput is { } input)
+            Add(BoardInput ?? throw new InvalidOperationException("Board input current BIOS policy is unsupported."), input.DefaultMa, input.MaximumMa);
         return patches.Select((patch, i) =>
         {
             byte[] data = new byte[14]; version.CopyTo(data, 0);

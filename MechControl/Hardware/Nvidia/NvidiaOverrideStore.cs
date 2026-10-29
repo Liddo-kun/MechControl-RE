@@ -100,13 +100,17 @@ internal sealed class NvidiaOverrideStore : IDisposable
         var current = ReadRegistry();
         var recovery = LoadRecovery();
         RequireOwned(current, recovery);
-        if (recovery == null && records.Count != 0)
+        if (records.Count != 0)
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(RecoveryPath)!);
-            string text = string.Join("\n", [original.Version, .. original.PatchOffsets.Select(o => $"{o}={original.ValueAt(o)}")]);
-            using (var file = new FileStream(RecoveryPath + ".tmp", FileMode.Create, FileAccess.Write, FileShare.None))
-            { file.Write(Encoding.UTF8.GetBytes(text)); file.Flush(true); }
-            File.Move(RecoveryPath + ".tmp", RecoveryPath, true);
+            var complete = CompleteRecovery(original, recovery);
+            if (recovery == null || complete.Originals.Count != recovery.Originals.Count)
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(RecoveryPath)!);
+                string text = string.Join("\n", [complete.Version, .. complete.Originals.Select(o => $"{o.Key}={o.Value}")]);
+                using (var file = new FileStream(RecoveryPath + ".tmp", FileMode.Create, FileAccess.Write, FileShare.None))
+                { file.Write(Encoding.UTF8.GetBytes(text)); file.Flush(true); }
+                File.Move(RecoveryPath + ".tmp", RecoveryPath, true);
+            }
         }
         foreach (string name in current.Keys.Except(records.Select(r => r.Name), StringComparer.OrdinalIgnoreCase)) key.DeleteValue(name, false);
         foreach (var record in records) key.SetValue(record.Name, record.Data, RegistryValueKind.Binary);
@@ -119,6 +123,15 @@ internal sealed class NvidiaOverrideStore : IDisposable
     {
         RequireOwned(ReadRegistry(), null);
         File.Delete(RecoveryPath);
+    }
+
+    // Append newly supported fields from Open's recovered stock BIOS, never
+    // replace originals already saved by an older version.
+    private static NvidiaOverrideRecovery CompleteRecovery(NvidiaBios original, NvidiaOverrideRecovery? recovery)
+    {
+        var originals = recovery == null ? new Dictionary<int, uint>() : new Dictionary<int, uint>(recovery.Originals);
+        foreach (int offset in original.PatchOffsets) originals.TryAdd(offset, original.ValueAt(offset));
+        return new(recovery?.Version ?? original.Version, originals);
     }
 
     // Text: the BIOS version, then one "offset=original" line per patchable place.
