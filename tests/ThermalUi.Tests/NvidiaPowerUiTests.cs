@@ -37,9 +37,10 @@ static partial class Program
         var unlock = Field<CheckBox>(tab, "_chkTgpUnlock");
         // Whole-amp steps; an unmoved slider shows (and keeps) the exact detected value.
         Require(core.Slider.Value == 188 && core.Value.Text == "187.5 A" && fabric.Slider.Value == 57, "Current sliders did not populate detected values");
-        Require(core.Slider.Maximum == 252 && fabric.Slider.Maximum == 77 && input.Slider.Maximum == 15 && core.Slider.Minimum == 1,
+        // Board input moves in 0.1 A steps (positions are tenths), never below 1 A.
+        Require(core.Slider.Maximum == 252 && fabric.Slider.Maximum == 77 && input.Slider.Maximum == 154 && core.Slider.Minimum == 1 && input.Slider.Minimum == 10,
             "The three current ranges did not follow the shared 140%-of-default policy");
-        Require(input.Slider.Value == 11 && input.Value.Text == "11.053 A", "Board input lost fractional stock milliamps");
+        Require(input.Slider.Value == 111 && input.Value.Text == "11.053 A", "Board input lost fractional stock milliamps");
         var status = Field<Label>(tab, "_lblDriverLimits");
         Require(status.Text.Contains("stock currents 180 / 55 / 11.053 A"), "Status did not list the stock board input current");
         Require(unlock.Checked && backend.Configurations == 0, "Refreshing the checkbox caused hardware writes");
@@ -57,24 +58,33 @@ static partial class Program
         Require(saved.NvvddMilliamps == 186000 && saved.MsvddMilliamps == 57000 && saved.BoardInputMilliamps == 11053 && saved.BiosOverrideEnabled == false,
             "Profile capture lost current units or asked for an unneeded unlock");
         // An already-unlocked user can raise the new input slider: one restart, then live changes.
-        input.Slider.Value = 12;
-        var selected = (GpuProfileSettings)typeof(PowerTab).GetMethod("ReadGpuSettings", Private)!.Invoke(tab, null)!;
-        var restartPlan = gpu.PlanProfile(selected, automatic: false);
+        GpuProfileSettings Selected() => (GpuProfileSettings)typeof(PowerTab).GetMethod("ReadGpuSettings", Private)!.Invoke(tab, null)!;
+        input.Slider.Value = 123;
+        Require(input.Value.Text == "12.3 A", "Board input did not show its 0.1 A step");
+        var restartPlan = gpu.PlanProfile(Selected(), automatic: false);
         Require(restartPlan.Restart, "Raising board input above the old ceiling did not request a restart");
         gpu.ConfigureProfile(restartPlan); // Exercise the confirmed plan without opening a modal dialog.
         tab.RefreshFromEc();
-        Require(backend.Input == 12000 && backend.Restarts == 1 && backend.Core == 186000 && backend.Fabric == 57000,
+        Require(backend.Input == 12300 && backend.Restarts == 1 && backend.Core == 186000 && backend.Fabric == 57000,
             "Board input did not upgrade its old ceiling without changing the other currents");
-        input.Slider.Value = 15;
+        input.Slider.Value = 151;
         Apply();
-        Require(backend.Input == 15000 && backend.Restarts == 1, "Board input restarted inside the active range");
+        Require(backend.Input == 15100 && backend.Restarts == 1, "Board input restarted inside the active range");
         gpu.CaptureDriverSettings(saved);
-        Require(saved.BoardInputMilliamps == 15000 && saved.BiosOverrideEnabled == true, "Raised board input alone did not persist its unlock requirement");
+        Require(saved.BoardInputMilliamps == 15100 && saved.BiosOverrideEnabled == true, "Raised board input alone did not persist its unlock requirement");
         backend.HasBoardInput = false;
         tab.RefreshFromEc();
         Require(!input.Slider.Enabled && input.Value.Text == "--" && core.Slider.Enabled, "An absent board policy disabled other controls or left its slider usable");
         Require(status.Text.Contains("stock currents 180 / 55 A"), "Status listed an absent board input current");
         backend.HasBoardInput = true;
+        // Locked at stock, 11.053 A rounds to 11.1 A above the 11.0 A maximum; unmoved, it still writes nothing.
+        backend.Enabled = false; backend.Input = 11053;
+        tab.RefreshFromEc();
+        Require(input.Slider.Maximum == 110 && input.Slider.Value == 110 && input.Value.Text == "11.053 A" && Selected().BoardInputMilliamps == null,
+            "A clamped unmoved board input slider would rewrite its current");
+        input.Slider.Value = 109;
+        Require(input.Value.Text == "10.9 A" && Selected().BoardInputMilliamps == 10900, "Moving the clamped slider did not select its step");
+        backend.Enabled = true;
         tab.RefreshFromEc();
         // Unlocked: TGP below the EC minimum (60% of 80 W) is a driver request; the EC stays at its minimum.
         var tgp = Field<TrackBar>(tab, "_sliderTgp");
@@ -97,7 +107,7 @@ static partial class Program
 
     private sealed class UiGpuPower : IGpuPowerOverride
     {
-        public bool Enabled => true;
+        public bool Enabled { get; set; } = true;
         public int StockPowerLimitWatts => 150;
         public int MinimumPowerLimitWatts => 5;
         public GpuPowerLimits ReadPowerLimits() => new(225, 80, Requested);
