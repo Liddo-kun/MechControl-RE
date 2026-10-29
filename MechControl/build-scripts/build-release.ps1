@@ -14,17 +14,18 @@ $ErrorActionPreference = 'Stop'
 
 # Resolve dotnet.exe: explicit param > PATH > standard install locations.
 # Matches the 7z autodetect pattern below so the script works on any dev box
-# without requiring -DotnetPath.
+# without requiring -DotnetPath. Runtime-only installs can't build, so skip
+# any dotnet.exe that reports no SDKs.
 if (-not $DotnetPath) {
     $DotnetPath = @(
         (Get-Command dotnet -ErrorAction SilentlyContinue).Source,
         'C:\Program Files\dotnet\dotnet.exe',
         'C:\Program Files (x86)\dotnet\dotnet.exe',
         "$env:USERPROFILE\.dotnet\dotnet.exe"
-    ) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+    ) | Where-Object { $_ -and (Test-Path $_) -and (& $_ --list-sdks 2>$null) } | Select-Object -First 1
 }
 if (-not $DotnetPath -or -not (Test-Path $DotnetPath)) {
-    throw "dotnet.exe not found. Install the .NET 8 SDK or pass -DotnetPath explicitly."
+    throw "No dotnet.exe with an SDK found. Install the .NET 8 SDK or pass -DotnetPath explicitly."
 }
 
 $7zPath = @(
