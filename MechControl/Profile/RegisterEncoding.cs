@@ -18,9 +18,10 @@ static class RegisterEncoding
     }
     public static int DecodePL4(byte reg, bool doubled) => doubled ? reg * 2 : reg;
 
-    // TGP: offset from 95W base TDP
+    // TGP: offset from 95W base TDP. The model range is enforced by callers;
+    // 0xFF stays reserved because it reads as an unprogrammed/unreadable register.
     public static byte EncodeTGP(int watts, int offset = 95) =>
-        (byte)Math.Clamp(watts - offset, 0, 55);
+        (byte)Math.Clamp(watts - offset, 0, 0xFE);
     public static int DecodeTGP(byte reg, int offset = 95) => reg + offset;
 
     // Dynamic Boost: direct (1 byte = 1 watt)

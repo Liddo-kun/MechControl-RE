@@ -156,16 +156,21 @@ class ProfileBar : UserControl
         if (profile.Cpu == null || profile.Gpu == null || profile.Fan == null || profile.Battery == null || profile.Lighting == null || profile.GpuFailsafe == null)
             throw new InvalidOperationException("Profile contains a null settings group.");
         _cpuControl?.ValidatePower(profile.Cpu.PL1, profile.Cpu.PL2, profile.Cpu.PL4, profile.Cpu.TempLimit);
-        _gpuControl?.ValidatePower(profile.Gpu.Tgp, profile.Gpu.DynamicBoostEnabled, profile.Gpu.DynamicBoostWatts);
         if (profile.Fan.CpuCurve == null || profile.Fan.GpuCurve == null)
             throw new InvalidOperationException("Profile contains null fan curves.");
+        // Automatic loads limit NVIDIA settings to the active range instead of failing.
+        var gpuPlan = _gpuControl?.PlanProfile(profile.Gpu, automatic);
+        if (!automatic && gpuPlan != null && !UiHelpers.ConfirmGpuPlan(_gpuControl!, gpuPlan))
+            throw new OperationCanceledException("Profile load cancelled; NVIDIA limits were not changed.");
 
         var failsafe = _failsafeTab.Controller;
         var destination = preserveFailsafeSettings ? _failsafeTab.ReadSettings() : profile.GpuFailsafe;
         HighlightSlot(0); // Failed/partial applies must not keep a misleading old highlight.
         void Apply()
         {
-            ApplyProfile(profile);
+            // Resolve driver ceilings before any unrelated profile writes.
+            if (gpuPlan != null) _gpuControl!.ConfigureProfile(gpuPlan);
+            ApplyProfile(profile, gpuPlan?.Settings ?? profile.Gpu);
             _manager.LastUsedSlot = slot;
         }
         try
@@ -178,6 +183,11 @@ class ProfileBar : UserControl
             ? $"Legacy trigger migrated to {GpuFailsafeSettings.MinimumThreshold} C; save this profile to persist the migration." : "");
         HighlightSlot(slot);
         ProfileApplied?.Invoke();
+        if (gpuPlan?.Notice is { Length: > 0 } notice)
+        {
+            DiagnosticLog.Warn($"[NVIDIA Power] Slot {slot}: {notice}");
+            if (!automatic) MessageBox.Show(FindForm(), notice, "Profile Loaded", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
     }
 
     private void OnSlotClick(int slot)
@@ -296,7 +306,7 @@ class ProfileBar : UserControl
 
     // ── Apply profile to EC ──────────────────────────────────────────
 
-    private void ApplyProfile(UserProfile profile)
+    private void ApplyProfile(UserProfile profile, GpuProfileSettings gpu)
     {
         // 1-4. Fan (if available)
         if (_fanControl != null)
@@ -322,9 +332,9 @@ class ProfileBar : UserControl
 
         // 6. GPU power (if available)
         _gpuControl?.ApplyGpuPower(
-                profile.Gpu.Tgp,
-                profile.Gpu.DynamicBoostEnabled,
-                profile.Gpu.DynamicBoostWatts);
+                gpu.Tgp,
+                gpu.DynamicBoostEnabled,
+                gpu.DynamicBoostWatts);
 
         // 7. Fan boost (if available)
         _fanControl?.SetFanBoost(profile.Fan.BoostEnabled);
@@ -403,6 +413,13 @@ class ProfileBar : UserControl
 
         // 2. GPU (defaults if controller not available)
         var gpu = _gpuControl?.ReadGpuPower() ?? new GpuPowerValues { TgpWatts = 115, DynamicBoostEnabled = false, DbWatts = 0 };
+        var gpuSettings = new GpuProfileSettings
+        {
+            Tgp = gpu.TgpWatts,
+            DynamicBoostEnabled = gpu.DynamicBoostEnabled,
+            DynamicBoostWatts = gpu.DbWatts
+        };
+        _gpuControl?.CaptureDriverSettings(gpuSettings);
 
         // 3-6. Fan — curves from panels (source of truth), state from EC
         bool fanBoost = _fanControl?.ReadFanBoost() ?? false;
@@ -451,12 +468,7 @@ class ProfileBar : UserControl
                 PL4 = cpu.PL4Watts,
                 TempLimit = cpu.TempLimitC
             },
-            Gpu = new GpuProfileSettings
-            {
-                Tgp = gpu.TgpWatts,
-                DynamicBoostEnabled = gpu.DynamicBoostEnabled,
-                DynamicBoostWatts = gpu.DbWatts
-            },
+            Gpu = gpuSettings,
             Fan = new FanProfileSettings
             {
                 BoostEnabled = fanBoost,

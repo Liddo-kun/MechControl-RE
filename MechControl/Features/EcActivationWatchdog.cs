@@ -105,7 +105,7 @@ sealed class EcActivationWatchdog : IDisposable
                 return (DateTime.UtcNow - _lastRecoveryUtc) < TimeSpan.FromSeconds(10);
             }
 
-            DiagnosticLog.Warn($"EC activation lost (0x741=0, detected via {reason}) — re-running EC init");
+            DiagnosticLog.Warn($"EC activation lost (0x741 bit 0 clear, detected via {reason}) — re-running EC init");
 
             List<string> errors;
             using (WriteGuard.EnterRecoveryScope())
@@ -122,7 +122,7 @@ sealed class EcActivationWatchdog : IDisposable
             }
             else
             {
-                DiagnosticLog.Error("EC re-activation FAILED — 0x741 still 0, EC is ignoring writes");
+                DiagnosticLog.Error("EC re-activation FAILED — 0x741 bit 0 still clear, EC is ignoring writes");
             }
             return restored;
         }

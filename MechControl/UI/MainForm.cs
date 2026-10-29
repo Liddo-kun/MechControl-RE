@@ -27,6 +27,7 @@ class MainForm : Form
 
     private readonly CpuPowerControl? _cpuControl;
     private readonly GpuPowerControl? _gpuControl;
+    private PowerLineStatus _powerLine = SystemInformation.PowerStatus.PowerLineStatus;
     private readonly FanControl? _fanControl;
     private readonly FanSwitchSpeedControl? _switchSpeedControl;
     private readonly BatteryControl? _batteryControl;
@@ -267,6 +268,7 @@ class MainForm : Form
         guard.VerifyFailureRecovery = () => _watchdog.TryRecover("write verify failure");
         _watchdog.Reactivated += OnEcReactivated;
         _watchdog.Start();
+        Microsoft.Win32.SystemEvents.PowerModeChanged += OnPowerModeChanged;
 
         // Single fan snapshot — one read feeds detection, diagnostic dump,
         // panel seeding, and the startup custom-mode decision.
@@ -340,7 +342,22 @@ class MainForm : Form
             if (_validator.IsFeatureEnabled("cpuPower"))
                 _cpuControl = new CpuPowerControl(device, guard, profile);
             if (_validator.IsFeatureEnabled("gpuPower"))
+            {
                 _gpuControl = new GpuPowerControl(device, guard, profile);
+                if (NvidiaPowerControl.HasNvidiaAdapter())
+                {
+                    int minimum = _gpuControl.MinimumTgpWatts;
+                    _gpuControl.OpenPowerOverride = () => NvidiaPowerControl.Open(minimum);
+                    _gpuControl.RunBlocking = UiHelpers.RunWithProgress;
+                    _gpuControl.ScheduleDriverCheck = () => ScheduleGpuCheck(3_000);
+                    // Open now only to resume or recover saved NVIDIA state; stock users never touch NVAPI.
+                    if (NvidiaPowerControl.HasSavedState())
+                        try { _gpuControl.EnsurePowerOverride(); } catch { /* Logged; the unlock stays unavailable. */ }
+                }
+                if (_gpuControl.CanUnlockTgp)
+                    DiagnosticLog.Write($"GPU TGP unlock: {(_gpuControl.TgpUnlocked ? "ON" : "OFF")} " +
+                        $"(normal TGP {_gpuControl.NormalMinTgpWatts}-{_gpuControl.NormalMaxTgpWatts} W, unlocked {_gpuControl.UnlockedMinTgpWatts}-{_gpuControl.UnlockedMaxTgpWatts} W)");
+            }
             _powerTab = new PowerTab(_cpuControl, _gpuControl, profile, _validator);
             var powerPage = new TabPage("Power");
             _powerTab.Dock = DockStyle.Fill;
@@ -663,6 +680,7 @@ class MainForm : Form
             _failsafeAlert?.Close();
             _batteryTab?.StopTelemetry();
             _watchdog.Dispose();
+            Microsoft.Win32.SystemEvents.PowerModeChanged -= OnPowerModeChanged;
             _lightingResume?.Dispose();
             _monitor.Dispose();
             _gpuThermProvider?.Dispose();
@@ -844,6 +862,37 @@ class MainForm : Form
         _gpuFailsafe?.InvalidateVerification();
         try { BeginInvoke(ReapplyAfterReactivation); }
         catch (InvalidOperationException) { }
+    }
+
+    /// <summary>
+    /// A GPU power-off during sleep can drop the unlocked NVIDIA request, and plugging the
+    /// charger in or out resets the laptop budget. Checked after the watchdog's resume
+    /// recovery (which re-applies the whole profile) and after the budget has settled.
+    /// </summary>
+    private void OnPowerModeChanged(object sender, Microsoft.Win32.PowerModeChangedEventArgs e)
+    {
+        if (_gpuControl == null) return;
+        if (e.Mode == Microsoft.Win32.PowerModes.Resume) ScheduleGpuCheck(8_000);
+        else if (e.Mode == Microsoft.Win32.PowerModes.StatusChange)
+        {
+            // StatusChange also fires for battery level changes; only the power source matters.
+            var line = SystemInformation.PowerStatus.PowerLineStatus;
+            if (line == _powerLine) return;
+            _powerLine = line;
+            ScheduleGpuCheck(5_000);
+        }
+    }
+
+    private void ScheduleGpuCheck(int delayMs) => Task.Delay(delayMs).ContinueWith(_ =>
+    {
+        try { BeginInvoke(ReassertGpuRequest); }
+        catch (InvalidOperationException) { }
+    });
+
+    private void ReassertGpuRequest()
+    {
+        try { _gpuControl?.ReassertDriverRequest(); }
+        catch (Exception ex) { DiagnosticLog.Warn($"[NVIDIA Power] Request check failed: {ex.Message}"); }
     }
 
     /// <summary>
@@ -1070,7 +1119,8 @@ class MainForm : Form
             return;
         }
         if (MessageBox.Show(
-            "This will restore firmware control of power and fans. Continue?",
+            "This will restore firmware control of power and fans." +
+            (_gpuControl?.TgpUnlocked == true ? " The NVIDIA unlock will be removed and the GPU restarted; the display may blink and GPU applications may close." : "") + " Continue?",
             "Restore Firmware Defaults",
             MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
             return;
@@ -1118,6 +1168,8 @@ class MainForm : Form
                 }
             }
             _gpuFailsafe.ApplyExplicit(Restore);
+            // After the EC restore, so a failed GPU restart never leaves the EC half-restored.
+            UiHelpers.TryUi(() => _gpuControl?.RestoreDriverDefaults(), "restore NVIDIA BIOS limits", "GPU BIOS Override");
 
             // Battery: first mode (High Capacity)
             if (_profile.BatteryModes.Count > 0)
@@ -1253,6 +1305,7 @@ class MainForm : Form
             // path guarantees the PawnIO module/MMIO mapping is released even
             // on nonstandard disposal.
             _gpuThermProvider?.Dispose();
+            (_gpuControl?.PowerOverride as IDisposable)?.Dispose();
             _bleDevice?.Dispose();
             _hidDevice.Dispose();
             _device.Dispose(); // EC device must be last — child controls may write during disposal

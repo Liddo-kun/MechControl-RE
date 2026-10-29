@@ -21,12 +21,14 @@
     <Compile Include="../../MechControl/Monitoring/EcMonitor.cs" />
     <Compile Include="../../MechControl/UI/FailsafeTab.cs" />
     <Compile Include="../../MechControl/UI/ProfileBar.cs" />
+    <Compile Include="../../MechControl/UI/PowerTab.cs" />
     <Compile Include="../../MechControl/UI/FanTab.cs" />
     <Compile Include="../../MechControl/UI/FanCurvePanel.cs" />
     <Compile Include="../../MechControl/UI/FanCurveDebugSection.cs" />
     <Compile Include="../../MechControl/UI/LinkedFanStatusBar.cs" />
     <Compile Include="../../MechControl/Features/CpuPowerControl.cs" />
     <Compile Include="../../MechControl/Features/GpuPowerControl.cs" />
+    <Compile Include="../../MechControl/Features/IGpuPowerOverride.cs" />
     <Compile Include="../../MechControl/Features/FanSwitchSpeedControl.cs" />
     <Compile Include="../../MechControl/Features/FanSnapshot.cs" />
     <Compile Include="../../MechControl/Profile/UserProfile.cs" />

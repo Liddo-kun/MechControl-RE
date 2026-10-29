@@ -429,7 +429,9 @@ Pre-write sanity checks: size must be exactly 180 bytes, PowerMode must be 0-3, 
 Setting bit 7 of `0x726` (ADDR_AP_OEM_BYTE9) and bit 6 of `0x727` (DSDT field `CUME`) activates the EC's PECI power management loop. Without these bits, PL register values sit in EC RAM but are never applied to the CPU via PECI — the CPU stays at its default 75W regardless of PL1/PL2 settings. Written as read-modify-write (OR) every startup. These persist in EC microcontroller NVRAM across reboots, but clearing them immediately deactivates power management without a reboot.
 
 **3. Activation byte (0x741):**
-EC clears this to 0x00 when the OEM service stops. While 0x741=0, the EC ignores writes to PL/fan/GPU registers (simple direct-control registers like fan boost 0x751 still work). Write 0x05 on app startup (EC transforms to 0x01). Required for PL and GPU writes to take effect. Post-init verification: if readback is 0x01, the EC is actively processing.
+EC clears this to 0x00 when the OEM service stops. While 0x741=0, the EC ignores writes to PL/fan/GPU registers (simple direct-control registers like fan boost 0x751 still work). Write 0x05 on app startup (EC transforms to 0x01). Required for PL and GPU writes to take effect. Post-init verification: bit 0 set and bit 2 cleared means the EC is actively processing.
+
+The byte is a bitfield (OEM code does RMW `| 1` to set it): bit 0 = activation (DSDT `APPE`), bit 2 = cleared by the EC ~60 ms after it accepts activation, bit 3 = OEM keyboard-lighting "on key pressed", bit 5 = fan error (`GetECFanAlert()` returns bit 5 in a decrypted Eluktronics Control Center 4.23.47.11 GCUService; sent to the UI as `System/FanErrorInfo`; the byte's `ADDR_FAN_ALERT_BYTE` name comes from this), bit 7 = unknown EC-owned flag (no OEM reader or writer found). Record and tools: `notes/ec_0x741_bits.md`. Measured 2026-10-29 (IDY_7Y): bit 7 is clear after boot, appears later in the boot, survives app stop and fan spin-up, and the EC sets it again ~190 ms after our 0x05 write clears it (`0x81 -> 0x05 -> 0x01 -> 0x81`). So `0x81` after a same-boot app restart is normal; the OEM app also reads 0x81 on X6FR5xxY.
 
 **Fan curve mode flag (0x7C6):** Must be set to 0x04 and **left set** for the EC to use the custom fan table (0xF00-0xF5F). This is a persistent mode flag, not a trigger. Without it, the EC ignores fan table writes and runs fans at ~26% default. Not needed for PL/GPU writes — only for fan curves.
 
@@ -446,7 +448,7 @@ EC clears this to 0x00 when the OEM service stops. While 0x741=0, the EC ignores
 7. Write(0x7C7, 0x0C)                       -- fan curve parameter
 8. Write(0x7C6, 0x04)                       -- fan curve commit
 9. Write(0x706, 0x41)                       -- BIOS_CTRL init complete
--- Verify: Read(0x741) == 0x01              -- EC active confirmation
+-- Verify: Read(0x741) & 0x05 == 0x01       -- EC active confirmation (bit 7 may be set)
 ```
 
 ### Full OEM init sequence (for reference)
@@ -574,7 +576,7 @@ Handshake, activation, feature enable, command clears, BIOS control.
 | `0x727` | RW | ADDR_AP_OEM_BYTE10 / ADDR_CPU_DOUBLE_FLAG_SUPPORT / ADDR_ESHUTTER_STATUS | **DSDT fields:** bit 6 = `CUME` (CPU Management Enable), bit 7 = `PL4D`. Bit 6 must be set (`\|= 0x40`) alongside 0x726 bit 7 to activate PECI loop. Also polled by OEM for e-shutter status. |
 | `0x728` | RW | ADDR_AP_OEM_BYTEB | OEM byte B |
 | `0x740` | R | ADDR_PROJECT_ID_BYTE | Model/project ID. `raw >> 1` = enum value (26>>1 = 13 = IDY_7Y). |
-| `0x741` | RW | ADDR_AP_OEM_BYTE / ADDR_FAN_ALERT_BYTE | Activation byte + fan alert. Write 0x05 on startup (EC transforms to 0x01). EC clears on service disconnect. |
+| `0x741` | RW | ADDR_AP_OEM_BYTE / ADDR_FAN_ALERT_BYTE | Activation byte + fan alert. Write 0x05 on startup (EC transforms to 0x01; bit 7 is EC-owned and may read back as 0x81). Active = bit 0 set. EC clears on service disconnect. |
 | `0x742` | R | ADDR_SUPPORT_BYTE5 | Support flags byte 5 (reads 0x22) |
 | `0x748` | W | ADDR_LIGHTBAR_CONTROL_BYTE | Feature enable / lightbar control. Write 0x81 during init (4x). Also see lighting group. |
 | `0x749` | W | ADDR_REDBAR_CONTROL_BYTE | Red bar control / command clear 1. Write 0x00 during init. |
