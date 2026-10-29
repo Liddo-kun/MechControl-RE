@@ -317,7 +317,7 @@ class PowerTab : UserControl
         UiHelpers.SliderRow? row = null;
         row = UiHelpers.BuildSliderRow(name, 1, 2, "A", formatter: v => FormatCurrent(row?.Slider, v));
         UiHelpers.AddSliderRow(layout, row);
-        _tooltip.SetToolTip(row.Slider, "Raising a current ceiling restarts the GPU; lower values apply live.");
+        _tooltip.SetToolTip(row.Slider, "Applies live; changing the unlock restarts the GPU.");
         return row;
     }
 
