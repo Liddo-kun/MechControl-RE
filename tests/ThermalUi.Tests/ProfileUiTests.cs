@@ -95,12 +95,17 @@ static partial class Program
             manager.SaveProfile(1, profile);
             RefuseLoad();
             profile.ProjectId = model.ProjectId;
-            profile.Gpu.Tgp = 125;
+            profile.Gpu.Tgp = 200; // Beyond even the unlocked range.
             manager.SaveProfile(1, profile);
             RefuseLoad();
             profile.ProjectId = ""; // Moved DTO preflight coverage exercises the actual load boundary.
             manager.SaveProfile(1, profile);
             RefuseLoad();
+            // An unlocked-range value loads limited to the normal range when the unlock is unavailable.
+            profile.Gpu.Tgp = 125;
+            manager.SaveProfile(1, profile);
+            bar.LoadAndApplySlot(1, automatic: true);
+            Require(gpu.ReadGpuPower().TgpWatts == 100 && gpu.ProfileNotice.Contains("unavailable"), "Unlocked profile was not limited to the normal range");
             profile.Gpu.Tgp = 90;
             manager.SaveProfile(1, profile);
             bar.LoadAndApplySlot(1, automatic: true);

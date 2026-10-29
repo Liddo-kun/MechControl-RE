@@ -2,6 +2,47 @@ namespace MechControl.UI;
 
 static class UiHelpers
 {
+    private const string GpuRestartWarning = "The GPU will restart; the display may blink and GPU applications may close.";
+
+    public static bool ConfirmGpuRestart() => MessageBox.Show(
+        "Raising these NVIDIA current limits requires a GPU restart. " + GpuRestartWarning + " Continue?",
+        "GPU BIOS Override", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) == DialogResult.Yes;
+
+    public static bool ConfirmGpuUnlock(bool unlock, int stockWatts) => MessageBox.Show(unlock
+            ? $"Raise the NVIDIA BIOS power ceiling from {stockWatts} W to {stockWatts + Profile.UniversalDefaults.TgpUnlockHeadroomWatts} W, allow TGP below the normal minimum and allow higher current limits?\n\n" +
+              "Higher limits increase heat and hardware stress. This is a persistent software override, not a BIOS flash. " + GpuRestartWarning
+            : "Restore the original NVIDIA BIOS power and current limits? " + GpuRestartWarning,
+        "GPU BIOS Override", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) == DialogResult.Yes;
+
+    // Asks before a manual profile load turns on the unlock or restarts the GPU.
+    public static bool ConfirmGpuPlan(Features.GpuPowerControl gpu, Features.GpuProfilePlan plan) =>
+        plan.Unlock && !gpu.TgpUnlocked ? ConfirmGpuUnlock(true, gpu.PowerOverride!.StockPowerLimitWatts)
+        : !plan.Restart || ConfirmGpuRestart();
+
+    /// <summary>
+    /// Run slow hardware work (a GPU restart) on a worker thread behind a modal notice.
+    /// The modal loop keeps the UI thread pumping, so monitor samples and the thermal
+    /// failsafe continue meanwhile.
+    /// </summary>
+    public static void RunWithProgress(string text, Action work)
+    {
+        Exception? failure = null;
+        using var dialog = new Form
+        {
+            Text = "MechControl", FormBorderStyle = FormBorderStyle.FixedDialog, ControlBox = false,
+            StartPosition = FormStartPosition.CenterScreen, ClientSize = new System.Drawing.Size(380, 90), ShowInTaskbar = false, TopMost = true
+        };
+        dialog.Controls.Add(new Label { Text = text, Dock = DockStyle.Fill, TextAlign = System.Drawing.ContentAlignment.MiddleCenter });
+        dialog.Shown += async (_, _) =>
+        {
+            try { await Task.Run(work); }
+            catch (Exception ex) { failure = ex; }
+            dialog.Close();
+        };
+        dialog.ShowDialog();
+        if (failure != null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
+    }
+
     public static readonly System.Drawing.Font FontTiny = new("Segoe UI", 7f);
     public static readonly System.Drawing.Font FontNormal = new("Segoe UI", 9f);
     public static readonly System.Drawing.Font FontBold = new("Segoe UI", 9f, System.Drawing.FontStyle.Bold);

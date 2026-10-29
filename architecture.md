@@ -29,6 +29,15 @@ MechControl/
     PciBdf.cs                     PCI bus/device/function candidate identity (consumer supplies BDF to the module)
     NvidiaPciDeviceLocator.cs     Passive SetupAPI discovery of NVIDIA display-class PCI candidates (never NVAPI/NVML)
 
+  Hardware/Nvidia/
+    NvidiaApi.cs                   Versioned NVAPI BIOS/power/current requests; NVML enforced-limit readback
+    NvidiaRuntimeNvml.cs           Selected-adapter PCI identity and enforced power telemetry
+    NvidiaBudget.cs                Laptop/shared-budget reads and writes (originals kept in memory)
+    NvidiaBudgetTransport.cs       Validated native F7 transport discovery (no copied driver RVAs)
+    NvidiaBios.cs                  Validated BIT power-policy parser and targeted software override records
+    NvidiaOverrideStore.cs         Registry overrides of the identified adapter; saved original values (originals.txt)
+    NvidiaDeviceRestart.cs         Restart only the identified NVIDIA PnP device
+
   Profile/
     ProfileSchema.cs              C# types mirroring the JSON schema (MachineProfile, ModeDefaultInfo, etc.)
     ProfileLoader.cs              Detect project ID, load matching JSON, validate
@@ -47,6 +56,7 @@ MechControl/
     UefiSetup.cs                  One-time UEFI NVRAM flag setup (self-healing)
     CpuPowerControl.cs            PL1/PL2/PL4 + CPU temp limit
     GpuPowerControl.cs            TGP + Dynamic Boost toggle/value
+    NvidiaPowerControl.cs         BIOS ceilings, NVVDD/MSVDD currents, restart/readback coordination
     GpuTemperatureFailsafe.cs     Thermal trip/acknowledged holds, optional CPU/fan actions, scoped restoration
     FanControl.cs                 Fan boost, custom fan curve mode, fan table write
     FanSnapshot.cs                One-shot fan-table + curve-control register capture (see Section 5)
@@ -69,7 +79,7 @@ MechControl/
 
   UI/
     MainForm.cs                   TabControl + monitor panel + profile bar + system tray + EC enrichment orchestration
-    PowerTab.cs                   CPU (PL1/PL2/PL4/temp limit) + GPU (TGP/DB) sliders
+    PowerTab.cs                   CPU + GPU TGP/DB/current sliders and opt-in NVIDIA BIOS override
     FailsafeTab.cs                Thermal Failsafe configuration, peak/history/status, test and one-step reset
     FanTab.cs                     Boost/curve checkboxes + single Apply button + FanCurvePanel + fan switch speed + linked mode
     FanCurvePanel.cs              GDI+ chart, draggable points (point 0 locked to 0% duty), mouse interaction, ReadOnly mode

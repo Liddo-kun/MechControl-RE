@@ -52,6 +52,11 @@ class GpuProfileSettings
     [JsonPropertyName("tgp")] public int Tgp { get; set; }
     [JsonPropertyName("dynamicBoostEnabled")] public bool DynamicBoostEnabled { get; set; }
     [JsonPropertyName("dynamicBoostWatts")] public int DynamicBoostWatts { get; set; }
+    // True when the saved values need the NVIDIA unlock. Loading never removes the unlock.
+    [JsonPropertyName("biosOverrideEnabled")] public bool? BiosOverrideEnabled { get; set; }
+    // Null on legacy profiles or when NVIDIA was not in use: leave currents alone.
+    [JsonPropertyName("nvvddMilliamps")] public int? NvvddMilliamps { get; set; }
+    [JsonPropertyName("msvddMilliamps")] public int? MsvddMilliamps { get; set; }
 }
 
 class FanProfileSettings

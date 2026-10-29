@@ -23,10 +23,12 @@ static partial class Program
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             Application.SetDefaultFont(new Font("Segoe UI", 9));
+            if (args.Contains("--power-only")) { NvidiaPowerUiTests(capture: true); return 0; }
             MonitorTests();
             LinkedFanTests();
             RefreshTests();
             ProfileAndLinkedUiTests();
+            NvidiaPowerUiTests();
             if (args.Contains("--headless"))
             {
                 Console.WriteLine("PASS: shared monitor, linked fans and real checkbox orchestration, profile load/preflight/partial-save failures, hidden UI refresh; no windows shown or hardware accessed.");

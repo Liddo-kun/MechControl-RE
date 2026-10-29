@@ -41,8 +41,12 @@ class EcActivationControl
     private const int AddrPowerMgmtByte9 = 0x726;
     private const int AddrPowerMgmtCume = 0x727;
 
-    // EC activation byte
+    // EC activation byte. Bitfield: bit 0 = activation (DSDT APPE), bit 2 = cleared by
+    // the EC when it accepts activation, bit 5 = fan error (OEM GetECFanAlert), bit 7 =
+    // unknown EC-owned flag, set again by the EC after our write and kept until reboot.
     private const int AddrActivation = 0x741;
+    private const byte ActivationBit = 0x01;
+    private const byte ActivationPendingBit = 0x04;
 
     // Feature enable
     private const int AddrFeatureEnable = 0x748;
@@ -62,12 +66,12 @@ class EcActivationControl
     }
 
     /// <summary>
-    /// Read whether EC is unlocked (0x741 non-zero).
+    /// Read whether EC is unlocked (0x741 bit 0 set).
     /// </summary>
     public bool IsUnlocked()
     {
         byte val = _device.ReadByte(AddrActivation);
-        return val != 0;
+        return (val & ActivationBit) != 0;
     }
 
     /// <summary>Unlock EC writes (0x741 = 0x05).</summary>
@@ -156,10 +160,10 @@ class EcActivationControl
         // With 150ms inter-step sleeps, the 0x741 write happens ~900ms before
         // this read, well past the ~250ms async transform window.
         byte appe = _device.ReadByte(AddrActivation);
-        if (appe == 0x01)
-            DiagnosticLog.Write("EC init verified: 0x741 transformed (EC active)");
+        if ((appe & (ActivationBit | ActivationPendingBit)) == ActivationBit)
+            DiagnosticLog.Write($"EC init verified: 0x741 transformed (EC active, 0x{appe:X2})");
         else
-            DiagnosticLog.Warn($"EC init: 0x741 = 0x{appe:X2} (expected 0x01 — EC may not be applying power limits)");
+            DiagnosticLog.Warn($"EC init: 0x741 = 0x{appe:X2} (expected bit 0 set, bit 2 cleared — EC may not be applying power limits)");
 
         DiagnosticLog.Write(errors.Count == 0
             ? "EC init: all steps completed successfully"

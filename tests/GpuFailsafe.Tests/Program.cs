@@ -26,6 +26,8 @@ static partial class Program
             ("constructor restores persisted latch", ConstructorRestoresLatch),
             ("manual test trips while disabled", ManualTestTripsWhileDisabled),
             ("GPU power gate integrates with real guard and encoding", GpuPowerGateIntegration),
+            ("TGP unlock headroom and over-limit readback", TgpUnlockAndOverLimitReadback),
+            ("NVIDIA opens only on demand", NvidiaOpensOnlyOnDemand),
             ("tripped hold continues enforcement when disabled", TrippedEnforcesWhenDisabled),
             ("reset clears even incomplete protection", ResetClearsIncompleteProtection),
             ("notification exceptions cannot interrupt safety", SubscriberFailuresAreContained),

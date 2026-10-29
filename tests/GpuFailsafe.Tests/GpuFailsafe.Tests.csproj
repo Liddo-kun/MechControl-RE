@@ -10,6 +10,7 @@
   <ItemGroup>
     <Compile Include="../../MechControl/Driver/WriteGuard.cs" Link="Production/WriteGuard.cs" />
     <Compile Include="../../MechControl/Features/GpuPowerControl.cs" Link="Production/GpuPowerControl.cs" />
+    <Compile Include="../../MechControl/Features/IGpuPowerOverride.cs" Link="Production/IGpuPowerOverride.cs" />
     <Compile Include="../../MechControl/Features/GpuTemperatureFailsafe.cs" Link="Production/GpuTemperatureFailsafe.cs" />
     <Compile Include="../../MechControl/Features/CpuPowerControl.cs" Link="Production/CpuPowerControl.cs" />
     <Compile Include="../../MechControl/Features/FanControl.cs" Link="Production/FanControl.cs" />

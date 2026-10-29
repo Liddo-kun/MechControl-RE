@@ -55,6 +55,14 @@ static class UniversalDefaults
         ["fanSwitchSpeed"] = new LimitInfo { Min = 100, Max = 12700, Encoding = "fan_switch_speed" },
     };
 
+    // ── Opt-in TGP unlock ────────────────────────────────────────
+    // UI unlock headroom, not a hardware rating. The controller intersects this
+    // extension with the detected BIOS ceiling and the EC register encoding.
+    public const int TgpUnlockHeadroomWatts = 75;
+    // Unlocked TGP floor as a percentage of the model's minimum (its base TGP), so it
+    // scales with the GPU. Below the EC minimum only the NVIDIA driver request applies.
+    public const int TgpUnlockMinimumPercent = 60;
+
     // ── Universal write allowlist ────────────────────────────────
     // Init registers + feature registers safe to write on all Uniwill models.
 

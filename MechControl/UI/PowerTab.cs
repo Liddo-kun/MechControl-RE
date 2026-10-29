@@ -19,6 +19,11 @@ class PowerTab : UserControl
 
     private readonly TrackBar? _sliderTgp;
     private readonly Label? _lblTgp;
+    private readonly CheckBox? _chkTgpUnlock;
+    private readonly UiHelpers.SliderRow? _rowNvvdd;
+    private readonly UiHelpers.SliderRow? _rowMsvdd;
+    private readonly Label? _lblDriverLimits;
+    private bool _refreshing;
     private readonly CheckBox? _chkDynamicBoost;
     private readonly TrackBar? _sliderDb;
     private readonly Label? _lblDb;
@@ -107,9 +112,35 @@ class PowerTab : UserControl
 
             var gpuLayout = UiHelpers.BuildSliderTable();
 
-            var tgp = UiHelpers.BuildSliderRow("GPU TGP (Total Graphics Power)", tgpLimit.Min, tgpLimit.Max, "W");
+            var tgp = UiHelpers.BuildSliderRow("GPU TGP (before Dynamic Boost)", _gpuControl?.MinTgpWatts ?? tgpLimit.Min, _gpuControl?.MaxTgpWatts ?? tgpLimit.Max, "W");
             UiHelpers.AddSliderRow(gpuLayout, tgp);
             _sliderTgp = tgp.Slider; _lblTgp = tgp.Value;
+
+            if (_gpuControl?.CanUnlockTgp == true)
+            {
+                _chkTgpUnlock = new CheckBox
+                {
+                    Text = $"Unlock GPU power / current limits (TGP {_gpuControl.UnlockedMinTgpWatts}-{_gpuControl.UnlockedMaxTgpWatts} W)",
+                    AutoSize = true,
+                    Checked = _gpuControl.TgpUnlocked,
+                    Margin = new Padding(0, UiMetrics.RowGap, 0, 0),
+                };
+                _chkTgpUnlock.CheckedChanged += TgpUnlock_CheckedChanged;
+                gpuLayout.Controls.Add(_chkTgpUnlock);
+                gpuLayout.SetColumnSpan(_chkTgpUnlock, 3);
+            }
+            // Nothing to explain on models without an NVIDIA GPU.
+            else if (_gpuControl != null && (_gpuControl.PowerOverride != null || _gpuControl.OpenPowerOverride != null
+                || _gpuControl.PowerOverrideUnavailableReason != null))
+            {
+                var unavailable = MakeDisabledLabel(_gpuControl.PowerOverride == null && _gpuControl.OpenPowerOverride == null
+                    ? _gpuControl.PowerOverrideUnavailableReason!
+                    : "TGP unlock unavailable: this model's EC range cannot be extended.");
+                unavailable.ForeColor = UiColors.Hint;
+                unavailable.MaximumSize = new Size(600, 0);
+                gpuLayout.Controls.Add(unavailable);
+                gpuLayout.SetColumnSpan(unavailable, 3);
+            }
 
             _chkDynamicBoost = new CheckBox
             {
@@ -131,6 +162,16 @@ class PowerTab : UserControl
                 if (_sliderDb != null)
                     _sliderDb.Enabled = _chkDynamicBoost.Checked;
             };
+
+            if (_gpuControl != null && (_gpuControl.CanUnlockTgp || _gpuControl.PowerOverride != null))
+            {
+                _rowNvvdd = AddCurrentSlider(gpuLayout, "NVVDD / Core current limit");
+                _rowMsvdd = AddCurrentSlider(gpuLayout, "MSVDD / Fabric current limit");
+                _lblDriverLimits = new Label { AutoSize = true, ForeColor = UiColors.Hint, MaximumSize = new Size(600, 0) };
+                gpuLayout.Controls.Add(_lblDriverLimits);
+                gpuLayout.SetColumnSpan(_lblDriverLimits, 3);
+                RefreshDriverControls();
+            }
 
             grpGpu.Controls.Add(gpuLayout);
         }
@@ -180,7 +221,9 @@ class PowerTab : UserControl
                     : $"Register 0x{_addrTempWrite:X3} | Encoding: inverted_offset | Raw: 0x{RegisterEncoding.EncodeCpuTempLimit(_sliderTemp.Value, _tjMax):X2}");
         if (_sliderTgp != null)
             _sliderTgp.ValueChanged += (s, e) =>
-                _tooltip.SetToolTip(_sliderTgp, $"Register 0x{_addrTgp:X3} | Encoding: offset +{_tgpOffset} | Raw: {_sliderTgp.Value - _tgpOffset}");
+                _tooltip.SetToolTip(_sliderTgp, _sliderTgp.Value < tgpLimit.Min
+                    ? $"Below the EC minimum: NVIDIA driver request only (EC stays at {tgpLimit.Min} W)"
+                    : $"Register 0x{_addrTgp:X3} | Encoding: offset +{_tgpOffset} | Raw: {_sliderTgp.Value - _tgpOffset}");
         if (_sliderDb != null)
             _sliderDb.ValueChanged += (s, e) =>
                 _tooltip.SetToolTip(_sliderDb, $"Register 0x{_addrDbMaxTgp:X3} | Encoding: direct | Raw: {_sliderDb.Value}");
@@ -208,11 +251,17 @@ class PowerTab : UserControl
             }, "read CPU power values", "EC Read Error");
         }
 
+        RefreshGpuFromHardware();
+    }
+
+    private void RefreshGpuFromHardware()
+    {
         if (_gpuEnabled && _gpuControl != null && _sliderTgp != null)
         {
             UiHelpers.TryUi(() =>
             {
                 var gpu = _gpuControl.ReadGpuPower();
+                RefreshDriverControls();
                 _sliderTgp.Value = Math.Clamp(gpu.TgpWatts, _sliderTgp.Minimum, _sliderTgp.Maximum);
                 _chkDynamicBoost!.Checked = gpu.DynamicBoostEnabled;
                 _sliderDb!.Value = Math.Clamp(gpu.DbWatts, _sliderDb.Minimum, _sliderDb.Maximum);
@@ -224,23 +273,120 @@ class PowerTab : UserControl
     private void BtnApply_Click(object? sender, EventArgs e)
     {
         var failsafe = _gpuControl?.Failsafe ?? _cpuControl?.Failsafe;
+        bool attempted = false;
         UiHelpers.TryUi(() =>
         {
+            var plan = _gpuEnabled && _sliderTgp != null ? _gpuControl?.PlanProfile(ReadGpuSettings(), automatic: false) : null;
+            if (plan != null && !UiHelpers.ConfirmGpuPlan(_gpuControl!, plan)) return;
+            attempted = true;
             void Apply()
             {
+                if (plan != null) _gpuControl!.ConfigureProfile(plan);
                 if (_cpuEnabled && _cpuControl != null && _sliderPL1 != null)
                     _cpuControl.ApplyCpuPower(_sliderPL1.Value, _sliderPL2!.Value,
                         _sliderPL4!.Value, _sliderTemp!.Value);
 
-                if (_gpuEnabled && _gpuControl != null && _sliderTgp != null)
-                    _gpuControl.ApplyGpuPower(_sliderTgp.Value,
-                        _chkDynamicBoost!.Checked, _sliderDb!.Value);
+                if (plan != null)
+                    _gpuControl!.ApplyGpuPower(plan.Settings.Tgp,
+                        plan.Settings.DynamicBoostEnabled, plan.Settings.DynamicBoostWatts);
             }
             if (failsafe != null) failsafe.ApplyExplicit(Apply);
             else Apply();
         }, "apply power settings", "EC Write Error");
-        if (failsafe?.IsTripped == true) RefreshFromEc();
+        if (attempted || failsafe?.IsTripped == true) RefreshFromEc();
     }
+
+    private void TgpUnlock_CheckedChanged(object? sender, EventArgs e)
+    {
+        if (_refreshing) return;
+        var gpu = _gpuControl!;
+        bool unlocked = _chkTgpUnlock!.Checked;
+        if (unlocked == gpu.TgpUnlocked) return;
+        UiHelpers.TryUi(() =>
+        {
+            var driver = gpu.EnsurePowerOverride();
+            if (UiHelpers.ConfirmGpuUnlock(unlocked, driver.StockPowerLimitWatts)) gpu.SetUnlock(unlocked);
+        }, "change NVIDIA BIOS limits");
+        RefreshGpuFromHardware();
+    }
+
+    // Whole amps. An unmoved slider keeps the exact detected request, which some BIOSes
+    // define in fractional amps, and writes nothing.
+    private UiHelpers.SliderRow AddCurrentSlider(TableLayoutPanel layout, string name)
+    {
+        UiHelpers.SliderRow? row = null;
+        row = UiHelpers.BuildSliderRow(name, 1, 2, "A", formatter: v => FormatCurrent(row?.Slider, v));
+        UiHelpers.AddSliderRow(layout, row);
+        _tooltip.SetToolTip(row.Slider, "Raising a current ceiling restarts the GPU; lower values apply live.");
+        return row;
+    }
+
+    private static int WholeAmps(int milliamps) => (int)Math.Round(milliamps / 1000.0);
+
+    private static string FormatCurrent(TrackBar? slider, int amps) =>
+        slider?.Tag is GpuCurrentLimit limit && amps == WholeAmps(limit.CurrentMilliamps)
+            ? $"{limit.CurrentMilliamps / 1000.0:0.###} A" : $"{amps} A";
+
+    private static int? SelectedMilliamps(UiHelpers.SliderRow? row) =>
+        row?.Slider.Tag is GpuCurrentLimit limit && row.Slider.Value != WholeAmps(limit.CurrentMilliamps)
+            ? row.Slider.Value * 1000 : null;
+
+    private static void SetCurrent(UiHelpers.SliderRow row, GpuCurrentLimit? limit, bool unlocked)
+    {
+        row.Slider.Tag = limit;
+        row.Slider.Enabled = limit != null;
+        if (limit != null)
+        {
+            int min = Math.Max(1, (limit.MinimumMilliamps + 999) / 1000);
+            int max = Math.Max(min, limit.AllowedMaximumMilliamps(unlocked) / 1000);
+            row.Slider.SetRange(min, max);
+            row.Slider.Value = Math.Clamp(WholeAmps(limit.CurrentMilliamps), min, max);
+            row.Slider.TickFrequency = row.Slider.LargeChange = Math.Max(1, (max - min) / 10);
+        }
+        row.Value.Text = limit == null ? "--" : FormatCurrent(row.Slider, row.Slider.Value);
+    }
+
+    private void RefreshDriverControls()
+    {
+        var gpu = _gpuControl!;
+        _refreshing = true;
+        try
+        {
+            if (_chkTgpUnlock != null) { _chkTgpUnlock.Checked = gpu.TgpUnlocked; _chkTgpUnlock.Enabled = gpu.CanUnlockTgp; }
+            _sliderTgp!.SetRange(gpu.MinTgpWatts, gpu.MaxTgpWatts);
+            _sliderTgp.TickFrequency = Math.Max(1, (_sliderTgp.Maximum - _sliderTgp.Minimum) / 10);
+            if (_rowNvvdd == null) return;
+            GpuCurrentLimits? limits = null;
+            string status = "Turn on the unlock to adjust GPU current limits.";
+            if (gpu.PowerOverride is { } driver)
+            {
+                // Never let a transient driver error break the tab; show it instead.
+                try
+                {
+                    limits = driver.ReadCurrentLimits();
+                    var power = driver.ReadPowerLimits();
+                    status = $"Driver ceiling {power.CeilingWatts} W · enforced {power.EnforcedWatts} W · stock currents " +
+                        $"{limits.Nvvdd.DefaultMilliamps / 1000.0:0.###} / {limits.Msvdd.DefaultMilliamps / 1000.0:0.###} A";
+                }
+                catch (Exception ex) { limits = null; status = "NVIDIA readback failed: " + ex.Message; }
+            }
+            SetCurrent(_rowNvvdd, limits?.Nvvdd, gpu.TgpUnlocked);
+            SetCurrent(_rowMsvdd!, limits?.Msvdd, gpu.TgpUnlocked);
+            _lblDriverLimits!.Text = gpu.ProfileNotice.Length > 0 ? status + "\n" + gpu.ProfileNotice : status;
+        }
+        finally { _refreshing = false; }
+    }
+
+    private GpuProfileSettings ReadGpuSettings() => new()
+    {
+        Tgp = _sliderTgp?.Value ?? 0,
+        DynamicBoostEnabled = _chkDynamicBoost?.Checked == true,
+        DynamicBoostWatts = _sliderDb?.Value ?? 0,
+        // Not a profile: works within the active unlock, so unmoved sliders keep their values.
+        BiosOverrideEnabled = _gpuControl?.TgpUnlocked == true ? true : null,
+        NvvddMilliamps = SelectedMilliamps(_rowNvvdd),
+        MsvddMilliamps = SelectedMilliamps(_rowMsvdd)
+    };
 
     private void BtnRead_Click(object? sender, EventArgs e)
     {
