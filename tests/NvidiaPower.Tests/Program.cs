@@ -29,6 +29,8 @@ static partial class Program
             ("board current discovers alternate policies and preserves exact GET packet metadata", CurrentPolicyPacket),
             ("unsupported, ambiguous and out-of-range board current requests never SET; rails stay usable", CurrentPolicyRefusals),
             ("board current SET rejects missing readback and changed unselected rails", CurrentPolicyReadback),
+            ("live readings discover controllers at alternate policy indices", Telemetry),
+            ("unrecognized controller layouts, identities and ambiguity leave only those readings out", TelemetryFailsClosed),
         ];
         int failed = 0;
         foreach (var (name, test) in tests)

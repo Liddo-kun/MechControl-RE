@@ -137,15 +137,18 @@ class GpuPowerControl
     }
 
     /// <summary>
-    /// System Info display: the NVIDIA budgets, or why they weren't read. Never opens NVIDIA
-    /// (stock users) and never reads a GPU that Windows reports asleep.
+    /// Display reads (System Info budgets, Power tab live readings), or why they weren't read.
+    /// Never opens NVIDIA (stock users) and never reads a GPU that Windows reports asleep.
     /// </summary>
-    public GpuPowerBudget? ReadDisplayBudget(out string reason)
+    public GpuPowerBudget? ReadDisplayBudget(out string reason) => ReadDisplay(driver => driver.ReadPowerBudget(), out reason);
+    public GpuTelemetry? ReadDisplayTelemetry(out string reason) => ReadDisplay(driver => driver.ReadTelemetry(), out reason);
+
+    private T? ReadDisplay<T>(Func<IGpuPowerOverride, T> read, out string reason) where T : class
     {
         reason = "";
         if (PowerOverride is not { } driver) { reason = "NVIDIA not connected"; return null; }
         if (!driver.IsGpuAwake()) { reason = "GPU asleep, not read"; return null; }
-        try { return driver.ReadPowerBudget(); }
+        try { return read(driver); }
         catch (Exception) { reason = "unavailable"; return null; }
     }
 
