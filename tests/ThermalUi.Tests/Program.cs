@@ -24,14 +24,16 @@ static partial class Program
             Application.SetCompatibleTextRenderingDefault(false);
             Application.SetDefaultFont(new Font("Segoe UI", 9));
             if (args.Contains("--power-only")) { NvidiaPowerUiTests(capture: true); return 0; }
+            if (Array.IndexOf(args, "--cli-host") is int host and >= 0) { HostCli(int.Parse(args[host + 1])); return 0; }
             MonitorTests();
             LinkedFanTests();
             RefreshTests();
             ProfileAndLinkedUiTests();
             NvidiaPowerUiTests();
+            CliTests();
             if (args.Contains("--headless"))
             {
-                Console.WriteLine("PASS: shared monitor, linked fans and real checkbox orchestration, profile load/preflight/partial-save failures, hidden UI refresh; no windows shown or hardware accessed.");
+                Console.WriteLine("PASS: shared monitor, linked fans and real checkbox orchestration, profile load/preflight/partial-save failures, hidden UI refresh, mcctl commands and pipe; no windows shown or hardware accessed.");
                 return 0;
             }
             string output = args.FirstOrDefault() ?? @"C:\Temp\tandem\thermal-ui-validation";

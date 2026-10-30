@@ -34,6 +34,12 @@
     <EmbeddedResource Include="Resources\TrayIcons\*.png" />
   </ItemGroup>
 
+  <!-- mcctl command line (Cli/): only in builds made with -p:EnableCli=true
+       (build-release.ps1 -WithCli). Releases leave it out entirely. -->
+  <ItemGroup Condition="'$(EnableCli)' != 'true'">
+    <Compile Remove="Cli\**" />
+  </ItemGroup>
+
   <ItemGroup>
     <TrimmerRootDescriptor Include="ILLink.Descriptors.xml" />
     <!-- System.Management uses Activator.CreateInstance on internal types like

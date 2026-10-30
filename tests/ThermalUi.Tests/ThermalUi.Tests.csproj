@@ -41,5 +41,8 @@
     <Compile Include="../../MechControl/UI/Section.cs" />
     <Compile Include="../GpuFailsafe.Tests/FakeEcDevice.cs" />
     <Compile Include="../GpuFailsafe.Tests/DiagnosticLogStub.cs" />
+    <Compile Include="../../MechControl/Cli/CliCommands.cs" />
+    <Compile Include="../../MechControl/Cli/CliServer.cs" />
+    <Compile Include="../../MechControl/Cli/CliStatus.cs" />
   </ItemGroup>
 </Project>

@@ -16,6 +16,7 @@ An open-source replacement for the OEM Control Center on Uniwill-built gaming la
 - **Bluetooth liquid cooler:** fan, pump and RGB
 - **Profiles:** 5 slots. The last one used loads at startup. You can switch profiles from the tray icon.
 - **Monitoring:** live temperatures, fan speeds and power. Fan RPM is also published as Windows performance counters.
+- **Command line (optional build):** `mcctl.exe` reads and changes GPU/CPU power, NVIDIA current limits and fan boost on the running app, for scripts and agents.
 
 ## Requirements
 
@@ -47,6 +48,21 @@ Register-ScheduledTask MechControl -Action $action -Trigger $trigger -Principal 
 ```
 
 `-ExecutionTimeLimit` matters: without it, Windows stops the task after 3 days.
+
+### Command line
+
+The release downloads don't include it. Build with `build-release.ps1 -WithCli` to get `mcctl.exe` next to `MechControl.exe`; it talks to the running app. Run it from an elevated shell:
+
+```powershell
+mcctl status                         # settings with the ranges this machine accepts, live readings
+mcctl status --json                  # the same as one line of JSON
+mcctl gpu --tgp 150 --db 25          # GPU TGP and Dynamic Boost (watts)
+mcctl gpu --nvvdd 240 --msvdd 75 --board-input 10.25   # NVIDIA current limits (amps, or e.g. 10250mA)
+mcctl fan boost on                   # maximum fan speed
+mcctl help                           # everything else
+```
+
+Changes apply immediately but aren't saved: loading a profile or waking from sleep restores the saved profile. Values outside your model's ranges are refused, and nothing from the command line restarts the GPU or turns the NVIDIA unlock on or off. Current limits need the unlock to have been turned on in the Power tab.
 
 ## Supported models
 

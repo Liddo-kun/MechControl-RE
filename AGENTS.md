@@ -19,7 +19,7 @@ Answers to the above (verify in `Profile/ProfileLoader.cs` if code has moved on)
 
 - **Edit here** (`~/code/Mechcontrol` on the tablet). Syncthing mirrors to `C:\Users\Jon\code\Mechcontrol` on the Windows build PC. Never hand-copy files over the `~/win` SMB mount (sync-conflict risk).
 - **Syncthing caveat:** the tablet-side watcher does NOT see Ubuntu writes (FUSE bypass); tablet→PC sync only happens on a periodic rescan (~30 min) or Jon pressing "Rescan All". Before building, **verify changed-file hashes match over SSH** (`Get-FileHash`) — the `~/win` mount shows stale cache and can't be trusted for verification. If sync is stalled, ask Jon to hit Rescan All.
-- **Build (over SSH):** `powershell -ExecutionPolicy Bypass -File C:/Users/Jon/code/Mechcontrol/MechControl/build-scripts/build-release.ps1` — autodetects dotnet (SDK 8 per-user at `C:\Users\Jon\.dotnet`), produces framework-dependent + trimmed self-contained under `MechControl\bin\`. Expect **0 errors and exactly 2 pre-existing CS8602 warnings** (MainForm.cs FormClosing area); anything else is yours.
+- **Build (over SSH):** `powershell -ExecutionPolicy Bypass -File C:/Users/Jon/code/Mechcontrol/MechControl/build-scripts/build-release.ps1` — autodetects dotnet (SDK 8 per-user at `C:\Users\Jon\.dotnet`), produces framework-dependent + trimmed self-contained under `MechControl\bin\`. **For deploys to Jon's machine add `-WithCli`** (keeps the `mcctl` command line; plain builds are release builds without it). Expect **0 errors and exactly 2 pre-existing CS8602 warnings** (MainForm.cs FormClosing area); anything else is yours.
 - **Trim compat:** the self-contained build is trimmed (`ILLink.Descriptors.xml`, source-generated JSON in `AppJsonContext.cs`). Keep new `System.Text.Json` usage on the context; check trim compatibility when adding reflection.
 - PowerShell-over-SSH gotchas (no `&&`, scp a `.ps1` for anything non-trivial) are in the global agent notes.
 
@@ -29,6 +29,7 @@ Answers to the above (verify in `Profile/ProfileLoader.cs` if code has moved on)
 - **Redeploy:** stop task + process → back up deploy dir to `C:\tmp\MechControl-backup-<stamp>` → swap in `bin/selfcontained` contents, **preserving user data**: `settings.json`, `lighting_state.json`, `liquid_cooler_state.json`, `userprofile_*.json`, `mechcontrol.log` → start task. A helper doing all of this exists at `C:\tmp\deploy.ps1` (recreate from this recipe if gone).
 - **Verify after deploy** in `mechcontrol.log`: EC init steps `[OK]`, `0x741 transformed`, validations PASS, `Auto-loaded user profile slot N`, sane fan table dump. Perf counters prove the tray-hidden monitor is alive: `Get-Counter '\MechControl\CPU Fan RPM'`.
 - Post-sleep issues: grep the log for `EC activation lost` / `Re-applied user profile` (EC re-activation watchdog).
+- **Command line:** `C:\Program_Files\MechControl\mcctl.exe` (elevated shell; SSH as Jon is elevated) reads/sets GPU TGP/DB, NVVDD/MSVDD/board-input currents, CPU PLs and fan boost on the running app: `mcctl status --json`, `mcctl gpu --nvvdd 240`, `mcctl help`. Changes are unsaved. Only in `-WithCli` builds. Design: `architecture.md` section 12.
 
 ## Evidence Archive (consult when debugging or doing new RE)
 

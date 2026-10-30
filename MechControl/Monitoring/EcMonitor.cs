@@ -169,53 +169,8 @@ class EcMonitor : IDisposable
         }
         try
         {
-            var data = new MonitorData { BatteryModeName = "" };
-
-            // RPM byte order is inconsistent in the EC firmware:
-            // CPU RPM: register "Lo" (0x464) is actually the high byte
-            // GPU RPM: register "Lo" (0x46B) is actually the low byte
-            byte cpuRpmA = _device.ReadByte(_addrCpuFanRpmLo);
-            byte cpuRpmB = _device.ReadByte(_addrCpuFanRpmHi);
-            data.CpuFanRpm = cpuRpmA << 8 | cpuRpmB;
-
-            byte gpuRpmA = _device.ReadByte(_addrGpuFanRpmLo);
-            byte gpuRpmB = _device.ReadByte(_addrGpuFanRpmHi);
-            data.GpuFanRpm = gpuRpmB << 8 | gpuRpmA;
-
-            if (!Lightweight)
-            {
-                data.CpuFanPercent = RegisterEncoding.DecodeFanDuty(_device.ReadByte(_addrCpuFanDuty));
-                data.GpuFanPercent = RegisterEncoding.DecodeFanDuty(_device.ReadByte(_addrGpuFanDuty));
-
-                byte tempRaw = _device.ReadByte(_addrCpuTempLimitRead);
-                data.CpuTempLimit = RegisterEncoding.DecodeCpuTempLimit(tempRaw, _absoluteTemp, _tjMax);
-                data.BatterySoc = _device.ReadByte(_addrBatterySoc);
-
-                byte batteryRaw = _device.ReadByte(_addrBatteryMode);
-                data.BatteryModeRaw = batteryRaw;
-                data.BatteryModeIndex = RegisterEncoding.DecodeBatteryMode(batteryRaw);
-                data.BatteryModeName = data.BatteryModeIndex < _profile.BatteryModes.Count
-                    ? _profile.BatteryModes[data.BatteryModeIndex].Name
-                    : $"Unknown ({data.BatteryModeIndex})";
-
-                byte statusRaw = _device.ReadByte(_addrStatusByte);
-                data.FanBoostActive = (statusRaw & 0x04) != 0;
-
-                byte fanCurveRaw = _device.ReadByte(_addrFanCurveEnable);
-                data.FanCurveEnabled = (fanCurveRaw & 0x80) != 0;
-
-                // System info (universal EC addresses)
-                if (_addrCpuTemp >= 0)
-                    data.CpuTemp = fansActive ? cpuTemperature ?? 0 : _device.ReadByte(_addrCpuTemp);
-                if (_addrGpuTemp >= 0)
-                    data.GpuTemp = safetyActive || fansActive ? gpuTemperature ?? 0 : _device.ReadByte(_addrGpuTemp);
-                data.AdapterCurrentAmps = _device.ReadByte(AddrAdapterCurrent) / 10.0;
-                data.SystemPowerWatts = _device.ReadByte(AddrSystemPowerLo)
-                                      | (_device.ReadByte(AddrSystemPowerHi) << 8);
-                data.DbMaxLiveWatts = _device.ReadByte(AddrDbMaxMirror);
-                data.TgpLiveWatts = _device.ReadByte(AddrTgpMirror) + _profile.TgpOffset;
-            }
-
+            var data = Read(Lightweight, fansActive ? cpuTemperature ?? 0 : null,
+                safetyActive || fansActive ? gpuTemperature ?? 0 : null);
             _consecutiveFailures = 0;
             Updated?.Invoke(data);
         }
@@ -231,5 +186,59 @@ class EcMonitor : IDisposable
                 Stopped?.Invoke("Monitor stopped after 5 consecutive read failures.");
             }
         }
+    }
+
+    /// <summary>One fresh full read outside the timer (command-line status). Raises no events.</summary>
+    public MonitorData ReadNow() => Read(lightweight: false, null, null);
+
+    // Temperatures already sampled this tick are passed in instead of being read twice.
+    private MonitorData Read(bool lightweight, int? cpuTemperature, int? gpuTemperature)
+    {
+        var data = new MonitorData { BatteryModeName = "" };
+
+        // RPM byte order is inconsistent in the EC firmware:
+        // CPU RPM: register "Lo" (0x464) is actually the high byte
+        // GPU RPM: register "Lo" (0x46B) is actually the low byte
+        byte cpuRpmA = _device.ReadByte(_addrCpuFanRpmLo);
+        byte cpuRpmB = _device.ReadByte(_addrCpuFanRpmHi);
+        data.CpuFanRpm = cpuRpmA << 8 | cpuRpmB;
+
+        byte gpuRpmA = _device.ReadByte(_addrGpuFanRpmLo);
+        byte gpuRpmB = _device.ReadByte(_addrGpuFanRpmHi);
+        data.GpuFanRpm = gpuRpmB << 8 | gpuRpmA;
+
+        if (lightweight) return data;
+
+        data.CpuFanPercent = RegisterEncoding.DecodeFanDuty(_device.ReadByte(_addrCpuFanDuty));
+        data.GpuFanPercent = RegisterEncoding.DecodeFanDuty(_device.ReadByte(_addrGpuFanDuty));
+
+        byte tempRaw = _device.ReadByte(_addrCpuTempLimitRead);
+        data.CpuTempLimit = RegisterEncoding.DecodeCpuTempLimit(tempRaw, _absoluteTemp, _tjMax);
+        data.BatterySoc = _device.ReadByte(_addrBatterySoc);
+
+        byte batteryRaw = _device.ReadByte(_addrBatteryMode);
+        data.BatteryModeRaw = batteryRaw;
+        data.BatteryModeIndex = RegisterEncoding.DecodeBatteryMode(batteryRaw);
+        data.BatteryModeName = data.BatteryModeIndex < _profile.BatteryModes.Count
+            ? _profile.BatteryModes[data.BatteryModeIndex].Name
+            : $"Unknown ({data.BatteryModeIndex})";
+
+        byte statusRaw = _device.ReadByte(_addrStatusByte);
+        data.FanBoostActive = (statusRaw & 0x04) != 0;
+
+        byte fanCurveRaw = _device.ReadByte(_addrFanCurveEnable);
+        data.FanCurveEnabled = (fanCurveRaw & 0x80) != 0;
+
+        // System info (universal EC addresses)
+        if (_addrCpuTemp >= 0)
+            data.CpuTemp = cpuTemperature ?? _device.ReadByte(_addrCpuTemp);
+        if (_addrGpuTemp >= 0)
+            data.GpuTemp = gpuTemperature ?? _device.ReadByte(_addrGpuTemp);
+        data.AdapterCurrentAmps = _device.ReadByte(AddrAdapterCurrent) / 10.0;
+        data.SystemPowerWatts = _device.ReadByte(AddrSystemPowerLo)
+                              | (_device.ReadByte(AddrSystemPowerHi) << 8);
+        data.DbMaxLiveWatts = _device.ReadByte(AddrDbMaxMirror);
+        data.TgpLiveWatts = _device.ReadByte(AddrTgpMirror) + _profile.TgpOffset;
+        return data;
     }
 }

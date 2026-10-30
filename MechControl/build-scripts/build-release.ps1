@@ -4,10 +4,13 @@
 #   2. Self-contained (larger, runs on any Win10+ x64 machine)
 #
 # Usage: Run from any directory. Requires dotnet CLI.
+#   -WithCli  include the mcctl command line (pipe server + mcctl.exe). Off for releases;
+#             use it for builds deployed where scripts/agents need it.
 
 param(
     [string]$DotnetPath,
-    [switch]$SkipSelfContained
+    [switch]$SkipSelfContained,
+    [switch]$WithCli
 )
 
 $ErrorActionPreference = 'Stop'
@@ -55,6 +58,7 @@ $outDir = Join-Path $binDir 'release-zips'
 #   System.Configuration.ConfigurationManager.dll — WMI/PerfCounter on some systems
 #   System.Formats.Asn1.dll               — crypto dependency chain (BLE certs)
 #   UIAutomation*.dll                     — Windows accessibility / screen readers
+#   System.IO.Pipes.dll                   — -WithCli builds only (stripped below otherwise)
 #   System.Security.Cryptography.{Cng,X509Certificates,Primitives,Encoding,Algorithms}.dll
 #                                         — crypto chain for untested BLE pairing paths
 
@@ -139,7 +143,6 @@ $OtherUnused = @(
     'System.Linq.Parallel.dll',
     'System.Linq.Queryable.dll',
     'System.IO.IsolatedStorage.dll',
-    'System.IO.Pipes.dll',
     'System.IO.Compression.dll', 'System.IO.Compression.Brotli.dll',
     'System.IO.Compression.FileSystem.dll', 'System.IO.Compression.ZipFile.dll',
     'System.IO.FileSystem.Watcher.dll',
@@ -168,6 +171,8 @@ $OtherUnused = @(
 )
 
 $AllStrip = $WpfDlls + $DebugDlls + $DesignDlls + $CryptoDlls + $NetworkDlls + $DataXmlDlls + $OtherUnused
+if (-not $WithCli) { $AllStrip += 'System.IO.Pipes.dll' }
+$cliProperty = if ($WithCli) { '-p:EnableCli=true' } else { '-p:EnableCli=false' }
 
 function Remove-Files($dir, $names) {
     foreach ($f in $names) {
@@ -187,15 +192,15 @@ if (Test-Path $binDir) { Remove-Item $binDir -Recurse -Force }
 
 # ── Step 2: Regular build ──────────────────────────────────────────
 
-Write-Host "`n=== Building (Release) ===" -ForegroundColor Cyan
-& $DotnetPath build $projectDir -c Release
+Write-Host "`n=== Building (Release, mcctl command line $(if ($WithCli) { 'included' } else { 'excluded' })) ===" -ForegroundColor Cyan
+& $DotnetPath build $projectDir -c Release $cliProperty
 if ($LASTEXITCODE -ne 0) { throw "Build failed" }
 
 # ── Step 3: Trimmed publish (only to get slim WinRT DLLs) ─────────
 
 Write-Host "`n=== Trimmed publish (extracting slim WinRT DLLs) ===" -ForegroundColor Cyan
 & $DotnetPath publish $projectDir -c Release -r win-x64 --self-contained true `
-    -p:PublishTrimmed=true -p:TrimMode=partial -p:_SuppressWinFormsTrimError=true `
+    -p:PublishTrimmed=true -p:TrimMode=partial -p:_SuppressWinFormsTrimError=true $cliProperty `
     -o $trimHelper --nologo -v q
 if ($LASTEXITCODE -ne 0) { throw "Trimmed publish failed" }
 
@@ -216,6 +221,16 @@ if (Test-Path $winx64) { Remove-Item $winx64 -Recurse -Force }
 $rootStub = Join-Path $releaseDir 'System.Management.dll'
 if (Test-Path $rootStub) { Remove-Item $rootStub -Force }
 
+# mcctl.exe, the command-line client. Built with the .NET Framework compiler that ships
+# with Windows (C# 5) so it starts fast and needs no runtime in either package.
+$mcctlExe = Join-Path $releaseDir 'mcctl.exe'
+if ($WithCli) {
+    Write-Host "`n=== Building mcctl.exe ===" -ForegroundColor Cyan
+    $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
+    & $csc -nologo -optimize+ "-out:$mcctlExe" (Join-Path (Split-Path $projectDir -Parent) 'mcctl\mcctl.cs')
+    if ($LASTEXITCODE -ne 0) { throw "mcctl build failed" }
+}
+
 $regSize = Get-DirSizeMB $releaseDir
 Write-Host "Framework-dependent build: ${regSize} MB" -ForegroundColor Green
 
@@ -224,7 +239,7 @@ Write-Host "Framework-dependent build: ${regSize} MB" -ForegroundColor Green
 if (-not $SkipSelfContained) {
     Write-Host "`n=== Self-contained publish (trimmed) ===" -ForegroundColor Cyan
     & $DotnetPath publish $projectDir -c Release -r win-x64 --self-contained true `
-        -p:PublishTrimmed=true -p:TrimMode=partial -p:_SuppressWinFormsTrimError=true `
+        -p:PublishTrimmed=true -p:TrimMode=partial -p:_SuppressWinFormsTrimError=true $cliProperty `
         -o $scDir --nologo -v q
     if ($LASTEXITCODE -ne 0) { throw "Self-contained publish failed" }
 
@@ -237,6 +252,7 @@ if (-not $SkipSelfContained) {
     # Swap in trimmed WinRT DLLs
     Copy-Item (Join-Path $releaseDir 'Microsoft.Windows.SDK.NET.dll') $scDir -Force
     Copy-Item (Join-Path $releaseDir 'WinRT.Runtime.dll') $scDir -Force
+    if ($WithCli) { Copy-Item $mcctlExe $scDir -Force }
 
     # Remove locale folders
     Get-ChildItem $scDir -Directory |
