@@ -6,7 +6,7 @@ using MechControl.Profile;
 
 namespace MechControl.UI;
 
-class MainForm : Form
+partial class MainForm : Form
 {
     private readonly EcDevice _device;
     private readonly WriteGuard _guard;
@@ -609,6 +609,7 @@ class MainForm : Form
         Load += async (s, e) =>
         {
             _powerTab?.RefreshFromEc();
+            StartCli();
             _trayIcon.Visible = true;
             if (_failsafeTab.HasConfigurationWarning)
                 _trayIcon.ShowBalloonTip(10000, "MechControl Configuration", "Review the persistent configuration warning on the Thermal Failsafe tab. Requested profile protection may not be armed.", ToolTipIcon.Warning);
@@ -633,6 +634,7 @@ class MainForm : Form
             }
 
             _trayIcon.Visible = false;
+            StopCli();
             _failsafeAlert?.Close();
             _batteryTab?.StopTelemetry();
             _watchdog.Dispose();
@@ -677,6 +679,11 @@ class MainForm : Form
         WindowState = FormWindowState.Minimized;
         ShowInTaskbar = false;
     }
+
+    // mcctl command line: implemented in Cli/MainForm.Cli.cs, which only -WithCli builds compile
+    // (architecture.md section 12). In other builds these calls compile away.
+    partial void StartCli();
+    partial void StopCli();
 
     private void RefreshActiveTab()
     {

@@ -43,6 +43,8 @@ class GpuPowerControl
     public int UnlockedMaxTgpWatts { get; }
     public int MinTgpWatts => TgpUnlocked && _canExtendEcLimit ? UnlockedMinTgpWatts : NormalMinTgpWatts;
     public int MaxTgpWatts => TgpUnlocked && _canExtendEcLimit ? UnlockedMaxTgpWatts : NormalMaxTgpWatts;
+    public int MinDbWatts => _dbLimit.Min;
+    public int MaxDbWatts => _dbLimit.Max;
     private readonly bool _canExtendEcLimit;
     // The last driver request MechControl set, and the values it came from (for resume).
     private int? _driverWatts;

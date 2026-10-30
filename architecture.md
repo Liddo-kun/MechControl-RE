@@ -68,8 +68,15 @@ MechControl/
 
   Monitoring/
     EcMonitor.cs                  WinForms Timer (1s), shared EC sampler (telemetry, failsafe, linked fans),
-                                  fires Updated event
+                                  fires Updated event; ReadNow() for one-shot reads (CLI status)
     PerfCounterPublisher.cs       Publishes CPU/GPU fan RPM as Windows perf counters from Updated (no extra EC reads)
+
+  Cli/                            Command line for scripts and agents (see Section 12). Compiled only
+                                  with -p:EnableCli=true (build-release.ps1 -WithCli); not in releases
+    CliServer.cs                  Admin-only named pipe \\.\pipe\MechControl; runs each request on the UI thread
+    CliCommands.cs                status / gpu / cpu / fan boost through the existing controllers
+    CliStatus.cs                  Status records + source-generated CliJsonContext (camelCase, one line)
+    MainForm.Cli.cs               Implements MainForm's partial StartCli/StopCli (calls compile away without it)
 
   UI/
     MainForm.cs                   TabControl + monitor panel + profile bar + system tray + EC enrichment orchestration
@@ -112,7 +119,10 @@ MechControl/
     TrayIcons/kekwait_*.png       40 animated frames (embedded resource) for profile 5 tray icon
 
   build-scripts/
-    build-release.ps1             Release build: dev exe + framework-dependent zip + self-contained zip + self-contained .7z (if 7-Zip installed)
+    build-release.ps1             Release build: dev exe + framework-dependent zip + self-contained zip + self-contained .7z (if 7-Zip installed);
+                                  -WithCli adds the command line (Cli/ + ../mcctl/mcctl.cs) to both packages
+
+mcctl/mcctl.cs                    Command-line client (outside the app project; .NET Framework csc, C# 5)
 ```
 
 ### UI layout pattern
@@ -679,7 +689,7 @@ Minimize or close hides to tray. On hide: EcMonitor switches to lightweight mode
 
 ### Shutdown / Disposal Order
 
-On real exit, `FormClosing` hides the tray icon, closes the failsafe alert, stops battery telemetry, disposes the EC activation watchdog, lighting resume restore, monitor and perf counters, then closes the log.
+On real exit, `FormClosing` hides the tray icon, stops the command-line pipe, closes the failsafe alert, stops battery telemetry, disposes the EC activation watchdog, lighting resume restore, monitor and perf counters, then closes the log.
 
 `MainForm.Dispose` then:
 1. Disposes the failsafe alert.
@@ -709,5 +719,76 @@ Fan curves are read from FanTab panels (source of truth), not from EC — EC may
 Every session appends to `mechcontrol.log` next to the exe. Logs hardware identity (ModuleID, ROMID, EC version, VRM), ECSpec config, per-mode PL defaults, effective limits and their source, feature register values (raw + decoded), fan table hex dumps (snapshot + post-write verify), fan detection results (activeEntries, GPU presence), startup validation pass/fail per feature, HID enumeration, and EC init steps. UI errors caught by `TryUi`/`TryUiAsync` are logged before the popup is shown, so most failed profile applies leave a trail (exception: tray-menu profile loads show a popup without logging the exception). Designed so a remote user's log contains everything needed to build a verified profile.
 
 Retention: `Start()` trims the log on each launch before opening the writer — keeps the very first session (baseline snapshot of the machine's original state) plus the 5 most recent previous sessions, drops everything between, then appends the current session (so up to 7 sessions after launch). Trimming is opportunistic; any IO failure silently skips rotation for that launch.
+
+---
+
+## 12. Command Line (mcctl)
+
+`mcctl.exe` lets scripts and agents read and change settings of the running app. It is a
+thin client: the app owns the EC handle, the NVIDIA driver state and the thermal failsafe,
+and a second process must never write the hardware (the single-instance mutex already makes
+a second MechControl exit), so every command runs inside MechControl.
+
+**Opt-in build.** Releases don't include it. `build-release.ps1 -WithCli` passes
+`-p:EnableCli=true` to every build/publish, compiles `mcctl.exe` into both packages and keeps
+`System.IO.Pipes.dll`. Without it the csproj removes `Cli/**` from compilation, MainForm's
+partial `StartCli`/`StopCli` calls compile away, and the packages match the pre-CLI file list
+exactly. The tests link the `Cli/` files directly, so they cover it either way.
+
+```
+mcctl status [--json]                          settings + accepted ranges, NVIDIA limits/live currents, fans, failsafe
+mcctl watch [--interval ms] [--json]           repeated status (client-side loop; --json = JSON Lines)
+mcctl gpu [--tgp W] [--db W|on|off] [--nvvdd A] [--msvdd A] [--board-input A]
+mcctl cpu [--pl1 W] [--pl2 W] [--pl4 W] [--temp-limit C]
+mcctl fan boost on|off
+```
+
+Currents are amps (`240`, `10.25`) or milliamps (`10250mA`), exact to 1 mA; JSON reports
+exact milliamps. Exit codes: 0 done, 1 refused/failed, 2 usage error, 3 MechControl not
+reachable. Write commands print the group they changed; every write attempt is logged as
+`[CLI] Applied:` / `[CLI] Not applied:`.
+
+**Transport** (`CliServer`): named pipe `\\.\pipe\MechControl`, created with
+`FirstPipeInstance` (never joins a squatted name) and a DACL of Administrators + SYSTEM only:
+whoever can write to it can change GPU limits. Non-elevated shells get "Access denied".
+Frames are little-endian `int32 version, int32 length, UTF-8 payload` (arguments separated
+by NUL) and `int32 exit code, int32 length, UTF-8 text`. The server always consumes the
+declared request before answering and waits for the client to close before disconnecting
+(disconnecting discards unread data). One request at a time; 5 s I/O timeouts; the client
+gives up after 60 s. The server starts in `MainForm.Load` and posts each request to the UI
+thread's `SynchronizationContext`. `MainForm.StartCli` refuses requests while a modal form
+is open (e.g. a GPU restart's progress notice, whose message loop would otherwise run the
+command mid-operation).
+
+**Semantics** (`CliCommands`) — the Power/Fan tabs' paths without their dialogs:
+
+- Options left out keep current hardware values. Values are validated before any write:
+  TGP/DB by `GpuPowerControl.ValidatePower`, CPU by `CpuPowerControl.ValidatePower`, currents
+  against `max(1 A, driver minimum)` to `min(AllowedMaximumMilliamps(unlocked), live ceiling)`.
+  Out-of-range values are refused, never clamped.
+- Nothing restarts the GPU or toggles the NVIDIA unlock: values above the live ceiling or
+  needing `RequiresRestart` are refused with a pointer to the Power tab. Current commands need
+  NVIDIA already open (unlock turned on once, or saved state); status never opens NVIDIA or
+  reads a GPU Windows reports asleep.
+- GPU/CPU writes run inside `GpuTemperatureFailsafe.ApplyExplicit`, so they are refused while
+  tripped. Fan boost mirrors the Fan tab: on is always allowed, off is refused while the
+  failsafe holds it.
+- Changes are live and unsaved, like Apply without Save: any profile load, including the
+  automatic one after resume/EC re-activation, replaces them. After a write the Power or Fan
+  tab refreshes from hardware so a later UI Apply doesn't write stale slider values.
+- Fan control is boost only. Fixed duties were left out deliberately: the EC override
+  (`0x759`/`0x75A`) has no temperature safety net (`notes/fan_duty_override.md`).
+
+Model compatibility: ranges and capabilities come from the same profile/ECSpec/NVIDIA data
+as the UI; features a model lacks are `null` in `status --json` and refused by commands.
+
+**Client** (`mcctl/mcctl.cs`): .NET Framework 4 console app, C# 5, compiled by
+`build-release.ps1 -WithCli` with `%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe` —
+no .NET 8 runtime needed, so it works next to the self-contained build. Usage text lives here.
+
+**Tests**: `tests/ThermalUi.Tests/CliTests.cs` (commands against fake EC/NVIDIA, pipe round
+trips, protocol mismatch, squatted name, non-elevated denial). For a hardware-free target for
+a real `mcctl.exe`, run `ThermalUi.Tests.exe --cli-host <seconds>` (serves the fake rig on
+the production pipe name; don't run it while MechControl is running).
 
 ---

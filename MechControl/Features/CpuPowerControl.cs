@@ -22,6 +22,11 @@ class CpuPowerControl
     public GpuTemperatureFailsafe? Failsafe { get; set; }
     public bool CanApplyMinimum { get; private set; }
     public CpuPowerValues Minimum { get; }
+    // Model ranges that ValidatePower enforces (watts / degrees C).
+    public (int Min, int Max) PL1Range => (_pl1Limit.Min, _pl1Limit.Max);
+    public (int Min, int Max) PL2Range => (_pl2Limit.Min, _pl2Limit.Max);
+    public (int Min, int Max) PL4Range => (_pl4Limit.Min, _pl4Limit.Max);
+    public (int Min, int Max) TempLimitRange => (_tempMin, _tempMax);
 
     public CpuPowerControl(EcDevice device, WriteGuard guard, MachineProfile profile)
     {
