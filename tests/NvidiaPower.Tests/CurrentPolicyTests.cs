@@ -74,11 +74,41 @@ static partial class Program
         foreach (bool alternate in new[] { false, true })
         {
             var fake = new CurrentPolicyDriver(alternate); fake.AddTelemetry();
-            var expected = new NvidiaTelemetry(126883, 47772, 8470, 152544, 59298, 2865000, 2940000, 3090000);
+            // No NVML or thermal monitors in this fake: clock, enforced limit and activity stay null.
+            var expected = new NvidiaTelemetry(126883, 47772, 8470, 152544, 59298, 2865000, 2940000, 3090000)
+            {
+                NvvddLimitMa = 125000, MsvddLimitMa = 32000, BoardInputLimitMa = 9500,
+                GpuPowerMw = 173336, CorePowerMw = 133102,
+            };
             Equal(expected, fake.Api.ReadTelemetry());
             Equal(expected, fake.Api.ReadTelemetry()); // Reused status buffer.
             GC.KeepAlive(fake);
         }
+        // A limit outside the policy's range, or unset GPU power, is left out.
+        var odd = new CurrentPolicyDriver(); odd.AddTelemetry();
+        CurrentPolicyDriver.Put(odd.Status, odd.StatusEntry(odd.NvIndex) + 4, 170001);
+        CurrentPolicyDriver.Put(odd.Status, odd.StatusEntry(odd.BoardPowerIndex) + 8, 0);
+        True(odd.Api.ReadTelemetry() is { NvvddLimitMa: null, MsvddLimitMa: 32000, GpuPowerMw: null });
+        GC.KeepAlive(odd);
+    }
+
+    private static void InlinePowerActivity()
+    {
+        var fake = new CurrentPolicyDriver(); fake.AddTelemetry(); fake.AddInlineMonitors();
+        True(fake.Api.ReadTelemetry().InlinePowerActivity == null); // No previous read.
+        // Only class 5 (ADC_IPC) counts; the busiest of them is used. 54 M counts ~ 0.5 s of a 108 MHz clock.
+        fake.Count(2, 54_000_000); fake.Count(5, 1_000); fake.Count(3, 900_000_000_000);
+        Thread.Sleep(600);
+        double? activity = fake.Api.ReadTelemetry().InlinePowerActivity;
+        True(activity > 0.3 && activity < 0.95);
+        fake.Count(2, 0); // Counter went backwards (GPU restart): no value this read.
+        True(fake.Api.ReadTelemetry().InlinePowerActivity == null);
+        True(fake.Api.ReadTelemetry().InlinePowerActivity == 0);
+        // Without ADC_IPC monitors the rest of the telemetry is unaffected.
+        var none = new CurrentPolicyDriver(); none.AddTelemetry(); none.AddInlineMonitors(ipc: false);
+        True(none.Api.ReadTelemetry() is { InlinePowerActivity: null, NvvddMa: 126883 });
+        True(none.Api.ReadTelemetry() is { InlinePowerActivity: null, CurrentCapKhz: 2865000 });
+        GC.KeepAlive(fake); GC.KeepAlive(none);
     }
 
     private static void TelemetryFailsClosed()
@@ -189,9 +219,29 @@ static partial class Program
             Policy(PowerIndex, 0x15, 5, 1, 5001000, 5001000, unit: 0);
             StatusValue(NvIndex, 19, 126883); StatusValue(MsIndex, 19, 47772); StatusValue(InputIndex, 4, 8470);
             StatusValue(BoardPowerIndex, 0, 173336);
+            foreach (var (index, limit) in new[] { (NvIndex, 125000u), (MsIndex, 32000u), (InputIndex, 9500u), (BoardPowerIndex, 209990u) })
+                Put(Status, StatusEntry(index) + 4, limit);
             Controller(CurrentIndex, 2865000, 126883, 47772, 152544, 59298);
             Controller(PowerIndex, 2940000, 85576, 47526, 121715, 71465);
             Arbitration(PowerIndex, 254, BoardPowerIndex);
+        }
+
+        // Thermal monitors as on Jon's GPU: classes 7, 8, 5, 4, 4, 5 (5 = ADC_IPC), 108 MHz utility clock.
+        public readonly byte[] ThermalInfo = new byte[0x94c], ThermalStatus = new byte[0xa48];
+        public void AddInlineMonitors(bool ipc = true)
+        {
+            Put(ThermalInfo, 0, 0x1094c); Put(ThermalInfo, 4, 0x3f); Put(ThermalInfo, 8, 108000);
+            Put(ThermalStatus, 0, 0x10a48);
+            uint[] classes = ipc ? [7, 8, 5, 4, 4, 5] : [7, 8, 4, 4, 4, 3];
+            for (int m = 0; m < classes.Length; m++) { Put(ThermalInfo, 76 + m * 72, classes[m]); Put(ThermalStatus, 72 + m * 80, classes[m]); }
+            Bind(0xb2c9d666, nameof(GetThermalInfo)); Bind(0x4b4bd039, nameof(GetThermalStatus));
+        }
+        public void Count(int monitor, ulong value) => BinaryPrimitives.WriteUInt64LittleEndian(ThermalStatus.AsSpan(80 + monitor * 80), value);
+        private int GetThermalInfo(IntPtr gpu, IntPtr data) { Marshal.Copy(ThermalInfo, 0, data, ThermalInfo.Length); return 0; }
+        private int GetThermalStatus(IntPtr gpu, IntPtr data)
+        {
+            if ((uint)Marshal.ReadInt32(data, 4) != 0x3f) return -1;
+            Marshal.Copy(ThermalStatus, 0, data, ThermalStatus.Length); return 0;
         }
         public int StatusEntry(int index) => 0x11b8 + index * 0x3768;
         public int Union(int index) => StatusEntry(index) + 0x968;

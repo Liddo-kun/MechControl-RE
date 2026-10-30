@@ -23,8 +23,7 @@ class PowerTab : UserControl
     private readonly UiHelpers.SliderRow? _rowNvvdd;
     private readonly UiHelpers.SliderRow? _rowMsvdd;
     private readonly UiHelpers.SliderRow? _rowBoardInput;
-    private readonly LiveCurrent? _liveNvvdd, _liveMsvdd, _liveBoardInput;
-    private readonly Label? _lblClockCaps;
+    private readonly GpuLimitsView? _limitsView;
     private readonly System.Windows.Forms.Timer? _liveTimer;
     private readonly Label? _lblDriverLimits;
     private bool _refreshing;
@@ -116,18 +115,10 @@ class PowerTab : UserControl
             bool currents = _gpuControl != null && (_gpuControl.CanUnlockTgp || _gpuControl.PowerOverride != null);
 
             var gpuLayout = UiHelpers.BuildSliderTable();
-            // Current limits have two live columns to their right; other rows' values span them.
-            if (currents)
-            {
-                gpuLayout.ColumnCount = 5;
-                gpuLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-                gpuLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-            }
             int span = gpuLayout.ColumnCount;
-            void AddRow(UiHelpers.SliderRow row) { UiHelpers.AddSliderRow(gpuLayout, row); gpuLayout.SetColumnSpan(row.Value, span - 2); }
 
             var tgp = UiHelpers.BuildSliderRow("GPU TGP (before Dynamic Boost)", _gpuControl?.MinTgpWatts ?? tgpLimit.Min, _gpuControl?.MaxTgpWatts ?? tgpLimit.Max, "W");
-            AddRow(tgp);
+            UiHelpers.AddSliderRow(gpuLayout, tgp);
             _sliderTgp = tgp.Slider; _lblTgp = tgp.Value;
 
             if (_gpuControl?.CanUnlockTgp == true)
@@ -167,7 +158,7 @@ class PowerTab : UserControl
             gpuLayout.SetColumnSpan(_chkDynamicBoost, span);
 
             var dbRow = UiHelpers.BuildSliderRow("Dynamic Boost Max", dbLimit.Min, dbLimit.Max, "W");
-            AddRow(dbRow);
+            UiHelpers.AddSliderRow(gpuLayout, dbRow);
             _sliderDb = dbRow.Slider; _lblDb = dbRow.Value;
             _sliderDb.Enabled = false;
 
@@ -179,29 +170,27 @@ class PowerTab : UserControl
 
             if (currents)
             {
-                AddLiveHeadings(gpuLayout);
-                (_rowNvvdd, _liveNvvdd) = AddCurrentSlider(gpuLayout, "NVVDD / Core current limit", 1000);
-                (_rowMsvdd, _liveMsvdd) = AddCurrentSlider(gpuLayout, "MSVDD / Fabric current limit", 1000);
+                _rowNvvdd = AddCurrentSlider(gpuLayout, "NVVDD / Core current limit", 1000);
+                _rowMsvdd = AddCurrentSlider(gpuLayout, "MSVDD / Fabric current limit", 1000);
                 // Board input is ~10 A, so a whole amp would be a ~10% (~20 W) step: exact
                 // milliamps, with arrow keys moving 0.1 A.
-                (_rowBoardInput, _liveBoardInput) = AddCurrentSlider(gpuLayout, "Board input current limit", 1, smallChange: 100);
-                _lblClockCaps = new Label { AutoSize = true, Margin = new Padding(0, UiMetrics.RowGap, 0, 0) };
-                _tooltip.SetToolTip(_lblClockCaps, "GPU core clock cap each driver controller allows; the lower one applies. " +
-                    "Each sets its cap where its prediction reaches its limit.");
-                gpuLayout.Controls.Add(_lblClockCaps);
-                gpuLayout.SetColumnSpan(_lblClockCaps, span);
+                _rowBoardInput = AddCurrentSlider(gpuLayout, "Board input current limit", 1, smallChange: 100);
+                _limitsView = new GpuLimitsView(_tooltip);
                 _lblDriverLimits = new Label { AutoSize = true, ForeColor = UiColors.Hint, MaximumSize = new Size(600, 0) };
                 gpuLayout.Controls.Add(_lblDriverLimits);
                 gpuLayout.SetColumnSpan(_lblDriverLimits, span);
                 RefreshDriverControls();
-                // Read only while this tab is on screen; minimizing hides the window to the tray.
+                // Read only while this tab is on screen: Visible is false on another tab and while
+                // the window is hidden to the tray (minimizing hides it). The first read is posted,
+                // so the brief show at startup, which hides to the tray at once, reads nothing.
                 var timer = _liveTimer = new System.Windows.Forms.Timer { Interval = 500 };
-                timer.Tick += (_, _) => RefreshLive();
+                void ReadIfShown() { if (Visible) RefreshLive(); else timer.Stop(); }
+                timer.Tick += (_, _) => ReadIfShown();
                 VisibleChanged += (_, _) =>
                 {
                     if (!Visible) { timer.Stop(); return; }
-                    RefreshLive();
                     timer.Start();
+                    if (IsHandleCreated) BeginInvoke((Action)ReadIfShown);
                 };
             }
 
@@ -229,6 +218,14 @@ class PowerTab : UserControl
         buttonRow.Controls.Add(btnApply);
         buttonRow.Controls.Add(btnRead);
         stack.Controls.Add(buttonRow);
+
+        // === GPU Limits (live): what each GPU limit above is doing ===
+        if (_limitsView != null)
+        {
+            var grpLimits = UiHelpers.BuildSection("GPU Limits (live)");
+            grpLimits.Controls.Add(_limitsView);
+            stack.Controls.Add(grpLimits);
+        }
 
         Controls.Add(stack);
 
@@ -345,7 +342,7 @@ class PowerTab : UserControl
     // Positions are milliamps / stepMilliamps, rounded down, so the detected request never sits
     // above the slider maximum. An unmoved slider keeps that exact request, which some BIOSes
     // define in fractional amps, and writes nothing.
-    private (UiHelpers.SliderRow, LiveCurrent) AddCurrentSlider(TableLayoutPanel layout, string name, int stepMilliamps, int smallChange = 1)
+    private UiHelpers.SliderRow AddCurrentSlider(TableLayoutPanel layout, string name, int stepMilliamps, int smallChange = 1)
     {
         UiHelpers.SliderRow? row = null;
         row = UiHelpers.BuildSliderRow(name, 1, 2, "A", formatter: v => FormatCurrent(row?.Slider, v));
@@ -353,35 +350,7 @@ class PowerTab : UserControl
         row.Slider.SmallChange = smallChange;
         UiHelpers.AddSliderRow(layout, row);
         _tooltip.SetToolTip(row.Slider, $"Applies live within the active ceiling. The unlock allows up to {UniversalDefaults.GpuCurrentUnlockPercent}% of the stock current; raising an older ceiling restarts the GPU.");
-        var live = new LiveCurrent(LiveLabel(), LiveLabel(), stepMilliamps < 1000 ? "0.00" : "0.0");
-        layout.Controls.Add(live.Measured);
-        layout.Controls.Add(live.Predicted);
-        return (row, live);
-    }
-
-    // Live driver readings right of a current limit: measured now, and predicted at the current
-    // controller's clock cap. Rails to 0.1 A, board input (~10 A) to 0.01 A.
-    private sealed record LiveCurrent(Label Measured, Label Predicted, string Format);
-
-    private static Label LiveLabel() => new() { AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(16, 8, 0, 0) };
-
-    private void AddLiveHeadings(TableLayoutPanel layout)
-    {
-        var spacer = new Label { AutoSize = true };
-        layout.Controls.Add(spacer);
-        layout.SetColumnSpan(spacer, 2);
-        foreach (var (text, tip, left) in new[]
-        {
-            ("Limit", "The current limit set by the slider.", 8),
-            ("Measured", "The driver's latest reading (it updates every 20 ms); refreshed twice a second while this tab is shown.", 16),
-            ("At clock cap", "The driver's prediction of this rail's current at the current controller's clock cap. " +
-                "The controller lowers its cap until no rail's prediction exceeds its limit; the rail near its limit is the one holding it.", 16),
-        })
-        {
-            var heading = new Label { Text = text, AutoSize = true, ForeColor = UiColors.Hint, Margin = new Padding(left, UiMetrics.RowGap, 0, 0) };
-            _tooltip.SetToolTip(heading, tip);
-            layout.Controls.Add(heading);
-        }
+        return row;
     }
 
     // The driver publishes every 20 ms, so a read twice a second is at most 20 ms old: no need
@@ -389,19 +358,7 @@ class PowerTab : UserControl
     private void RefreshLive()
     {
         var live = _gpuControl!.ReadDisplayTelemetry(out string reason);
-        static string Amps(int? milliamps, string format) => milliamps is int ma ? (ma / 1000.0).ToString(format) + " A" : "--";
-        static string Mhz(int? mhz) => mhz is int value ? $"{value} MHz" : "--";
-        void Show(LiveCurrent row, int? measured, int? predicted)
-        {
-            row.Measured.Text = Amps(measured, row.Format);
-            row.Predicted.Text = Amps(predicted, row.Format);
-        }
-        Show(_liveNvvdd!, live?.NvvddMilliamps, live?.NvvddPredictedMilliamps);
-        Show(_liveMsvdd!, live?.MsvddMilliamps, live?.MsvddPredictedMilliamps);
-        // A hardware threshold: the current controller makes no prediction for it.
-        _liveBoardInput!.Measured.Text = Amps(live?.BoardInputMilliamps, _liveBoardInput.Format);
-        _lblClockCaps!.Text = live == null ? $"Clock caps: -- ({reason})"
-            : $"Clock caps: current controller {Mhz(live.CurrentCapMhz)} · power controller {Mhz(live.PowerCapMhz)} · max {Mhz(live.MaxClockMhz)}";
+        _limitsView!.ShowTelemetry(live, reason);
     }
 
     // A current slider's Tag: its step and the detected limit (null when unavailable).

@@ -4,7 +4,7 @@ using System.Text;
 
 namespace MechControl.Hardware.Nvidia;
 
-/// <summary>Read-only NVML identity and independently enforced power-limit telemetry. Never NVML SET.</summary>
+/// <summary>Read-only NVML identity, independently enforced power limit and graphics clock. Never NVML SET.</summary>
 internal sealed class NvidiaRuntimeNvml : IDisposable
 {
     private IntPtr library, device;
@@ -17,6 +17,7 @@ internal sealed class NvidiaRuntimeNvml : IDisposable
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate int Handle(uint index, out IntPtr handle);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate int Pci(IntPtr handle, IntPtr info);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate int Limit(IntPtr handle, out uint value);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate int Clock(IntPtr handle, uint type, out uint value);
 
     public NvidiaRuntimeNvml(uint pciId, uint subsystem, uint bus)
     {
@@ -49,6 +50,12 @@ internal sealed class NvidiaRuntimeNvml : IDisposable
     {
         if (!initialized) throw new ObjectDisposedException(nameof(NvidiaRuntimeNvml));
         Check(Get<Limit>("nvmlDeviceGetEnforcedPowerLimit")(device, out uint value));
+        return value;
+    }
+    public uint ReadGraphicsClockMhz()
+    {
+        if (!initialized) throw new ObjectDisposedException(nameof(NvidiaRuntimeNvml));
+        Check(Get<Clock>("nvmlDeviceGetClockInfo")(device, 0, out uint value)); // NVML_CLOCK_GRAPHICS
         return value;
     }
     private T Get<T>(string name) where T : Delegate => Marshal.GetDelegateForFunctionPointer<T>(NativeLibrary.GetExport(library, name));

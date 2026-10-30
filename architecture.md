@@ -24,8 +24,9 @@ MechControl/
     BleDevice.cs                  WinRT BLE GATT: scan, connect (retry + cancellation), write, notify, disconnect
 
   Hardware/Nvidia/
-    NvidiaApi.cs                   Versioned NVAPI BIOS/power/current requests; NVML enforced-limit readback
-    NvidiaRuntimeNvml.cs           Selected-adapter PCI identity and enforced power telemetry
+    NvidiaApi.cs                   Versioned NVAPI BIOS/power/current requests; live limit telemetry (policies, controller caps)
+    NvidiaInlinePower.cs           Inline power controller (IPC) activity from ADC_IPC thermal-monitor counters
+    NvidiaRuntimeNvml.cs           Selected-adapter PCI identity, enforced power limit, graphics clock
     NvidiaBudget.cs                Laptop/shared-budget reads and writes (originals kept in memory)
     NvidiaBudgetTransport.cs       Validated native F7 transport discovery (no copied driver RVAs)
     NvidiaBios.cs                  Validated BIT power-policy parser and targeted software override records
@@ -81,6 +82,7 @@ MechControl/
   UI/
     MainForm.cs                   TabControl + monitor panel + profile bar + system tray + EC enrichment orchestration
     PowerTab.cs                   CPU + GPU TGP/DB/current sliders and opt-in NVIDIA BIOS override
+    GpuLimitsView.cs              Power tab "GPU Limits (live)": each limit's reading, share, controller cap, colors
     FailsafeTab.cs                Thermal Failsafe configuration, peak/history/status, test and one-step reset
     FanTab.cs                     Boost/curve checkboxes + single Apply button + FanCurvePanel + fan switch speed + linked mode
     FanCurvePanel.cs              GDI+ chart, draggable points (point 0 locked to 0% duty), mouse interaction, ReadOnly mode

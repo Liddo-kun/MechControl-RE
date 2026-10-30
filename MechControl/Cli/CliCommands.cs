@@ -194,7 +194,8 @@ sealed class CliCommands
             Current(limits?.Nvvdd, live?.NvvddMilliamps, live?.NvvddPredictedMilliamps),
             Current(limits?.Msvdd, live?.MsvddMilliamps, live?.MsvddPredictedMilliamps),
             Current(limits?.BoardInput, live?.BoardInputMilliamps, null),
-            live?.CurrentCapMhz, live?.PowerCapMhz, live?.MaxClockMhz);
+            live?.CurrentCapMhz, live?.PowerCapMhz, live?.MaxClockMhz, live?.ClockMhz, live?.GpuPowerMilliwatts, live?.CorePowerMilliwatts,
+            live?.InlinePowerActivity);
     }
 
     private CliFans ReadFans()
@@ -271,6 +272,9 @@ sealed class CliCommands
         Current("MSVDD", g.Msvdd, true);
         Current("Board input", g.BoardInput, false);
         lines.Add($"      Clock caps: current controller {Mhz(g.CurrentCapMhz)}; power controller {Mhz(g.PowerCapMhz)}; max {Mhz(g.MaxClockMhz)}");
+        lines.Add($"      Clock {Mhz(g.ClockMhz)}; power {Watts(g.GpuPowerMw)} (core rails {Watts(g.CorePowerMw)}, memory and other {Watts(g.GpuPowerMw - g.CorePowerMw)}); " +
+            "board input limiter (IPC) active " +
+            (g.BoardInputLimiterActivity is double a ? (a * 100).ToString("0.0", CultureInfo.InvariantCulture) + "%" : "--"));
         return string.Join(Environment.NewLine, lines);
     }
 
@@ -286,4 +290,5 @@ sealed class CliCommands
     private static string Amps(int milliamps) => (milliamps / 1000.0).ToString("0.###", CultureInfo.InvariantCulture);
     private static string Reading(int? milliamps) => milliamps is int ma ? Amps(ma) + " A" : "--";
     private static string Mhz(int? mhz) => mhz is int value ? $"{value} MHz" : "--";
+    private static string Watts(int? milliwatts) => milliwatts is int mw ? (mw / 1000.0).ToString("0.0", CultureInfo.InvariantCulture) + " W" : "--";
 }
