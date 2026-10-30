@@ -24,7 +24,8 @@ static partial class Program
             Require(!Field<CheckBox>(stockTab, "_chkTgpUnlock").Checked && !Field<UiHelpers.SliderRow>(stockTab, "_rowNvvdd").Slider.Enabled,
                 "Unopened NVIDIA controls were not offered as locked/disabled");
             Live(stockTab);
-            Require(Field<Label>(stockTab, "_lblClockCaps").Text == "Clock caps: -- (NVIDIA not connected)", "Live readings did not report an unopened driver");
+            Require(Field<Label>(Field<GpuLimitsView>(stockTab, "_limitsView"), "_status").Text == "-- (NVIDIA not connected)",
+                "Live readings did not report an unopened driver");
             Require(closed.OpenPowerOverride != null, "Building the Power tab initialized NVIDIA");
         }
 
@@ -48,29 +49,47 @@ static partial class Program
         var status = Field<Label>(tab, "_lblDriverLimits");
         Require(status.Text.Contains("stock currents 180 / 55 / 11.053 A"), "Status did not list the stock board input current");
         Require(unlock.Checked && backend.Configurations == 0, "Refreshing the checkbox caused hardware writes");
-        // Live readings: measured and predicted-at-cap columns right of each current limit; other rows span them.
-        Label LiveLabel(string row, string column) =>
-            (Label)typeof(PowerTab).GetNestedType("LiveCurrent", Private)!.GetProperty(column)!.GetValue(Field<object>(tab, row))!;
-        string LiveText(string row, string column) => LiveLabel(row, column).Text;
-        var caps = Field<Label>(tab, "_lblClockCaps");
+        // Live limits: their own section below the sliders, one row per limit against the clock.
+        var view = Field<GpuLimitsView>(tab, "_limitsView");
+        Label? CellLabel(string row, string column) =>
+            (Label?)typeof(GpuLimitsView).GetNestedType("Row", Private)!.GetProperty(column)!.GetValue(Field<object>(view, row));
+        string Cell(string row, string column) => CellLabel(row, column)!.Text;
+        var liveStatus = Field<Label>(view, "_status");
         var layout = (TableLayoutPanel)core.Slider.Parent!;
-        Require(layout.ColumnCount == 5 && layout.GetColumnSpan(Field<Label>(tab, "_lblTgp")) == 3 && layout.GetPositionFromControl(LiveLabel("_liveNvvdd", "Measured")).Column == 3 &&
-            layout.GetPositionFromControl(core.Value).Column == 2, "Live columns are not right of the current limits");
+        Require(layout.ColumnCount == 3 && view.Parent != layout.Parent, "Live limits are not a separate section below the sliders");
         Require(!Field<System.Windows.Forms.Timer>(tab, "_liveTimer").Enabled, "Live readings polled while the tab was not shown");
         Live(tab);
-        Require(LiveText("_liveNvvdd", "Measured") == "126.9 A" && LiveText("_liveNvvdd", "Predicted") == "152.5 A" &&
-            LiveText("_liveMsvdd", "Measured") == "47.8 A" && LiveText("_liveMsvdd", "Predicted") == "59.3 A" &&
-            LiveText("_liveBoardInput", "Measured") == "8.47 A" && LiveText("_liveBoardInput", "Predicted") == "",
-            "Live currents did not show measured and predicted values");
-        Require(caps.Text == "Clock caps: current controller 2865 MHz · power controller 2940 MHz · max 3090 MHz", "Clock caps were not shown");
-        backend.Telemetry = backend.Telemetry with { MsvddPredictedMilliamps = null, CurrentCapMhz = null };
+        // Numbers only: each reading as a share of its setting, and each controller cap above the clock.
+        Require(Cell("_clock", "Setting") == "max 3090 MHz" && Cell("_clock", "Now") == "2840 MHz" && Cell("_clock", "Cap") == "" && !liveStatus.Visible,
+            "The clock row did not show the clock");
+        Require(Cell("_power", "Setting") == "175.0 W" && Cell("_power", "Now") == "173.3 W" && Cell("_power", "Share") == "99%" &&
+            Cell("_power", "Cap") == "power 2940 MHz (+100)" && Cell("_core", "Now") == "133.1 W" && Cell("_rest", "Now") == "40.2 W",
+            "The power rows did not show power, its share and its controller cap");
+        // One current controller cap, shown once across both rail rows.
+        Require(Cell("_msvdd", "Setting") == "57 A" && Cell("_msvdd", "Now") == "47.8 A" && Cell("_msvdd", "Share") == "84%" &&
+            Cell("_nvvdd", "Now") == "126.9 A" && Cell("_nvvdd", "Share") == "68%" && Cell("_nvvdd", "Cap") == "current 2865 MHz (+25)" &&
+            CellLabel("_msvdd", "Cap") == null,
+            "The rail rows did not show their shares under one current controller cap");
+        Require(Cell("_boardInput", "Setting") == "11.053 A" && Cell("_boardInput", "Now") == "8.47 A" && Cell("_boardInput", "Share") == "77%" &&
+            Cell("_boardInput", "Cap") == "IPC active 6%",
+            "Board input or its IPC activity was wrong");
+        Color Fore(string row, string column) => CellLabel(row, column)!.ForeColor;
+        Require(Fore("_boardInput", "Cap") == UiColors.StatusOk && Fore("_msvdd", "Now") == UiColors.StatusOk,
+            "Normal IPC activity or MSVDD at 84% of its limit was not green");
+        backend.Telemetry = backend.Telemetry with { MsvddMilliamps = 56500, InlinePowerActivity = 0.66 };
         Live(tab);
-        Require(LiveText("_liveMsvdd", "Predicted") == "--" && LiveText("_liveMsvdd", "Measured") == "47.8 A" &&
-            caps.Text.Contains("current controller -- · power controller 2940 MHz"), "Unrecognized controller values were not shown as unavailable");
+        Require(Fore("_msvdd", "Now") == UiColors.StatusError && Fore("_boardInput", "Cap") == UiColors.StatusWarn,
+            "MSVDD at 99% of its limit was not red, or IPC activity midway not amber");
+        backend.Telemetry = backend.Telemetry with { MsvddMilliamps = 47772, InlinePowerActivity = 0.94 };
+        Live(tab);
+        Require(Fore("_boardInput", "Cap") == UiColors.StatusError, "Limiting IPC activity was not red");
+        backend.Telemetry = backend.Telemetry with { CurrentCapMhz = null };
+        Live(tab);
+        Require(Cell("_nvvdd", "Cap") == "--", "Unrecognized controller values were not shown as unavailable");
         backend.Awake = false;
         int reads = backend.TelemetryReads;
         Live(tab);
-        Require(backend.TelemetryReads == reads && LiveText("_liveNvvdd", "Measured") == "--" && caps.Text == "Clock caps: -- (GPU asleep, not read)",
+        Require(backend.TelemetryReads == reads && Cell("_nvvdd", "Now") == "--" && liveStatus.Text == "-- (GPU asleep, not read)" && liveStatus.Visible,
             "A sleeping GPU was read");
         backend.Awake = true;
         Require(Field<TrackBar>(tab, "_sliderTgp").Maximum == 200, "TGP range did not follow alternate model/BIOS limits");
@@ -163,7 +182,12 @@ static partial class Program
         public GpuPowerBudget ReadPowerBudget() => new(175, 350);
         public bool Awake = true;
         public int TelemetryReads;
-        public GpuTelemetry Telemetry = new(126883, 47772, 8470, 152544, 59298, 2865, 2940, 3090);
+        public GpuTelemetry Telemetry = new(126883, 47772, 8470, 152544, 59298, 2865, 2940, 3090)
+        {
+            ClockMhz = 2840, NvvddLimitMilliamps = 187500, MsvddLimitMilliamps = 57000, BoardInputLimitMilliamps = 11053,
+            GpuPowerMilliwatts = 173336, CorePowerMilliwatts = 133102, EnforcedMilliwatts = 175000,
+            InlinePowerActivity = 0.06,
+        };
         public GpuTelemetry ReadTelemetry() { TelemetryReads++; return Telemetry; }
         public bool IsGpuAwake() => Awake;
     }

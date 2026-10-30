@@ -17,7 +17,19 @@ record GpuPowerBudget(int LaptopWatts, int PlatformWatts);
 // applies); predictions are the current controller's estimate of each rail at its cap, which it
 // keeps within the rail's limit. Null fields are unavailable on this GPU/driver.
 record GpuTelemetry(int NvvddMilliamps, int MsvddMilliamps, int? BoardInputMilliamps, int? NvvddPredictedMilliamps,
-    int? MsvddPredictedMilliamps, int? CurrentCapMhz, int? PowerCapMhz, int? MaxClockMhz);
+    int? MsvddPredictedMilliamps, int? CurrentCapMhz, int? PowerCapMhz, int? MaxClockMhz)
+{
+    public int? ClockMhz { get; init; }
+    public int? NvvddLimitMilliamps { get; init; }
+    public int? MsvddLimitMilliamps { get; init; }
+    public int? BoardInputLimitMilliamps { get; init; }
+    // GPU power = core rails (the power controller's channels) + memory and the rest of the board.
+    public int? GpuPowerMilliwatts { get; init; }
+    public int? CorePowerMilliwatts { get; init; }
+    public int? EnforcedMilliwatts { get; init; }
+    // Share of time (0-1) the GPU's inline power controller acted since the previous read.
+    public double? InlinePowerActivity { get; init; }
+}
 
 interface IGpuPowerOverride
 {

@@ -31,6 +31,7 @@ static partial class Program
             ("board current SET rejects missing readback and changed unselected rails", CurrentPolicyReadback),
             ("live readings discover controllers at alternate policy indices", Telemetry),
             ("unrecognized controller layouts, identities and ambiguity leave only those readings out", TelemetryFailsClosed),
+            ("inline power controller activity comes from ADC_IPC counter deltas, never across a reset", InlinePowerActivity),
         ];
         int failed = 0;
         foreach (var (name, test) in tests)

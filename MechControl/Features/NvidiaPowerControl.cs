@@ -199,10 +199,17 @@ sealed class NvidiaPowerControl : IGpuPowerOverride, IDisposable
         try
         {
             var t = api.ReadTelemetry();
-            static int? Milliamps(uint? value) => value is uint v ? checked((int)v) : null;
+            static int? Int(uint? value) => value is uint v ? checked((int)v) : null;
             static int? Mhz(uint? khz) => khz is uint v ? (int)(v / 1000) : null;
-            return new(checked((int)t.NvvddMa), checked((int)t.MsvddMa), boardInputVerified ? Milliamps(t.BoardInputMa) : null,
-                Milliamps(t.NvvddPredictedMa), Milliamps(t.MsvddPredictedMa), Mhz(t.CurrentCapKhz), Mhz(t.PowerCapKhz), Mhz(t.CeilingKhz));
+            return new(checked((int)t.NvvddMa), checked((int)t.MsvddMa), boardInputVerified ? Int(t.BoardInputMa) : null,
+                Int(t.NvvddPredictedMa), Int(t.MsvddPredictedMa), Mhz(t.CurrentCapKhz), Mhz(t.PowerCapKhz), Mhz(t.CeilingKhz))
+            {
+                ClockMhz = Int(t.ClockMhz), NvvddLimitMilliamps = Int(t.NvvddLimitMa), MsvddLimitMilliamps = Int(t.MsvddLimitMa),
+                BoardInputLimitMilliamps = boardInputVerified ? Int(t.BoardInputLimitMa) : null,
+                GpuPowerMilliwatts = Int(t.GpuPowerMw), CorePowerMilliwatts = Int(t.CorePowerMw),
+                EnforcedMilliwatts = Int(t.EnforcedMw),
+                InlinePowerActivity = t.InlinePowerActivity,
+            };
         }
         finally { Monitor.Exit(sync); }
     }

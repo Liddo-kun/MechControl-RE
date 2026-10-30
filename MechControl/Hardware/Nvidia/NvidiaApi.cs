@@ -16,7 +16,21 @@ internal sealed record NvidiaCurrentLimit(uint MinimumMa, uint DefaultMa, uint M
 internal sealed record NvidiaCurrentLimits(NvidiaCurrentLimit Nvvdd, NvidiaCurrentLimit Msvdd, NvidiaCurrentLimit? BoardInput);
 // Null fields were not recognized on this read.
 internal sealed record NvidiaTelemetry(uint NvvddMa, uint MsvddMa, uint? BoardInputMa, uint? NvvddPredictedMa,
-    uint? MsvddPredictedMa, uint? CurrentCapKhz, uint? PowerCapKhz, uint? CeilingKhz);
+    uint? MsvddPredictedMa, uint? CurrentCapKhz, uint? PowerCapKhz, uint? CeilingKhz)
+{
+    // Active current limits (null outside the policy's range).
+    public uint? NvvddLimitMa { get; init; }
+    public uint? MsvddLimitMa { get; init; }
+    public uint? BoardInputLimitMa { get; init; }
+    // Board power policy: measured GPU power; the power controller's rails.
+    public uint? GpuPowerMw { get; init; }
+    public uint? CorePowerMw { get; init; }
+    // NVML.
+    public uint? ClockMhz { get; init; }
+    public uint? EnforcedMw { get; init; }
+    // Share of time since the previous read the inline power controller acted (0-1).
+    public double? InlinePowerActivity { get; init; }
+}
 
 /// <summary>
 /// User-mode NVIDIA backend. No registry, EC, driver patching, restart or external tuning-tool dependency.
@@ -201,8 +215,23 @@ internal sealed partial class NvidiaApi : IDisposable
         }
         int? power = boardPower is int source ? Unique(mask, i => Controller(i) && LimitedBy(i, source)) : null;
         uint? Value(int? index, int offset) => index is int i ? At(i, offset) : null;
+        uint? Limit(Rail? rail) => rail is { } r && U32(status, Entry(r.Index)) == r.Type && U32(status, Entry(r.Index) + 4) is uint v &&
+            v >= r.Min && v <= r.Max ? v : null;
+        // The board power policy's measured value (0 when unset).
+        uint? gpuPower = boardPower is int b && U32(status, Entry(b) + 8) is uint w and > 0 ? w : null;
+        uint? Nvml(Func<NvidiaRuntimeNvml, uint> read)
+        {
+            try { return nvml is { } n ? read(n) : null; }
+            catch (InvalidOperationException) { return null; }
+        }
         return new(nv, ms, input, Value(current, 0x1690), Value(current, 0x1e70), Value(current, 4), Value(power, 4),
-            Value(current, 0x24) ?? Value(power, 0x24));
+            Value(current, 0x24) ?? Value(power, 0x24))
+        {
+            NvvddLimitMa = Limit(rails.Nv), MsvddLimitMa = Limit(rails.Ms), BoardInputLimitMa = Limit(rails.Input),
+            GpuPowerMw = gpuPower, CorePowerMw = Value(power, 0x60),
+            ClockMhz = Nvml(n => n.ReadGraphicsClockMhz()), EnforcedMw = Nvml(n => n.ReadEnforcedPowerLimit()),
+            InlinePowerActivity = ReadInlinePowerActivity(),
+        };
     }
 
     // The only policy in the mask that matches, or null when none or several do.
@@ -371,6 +400,7 @@ internal sealed partial class NvidiaApi : IDisposable
     private void Close()
     {
         CloseBudget();
+        CloseInlinePower();
         nvml?.Dispose(); nvml = null;
         if (initialized && query != null) { initialized = false; var p = query(0xd22bdd7e); if (p != IntPtr.Zero) Marshal.GetDelegateForFunctionPointer<NoArgs>(p)(); }
         gpu = IntPtr.Zero; query = null;

@@ -18,7 +18,10 @@ sealed record CliGpu(
     // Why the NVIDIA values below are null; null when they were read.
     string? Nvidia, int? CeilingWatts, int? EnforcedWatts, int? RequestedWatts,
     CliCurrent? Nvvdd, CliCurrent? Msvdd, CliCurrent? BoardInput,
-    int? CurrentCapMhz, int? PowerCapMhz, int? MaxClockMhz);
+    int? CurrentCapMhz, int? PowerCapMhz, int? MaxClockMhz,
+    // As the Power tab's live limits: GPU power = core rails + memory and the rest of the board;
+    // board input limiter activity is the share of time (0-1) the inline power controller acted.
+    int? ClockMhz, int? GpuPowerMw, int? CorePowerMw, double? BoardInputLimiterActivity);
 
 // MinMa/MaxMa: what a command accepts without a GPU restart. AtClockCapMa is the driver's
 // prediction at the current controller's clock cap (none for board input).

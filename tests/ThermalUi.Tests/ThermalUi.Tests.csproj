@@ -29,6 +29,7 @@
     <Compile Include="../../MechControl/Features/CpuPowerControl.cs" />
     <Compile Include="../../MechControl/Features/GpuPowerControl.cs" />
     <Compile Include="../../MechControl/Features/IGpuPowerOverride.cs" />
+    <Compile Include="../../MechControl/UI/GpuLimitsView.cs" />
     <Compile Include="../../MechControl/Features/FanSwitchSpeedControl.cs" />
     <Compile Include="../../MechControl/Features/FanSnapshot.cs" />
     <Compile Include="../../MechControl/Profile/UserProfile.cs" />
