@@ -14,6 +14,9 @@ internal sealed record NvidiaPowerLimits(uint MinimumMw, uint DefaultMw, uint Ma
     uint EnforcedMw, uint? RequestedMw);
 internal sealed record NvidiaCurrentLimit(uint MinimumMa, uint DefaultMa, uint MaximumMa, uint CurrentMa);
 internal sealed record NvidiaCurrentLimits(NvidiaCurrentLimit Nvvdd, NvidiaCurrentLimit Msvdd, NvidiaCurrentLimit? BoardInput);
+// Null fields were not recognized on this read.
+internal sealed record NvidiaTelemetry(uint NvvddMa, uint MsvddMa, uint? BoardInputMa, uint? NvvddPredictedMa,
+    uint? MsvddPredictedMa, uint? CurrentCapKhz, uint? PowerCapKhz, uint? CeilingKhz);
 
 /// <summary>
 /// User-mode NVIDIA backend. No registry, EC, driver patching, restart or external tuning-tool dependency.
@@ -26,6 +29,7 @@ internal sealed partial class NvidiaApi : IDisposable
     private QueryInterface? query;
     private NvidiaRuntimeNvml? nvml;
     private bool initialized;
+    private byte[]? statusBuffer; // Reused: 704 KB, read twice a second while the Power tab is shown.
     public NvidiaIdentity Identity { get; private set; } = null!;
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate IntPtr QueryInterface(uint id);
@@ -156,6 +160,64 @@ internal sealed partial class NvidiaApi : IDisposable
         return result;
     }
 
+    /// <summary>
+    /// Live values the driver publishes every 20 ms: each current policy's measured value, the
+    /// clock caps of the current and power controllers, and the current controller's prediction
+    /// of each rail at its cap (it lowers the cap until neither exceeds its limit).
+    /// </summary>
+    public NvidiaTelemetry ReadTelemetry()
+    {
+        var rails = ReadRails();
+        uint mask = U32(rails.Info, 4);
+        // NV_GPU_POWER_POLICY_STATUS_PARAMS_V10: entries {type, limitCurr, valueCurr} at 0x11B8, stride 0x3768.
+        const int size = 0xb00b8;
+        var status = statusBuffer ??= new byte[size + GuardBytes];
+        status.AsSpan(0, size).Clear();
+        Put(status, 0, 0xb00b8); Put(status, 4, mask);
+        CallGuarded(0x31b7a4cd, status, size, "PowerPolicyGetStatus(V10)");
+        RequireVersion(status, 0xb00b8);
+        static int Entry(int index) => 0x11b8 + index * 0x3768;
+        uint Measured(Rail rail) => U32(status, Entry(rail.Index)) == rail.Type ? U32(status, Entry(rail.Index) + 8) : throw Unsupported("current-policy status identity");
+        uint nv = Measured(rails.Nv), ms = Measured(rails.Ms);
+        uint? input = rails.Input is { } board && U32(status, Entry(board.Index)) == board.Type ? U32(status, Entry(board.Index) + 8) : null;
+
+        // Controllers are status type 0x15. Their union (+0x968) was mapped on driver 617.14 (the
+        // public header's layout differs), so it is checked on every read: clock cap (kHz) +0x04 within
+        // the ceiling +0x24; observed total +0x60 = rail 0 +0x134 + rail 1 +0xB84; predicted at the
+        // cap: total +0x15D0 = rail 0 +0x1690 + rail 1 +0x1E70.
+        uint At(int index, int offset) => U32(status, Entry(index) + 0x968 + offset);
+        bool Controller(int i) => U32(status, Entry(i)) == 0x15 && At(i, 4) != 0 && At(i, 4) <= At(i, 0x24) &&
+            At(i, 0x60) == (ulong)At(i, 0x134) + At(i, 0xb84) && At(i, 0x15d0) == (ulong)At(i, 0x1690) + At(i, 0x1e70);
+        // The current controller observes exactly the NVVDD and MSVDD readings.
+        int? current = Unique(mask, i => Controller(i) && At(i, 0x134) == nv && At(i, 0xb84) == ms);
+        // The power controller's limit comes from the board power policy (TOTAL_GPU, mW): its PMU
+        // limit arbitration (+0xE0: input count +1, inputs {u8 policy, u32 limit} from +0x48).
+        uint Info(int index, int offset) => U32(rails.Info, 0x3c + index * 0x58 + offset);
+        int? boardPower = Unique(mask, i => Info(i, 0) == 0 && Info(i, 8) == 0 && Info(i, 20) != 0 && U32(status, Entry(i)) == 0);
+        bool LimitedBy(int i, int source)
+        {
+            int arbitration = Entry(i) + 0xe0, count = status[arbitration + 1];
+            return count <= 8 && Enumerable.Range(0, count).Any(k => status[arbitration + 0x48 + k * 8] == source);
+        }
+        int? power = boardPower is int source ? Unique(mask, i => Controller(i) && LimitedBy(i, source)) : null;
+        uint? Value(int? index, int offset) => index is int i ? At(i, offset) : null;
+        return new(nv, ms, input, Value(current, 0x1690), Value(current, 0x1e70), Value(current, 4), Value(power, 4),
+            Value(current, 0x24) ?? Value(power, 0x24));
+    }
+
+    // The only policy in the mask that matches, or null when none or several do.
+    private static int? Unique(uint mask, Func<int, bool> match)
+    {
+        int? found = null;
+        for (int i = 0; i < 32; i++)
+        {
+            if ((mask & (1u << i)) == 0 || !match(i)) continue;
+            if (found != null) return null;
+            found = i;
+        }
+        return found;
+    }
+
     private sealed record Board(int Index, uint Min, uint Default, uint Max);
     private Board ReadBoard()
     {
@@ -197,7 +259,7 @@ internal sealed partial class NvidiaApi : IDisposable
     }
 
     private sealed record Rail(int Index, uint Type, uint Min, uint Default, uint Max);
-    private (Rail Nv, Rail Ms, Rail? Input, uint Mask) ReadRails()
+    private (Rail Nv, Rail Ms, Rail? Input, uint Mask, byte[] Info) ReadRails()
     {
         // Layouts independently corroborated by mVolt FUN_1401fc9f0/1401fc540/
         // 1401fe260 and NV_GPU_POWER_POLICY_INFO_PARAMS_V4 / CONTROL_PARAMS_V2.
@@ -239,7 +301,7 @@ internal sealed partial class NvidiaApi : IDisposable
         // Board input is optional: an ambiguous or out-of-range policy is never written
         // and disables only that limit, not the rails.
         if (inputs > 1 || (input != null && !ValidRange(input.Min, input.Default, input.Max))) input = null;
-        return (nv, ms, input, (1u << nv.Index) | (1u << ms.Index) | (input == null ? 0 : 1u << input.Index));
+        return (nv, ms, input, (1u << nv.Index) | (1u << ms.Index) | (input == null ? 0 : 1u << input.Index), info);
     }
 
     private byte[] ReadCurrentControl(uint mask)
@@ -268,18 +330,26 @@ internal sealed partial class NvidiaApi : IDisposable
         return Marshal.GetDelegateForFunctionPointer<T>(address);
     }
 
+    private const int GuardBytes = 4096;
+
     private void Call(uint id, byte[] data, string name)
     {
-        // Guard tail catches an ABI mismatch instead of parsing corrupted data.
-        var guarded = new byte[data.Length + 4096];
-        data.CopyTo(guarded, 0); guarded.AsSpan(data.Length).Fill(0xcd);
+        var guarded = new byte[data.Length + GuardBytes];
+        data.CopyTo(guarded, 0);
+        CallGuarded(id, guarded, data.Length, name);
+        guarded.AsSpan(0, data.Length).CopyTo(data);
+    }
+
+    // Guard tail catches an ABI mismatch instead of parsing corrupted data.
+    private void CallGuarded(uint id, byte[] guarded, int length, string name)
+    {
+        guarded.AsSpan(length).Fill(0xcd);
         var pin = GCHandle.Alloc(guarded, GCHandleType.Pinned);
         int status;
         try { status = Resolve<BufferCall>(id)(gpu, pin.AddrOfPinnedObject()); }
         finally { pin.Free(); }
-        if (guarded.AsSpan(data.Length).IndexOfAnyExcept((byte)0xcd) >= 0) throw Unsupported($"{name} buffer overrun");
+        if (guarded.AsSpan(length).IndexOfAnyExcept((byte)0xcd) >= 0) throw Unsupported($"{name} buffer overrun");
         Check(status, name);
-        guarded.AsSpan(0, data.Length).CopyTo(data);
     }
 
     private string ReadString(uint id)

@@ -17,11 +17,14 @@ static partial class Program
         // Not opened yet (stock user): unlock offered, current sliders disabled, NVIDIA untouched.
         var closedEc = new EcDevice();
         var closed = new GpuPowerControl(closedEc, new WriteGuard(closedEc, model), model) { OpenPowerOverride = () => throw new Exception("opened") };
+        void Live(PowerTab powerTab) => typeof(PowerTab).GetMethod("RefreshLive", Private)!.Invoke(powerTab, null);
         using (var stockTab = new PowerTab(null, closed, model))
         {
             stockTab.RefreshFromEc();
             Require(!Field<CheckBox>(stockTab, "_chkTgpUnlock").Checked && !Field<UiHelpers.SliderRow>(stockTab, "_rowNvvdd").Slider.Enabled,
                 "Unopened NVIDIA controls were not offered as locked/disabled");
+            Live(stockTab);
+            Require(Field<Label>(stockTab, "_lblClockCaps").Text == "Clock caps: -- (NVIDIA not connected)", "Live readings did not report an unopened driver");
             Require(closed.OpenPowerOverride != null, "Building the Power tab initialized NVIDIA");
         }
 
@@ -45,6 +48,31 @@ static partial class Program
         var status = Field<Label>(tab, "_lblDriverLimits");
         Require(status.Text.Contains("stock currents 180 / 55 / 11.053 A"), "Status did not list the stock board input current");
         Require(unlock.Checked && backend.Configurations == 0, "Refreshing the checkbox caused hardware writes");
+        // Live readings: measured and predicted-at-cap columns right of each current limit; other rows span them.
+        Label LiveLabel(string row, string column) =>
+            (Label)typeof(PowerTab).GetNestedType("LiveCurrent", Private)!.GetProperty(column)!.GetValue(Field<object>(tab, row))!;
+        string LiveText(string row, string column) => LiveLabel(row, column).Text;
+        var caps = Field<Label>(tab, "_lblClockCaps");
+        var layout = (TableLayoutPanel)core.Slider.Parent!;
+        Require(layout.ColumnCount == 5 && layout.GetColumnSpan(Field<Label>(tab, "_lblTgp")) == 3 && layout.GetPositionFromControl(LiveLabel("_liveNvvdd", "Measured")).Column == 3 &&
+            layout.GetPositionFromControl(core.Value).Column == 2, "Live columns are not right of the current limits");
+        Require(!Field<System.Windows.Forms.Timer>(tab, "_liveTimer").Enabled, "Live readings polled while the tab was not shown");
+        Live(tab);
+        Require(LiveText("_liveNvvdd", "Measured") == "126.9 A" && LiveText("_liveNvvdd", "Predicted") == "152.5 A" &&
+            LiveText("_liveMsvdd", "Measured") == "47.8 A" && LiveText("_liveMsvdd", "Predicted") == "59.3 A" &&
+            LiveText("_liveBoardInput", "Measured") == "8.47 A" && LiveText("_liveBoardInput", "Predicted") == "",
+            "Live currents did not show measured and predicted values");
+        Require(caps.Text == "Clock caps: current controller 2865 MHz · power controller 2940 MHz · max 3090 MHz", "Clock caps were not shown");
+        backend.Telemetry = backend.Telemetry with { MsvddPredictedMilliamps = null, CurrentCapMhz = null };
+        Live(tab);
+        Require(LiveText("_liveMsvdd", "Predicted") == "--" && LiveText("_liveMsvdd", "Measured") == "47.8 A" &&
+            caps.Text.Contains("current controller -- · power controller 2940 MHz"), "Unrecognized controller values were not shown as unavailable");
+        backend.Awake = false;
+        int reads = backend.TelemetryReads;
+        Live(tab);
+        Require(backend.TelemetryReads == reads && LiveText("_liveNvvdd", "Measured") == "--" && caps.Text == "Clock caps: -- (GPU asleep, not read)",
+            "A sleeping GPU was read");
+        backend.Awake = true;
         Require(Field<TrackBar>(tab, "_sliderTgp").Maximum == 200, "TGP range did not follow alternate model/BIOS limits");
         void Apply() => typeof(PowerTab).GetMethod("BtnApply_Click", Private)!.Invoke(tab, new object?[] { null, EventArgs.Empty });
         Apply();
@@ -133,7 +161,11 @@ static partial class Program
         public bool IsPowerLimitAtMost(int watts) => true;
         public bool IsPowerLimitApplied(int watts) => Requested == watts;
         public GpuPowerBudget ReadPowerBudget() => new(175, 350);
-        public bool IsGpuAwake() => true;
+        public bool Awake = true;
+        public int TelemetryReads;
+        public GpuTelemetry Telemetry = new(126883, 47772, 8470, 152544, 59298, 2865, 2940, 3090);
+        public GpuTelemetry ReadTelemetry() { TelemetryReads++; return Telemetry; }
+        public bool IsGpuAwake() => Awake;
     }
 }
 

@@ -185,6 +185,27 @@ same day after review (lazy open, profile loading, F7 re-raise, live rail loweri
   Its slider uses the same unlock/restart/live-current path as NVVDD and MSVDD;
   checking the unlock expands its maximum without forcing its chosen current up.
   The status line lists the stock board input after the rails when available.
+- Live readings (2026-10-30), right of each current limit: "Measured" (the policy's STATUS
+  valueCurr) and "At clock cap" (the current controller's prediction for NVVDD/MSVDD; board input
+  is a hardware threshold with no prediction), then a line with the current and power controllers'
+  GPU clock caps and their ceiling. Read every 0.5 s only while the Power tab is shown (minimizing
+  hides the window), only when the driver is already open and Windows reports the GPU in D0
+  (same gate as System Info). The driver publishes new values every 20 ms, so no alignment is
+  needed. Reads never wait for a GPU restart; ~8 ms each on the UI thread.
+  - How the driver limits (measured 2026-10-30, driver 617.14): STATUS type-0x15 policies are
+    controllers that each set a clock cap where their prediction at that cap reaches their limit;
+    the lowest cap applies. The current controller (index 10 here) observes NVVDD + MSVDD and
+    predicts each rail's current at its cap; the power controller (index 0 here) takes its limit
+    from the board power policy (PMU limit arbitration input) and predicts rail power. With a
+    MSVDD 60 A limit in a game: current-controller cap 2820-2960 MHz below the power controller's
+    2917-3022 MHz in 150/150 samples, predicted MSVDD 98.6-100% of 60 A, predicted NVVDD 62-78%,
+    measured MSVDD only 45-51 A (the GPU ran 150-200 MHz below the cap; unexplained). Measured
+    versus limit therefore does not show a current limit; the prediction and the caps do.
+  - The controllers' union layout (offsets in `NvidiaApi.ReadTelemetry`) was mapped from live
+    dumps; the public header's layout differs. Every read checks it: totals equal the two rails,
+    the cap is within its ceiling, the current controller's observed rails equal the NVVDD/MSVDD
+    readings, exactly one candidate each. Anything else shows "--" for that value only.
+    3199/3199 back-to-back reads passed. Evidence: `C:\Temp\tandem\limit-probe\`.
 - System Info, Power Delivery: "EC" and "NVIDIA Driver" headings; the driver part shows
   the laptop GPU budget (F7) and the CPU+GPU platform budget (TPP; EC 0x7F7 reads 0 here,
   so it is not readable from the EC). Never opens NVIDIA (rows show "NVIDIA not
@@ -277,3 +298,12 @@ disables the feature.
   writes nothing; a round-to-nearest mutant fails), GpuFailsafe 45/45, NvidiaPower 20/20,
   release build, packaged smoke. Deployed 19:52 (backup
   `C:\tmp\MechControl-backup-20261029-195254`), startup as above, overrides unchanged.
+- Live readings revision (2026-10-30): NvidiaPower.Tests 22/22 (controllers at alternate policy
+  indices; broken totals/cap/identity, ambiguity, missing board power source and mismatched board
+  input each blank only their value; mismatched rail status refuses), GpuFailsafe.Tests 45/45,
+  ThermalUi headless (columns, values, unopened driver, sleeping GPU not read, timer off while
+  hidden), packaged headless smoke, release build 0 errors / 2 known warnings. Production
+  `NvidiaApi.ReadTelemetry` read-only against the live GPU (`C:\Temp\tandem\telemetry-live\`):
+  20 reads, all values present, 5.8-10.8 ms each. Deployed 2026-10-30 09:20 (backup
+  `C:\tmp\MechControl-backup-20261030-092011`): EC init OK, validations PASS, NVIDIA open, profile
+  slot 2 auto-loaded (150+25 W, 210/60/11.053 A) without a GPU restart.

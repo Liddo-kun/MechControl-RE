@@ -192,6 +192,21 @@ sealed class NvidiaPowerControl : IGpuPowerOverride, IDisposable
         }
     }
 
+    // Polled twice a second for display: never block the UI thread behind a GPU restart.
+    public GpuTelemetry ReadTelemetry()
+    {
+        if (!Monitor.TryEnter(sync)) throw new InvalidOperationException("The NVIDIA GPU is restarting.");
+        try
+        {
+            var t = api.ReadTelemetry();
+            static int? Milliamps(uint? value) => value is uint v ? checked((int)v) : null;
+            static int? Mhz(uint? khz) => khz is uint v ? (int)(v / 1000) : null;
+            return new(checked((int)t.NvvddMa), checked((int)t.MsvddMa), boardInputVerified ? Milliamps(t.BoardInputMa) : null,
+                Milliamps(t.NvvddPredictedMa), Milliamps(t.MsvddPredictedMa), Mhz(t.CurrentCapKhz), Mhz(t.PowerCapKhz), Mhz(t.CeilingKhz));
+        }
+        finally { Monitor.Exit(sync); }
+    }
+
     public bool IsGpuAwake() => store.IsAwake();
 
     public bool IsPowerLimitAtMost(int watts)

@@ -374,6 +374,7 @@ static partial class Program
         public int BudgetReads;
         public bool Awake = true;
         public GpuPowerBudget ReadPowerBudget() { BudgetReads++; return new(175, 350); }
+        public GpuTelemetry ReadTelemetry() => new(150000, 50000, 8000, 160000, 59000, 2865, 2940, 3090);
         public bool IsGpuAwake() => Awake;
     }
 
