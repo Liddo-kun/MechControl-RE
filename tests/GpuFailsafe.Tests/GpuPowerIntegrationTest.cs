@@ -333,6 +333,40 @@ static partial class Program
         Assert.False(unsupported.CanUnlockTgp);
     }
 
+    private static void DlppcDisabledReassert()
+    {
+        GpuPowerControl power = CreatePower(new EcDevice(), CreateGpuProfile(95, 95, 150));
+        int opens = 0;
+        var driver = new FakeGpuPowerOverride();
+        power.OpenPowerOverride = () => { opens++; return driver; };
+
+        // Enabled by default: never opens NVIDIA or touches DLPPC.
+        power.ReassertDriverRequest(onAc: true);
+        Assert.True(opens == 0 && driver.DlppcWrites == 0 && power.ReadDisplayDlppc() == null);
+
+        power.SetDlppcDisabled(true);
+        Assert.True(opens == 1 && power.DlppcDisabled && driver.Dlppc!.Active == false);
+
+        // A GPU restart re-enables DLPPC; the check disables it again, but never reads a GPU
+        // Windows reports asleep.
+        driver.Dlppc = driver.Dlppc! with { Active = true };
+        driver.Awake = false;
+        power.ReassertDriverRequest(onAc: true);
+        Assert.True(driver.Dlppc.Active && driver.DlppcWrites == 1 && power.ReadDisplayDlppc() == null);
+        driver.Awake = true;
+        power.ReassertDriverRequest(onAc: true);
+        Assert.True(!driver.Dlppc!.Active && driver.DlppcWrites == 2);
+        power.ReassertDriverRequest(onAc: true);
+        Assert.Equal(2, driver.DlppcWrites);
+        Assert.True(power.ReadDisplayDlppc() is { Active: false, Policy: 7 });
+
+        power.SetDlppcDisabled(false);
+        Assert.True(!power.DlppcDisabled && driver.Dlppc!.Active);
+        driver.Dlppc = null; // This GPU/driver has no DLPPC policy.
+        Assert.Throws<NotSupportedException>(() => power.SetDlppcDisabled(true));
+        Assert.False(power.DlppcDisabled);
+    }
+
     private sealed class FakeGpuPowerOverride : IGpuPowerOverride
     {
         public bool Enabled { get; set; }
@@ -376,6 +410,10 @@ static partial class Program
         public GpuPowerBudget ReadPowerBudget() { BudgetReads++; return new(175, 350); }
         public GpuTelemetry ReadTelemetry() => new(150000, 50000, 8000, 160000, 59000, 2865, 2940, 3090);
         public bool IsGpuAwake() => Awake;
+        public GpuDlppc? Dlppc = new(true, 7, new[] { 11 });
+        public int DlppcWrites;
+        public GpuDlppc? ReadDlppc() => Dlppc;
+        public void SetDlppc(bool active) { DlppcWrites++; Dlppc = Dlppc! with { Active = active }; }
     }
 
     private static GpuPowerControl CreatePower(EcDevice device, MachineProfile profile) =>

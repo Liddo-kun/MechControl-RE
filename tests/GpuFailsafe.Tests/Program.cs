@@ -28,6 +28,7 @@ static partial class Program
             ("GPU power gate integrates with real guard and encoding", GpuPowerGateIntegration),
             ("TGP unlock headroom and over-limit readback", TgpUnlockAndOverLimitReadback),
             ("NVIDIA opens only on demand", NvidiaOpensOnlyOnDemand),
+            ("disabled DLPPC is reasserted only on an awake GPU", DlppcDisabledReassert),
             ("tripped hold continues enforcement when disabled", TrippedEnforcesWhenDisabled),
             ("reset clears even incomplete protection", ResetClearsIncompleteProtection),
             ("notification exceptions cannot interrupt safety", SubscriberFailuresAreContained),

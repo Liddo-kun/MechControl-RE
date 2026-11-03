@@ -31,6 +31,9 @@ record GpuTelemetry(int NvvddMilliamps, int MsvddMilliamps, int? BoardInputMilli
     public double? InlinePowerActivity { get; init; }
 }
 
+// DLPPC's PERF_CF policy: whether it is on, its index and its controllers' indices (per GPU/driver).
+record GpuDlppc(bool Active, int Policy, IReadOnlyList<int> Controllers);
+
 interface IGpuPowerOverride
 {
     bool Enabled { get; }
@@ -49,6 +52,10 @@ interface IGpuPowerOverride
     GpuPowerBudget ReadPowerBudget();
     // Never waits for a GPU restart (throws instead).
     GpuTelemetry ReadTelemetry();
+    // NVIDIA's DLPPC controller, which lowers the memory clock under load to give the core more of
+    // the power limit. Null when this GPU/driver has none.
+    GpuDlppc? ReadDlppc();
+    void SetDlppc(bool active);
     // Windows' last device power state, without contacting the GPU. A driver read while it
     // sleeps would wake it.
     bool IsGpuAwake();

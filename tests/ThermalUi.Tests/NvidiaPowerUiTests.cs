@@ -190,6 +190,9 @@ static partial class Program
         };
         public GpuTelemetry ReadTelemetry() { TelemetryReads++; return Telemetry; }
         public bool IsGpuAwake() => Awake;
+        public GpuDlppc? Dlppc = new(true, 7, new[] { 11 });
+        public GpuDlppc? ReadDlppc() => Dlppc;
+        public void SetDlppc(bool active) => Dlppc = Dlppc! with { Active = active };
     }
 }
 

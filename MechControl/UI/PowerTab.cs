@@ -20,6 +20,8 @@ class PowerTab : UserControl
     private readonly TrackBar? _sliderTgp;
     private readonly Label? _lblTgp;
     private readonly CheckBox? _chkTgpUnlock;
+    private readonly CheckBox? _chkDlppc;
+    private readonly Action<bool>? _saveDlppcDisabled;
     private readonly UiHelpers.SliderRow? _rowNvvdd;
     private readonly UiHelpers.SliderRow? _rowMsvdd;
     private readonly UiHelpers.SliderRow? _rowBoardInput;
@@ -47,10 +49,11 @@ class PowerTab : UserControl
     private readonly bool _gpuEnabled;
 
     public PowerTab(CpuPowerControl? cpuControl, GpuPowerControl? gpuControl,
-        MachineProfile profile, StartupValidator? validator = null)
+        MachineProfile profile, StartupValidator? validator = null, Action<bool>? saveDlppcDisabled = null)
     {
         _cpuControl = cpuControl;
         _gpuControl = gpuControl;
+        _saveDlppcDisabled = saveDlppcDisabled;
         _cpuEnabled = validator?.IsFeatureEnabled("cpuPower") ?? true;
         _gpuEnabled = validator?.IsFeatureEnabled("gpuPower") ?? true;
 
@@ -145,6 +148,21 @@ class PowerTab : UserControl
                 unavailable.MaximumSize = new Size(600, 0);
                 gpuLayout.Controls.Add(unavailable);
                 gpuLayout.SetColumnSpan(unavailable, span);
+            }
+
+            if (_gpuControl != null && (_gpuControl.PowerOverride != null || _gpuControl.OpenPowerOverride != null))
+            {
+                _chkDlppc = new CheckBox
+                {
+                    Text = "Disable DLPPC (AI-controlled GPU memory clock)",
+                    AutoSize = true,
+                    Checked = _gpuControl.DlppcDisabled,
+                    Margin = new Padding(0, UiMetrics.RowGap, 0, 0),
+                };
+                _tooltip.SetToolTip(_chkDlppc, DlppcTip(null));
+                _chkDlppc.CheckedChanged += Dlppc_CheckedChanged;
+                gpuLayout.Controls.Add(_chkDlppc);
+                gpuLayout.SetColumnSpan(_chkDlppc, span);
             }
 
             _chkDynamicBoost = new CheckBox
@@ -339,6 +357,28 @@ class PowerTab : UserControl
         RefreshGpuFromHardware();
     }
 
+    // The policy/controller indices are this GPU's (found by the policy's DLPPC_1X label).
+    private static string DlppcTip(GpuDlppc? detected) =>
+        "DLPPC (likely Deep Learning Power/Performance Controller) is an NVIDIA firmware controller that uses a neural-network " +
+        "power model to pick the GPU memory clock under load. When the GPU is power-limited it caps memory a step down (P2) " +
+        "to give the core more of the power limit. Disabling it keeps memory at full speed (P0) in games; idle downclocking is " +
+        "unaffected. Applies now and at every startup, and is reapplied after a GPU restart." +
+        (detected is { } d ? $"\nDetected: PERF_CF policy {d.Policy}, controller {string.Join(", ", d.Controllers)}; currently {(d.Active ? "enabled" : "disabled")}." : "");
+
+    private void Dlppc_CheckedChanged(object? sender, EventArgs e)
+    {
+        if (_refreshing) return;
+        var gpu = _gpuControl!;
+        bool disable = _chkDlppc!.Checked;
+        if (disable == gpu.DlppcDisabled) return;
+        UiHelpers.TryUi(() =>
+        {
+            gpu.SetDlppcDisabled(disable);
+            _saveDlppcDisabled?.Invoke(disable);
+        }, "change DLPPC");
+        RefreshGpuFromHardware();
+    }
+
     // Positions are milliamps / stepMilliamps, rounded down, so the detected request never sits
     // above the slider maximum. An unmoved slider keeps that exact request, which some BIOSes
     // define in fractional amps, and writes nothing.
@@ -402,6 +442,12 @@ class PowerTab : UserControl
         try
         {
             if (_chkTgpUnlock != null) { _chkTgpUnlock.Checked = gpu.TgpUnlocked; _chkTgpUnlock.Enabled = gpu.CanUnlockTgp; }
+            if (_chkDlppc != null)
+            {
+                _chkDlppc.Checked = gpu.DlppcDisabled;
+                _chkDlppc.Enabled = gpu.PowerOverride != null || gpu.OpenPowerOverride != null;
+                _tooltip.SetToolTip(_chkDlppc, DlppcTip(gpu.ReadDisplayDlppc()));
+            }
             _sliderTgp!.SetRange(gpu.MinTgpWatts, gpu.MaxTgpWatts);
             _sliderTgp.TickFrequency = Math.Max(1, (_sliderTgp.Maximum - _sliderTgp.Minimum) / 10);
             if (_rowNvvdd == null) return;
