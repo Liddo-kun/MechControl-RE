@@ -142,7 +142,7 @@ their layouts were mapped from live dumps.
   cap lands higher), as Afterburner/mVolt do.
 - **Can only lower clocks:** clock locks and maximum clocks.
 - **Can't** through these interfaces: write the caps (recomputed every 20 ms) or switch a
-  controller off.
+  power/current controller off. The PERF_CF memory-clock controller (DLPPC) *can* be switched off (§6).
 
 ## 5. Open questions
 
@@ -160,8 +160,37 @@ their layouts were mapped from live dumps.
    applying on RTX 50 with driver 621.01+. Desktop boards use different board-input policies
    (0x17-0x19); RTX 40 laptops use a BIOS table the app doesn't parse.
 
+## 6. Memory clock in games (P2)
+
+Measured 2026-11-02 (same GPU/driver; MSI Afterburner +2700 MHz memory offset, so memory steps
+are 16701 / 13701 MHz with the offset). In every game memory ran at 13701 MHz (P2) unless
+`nvidia-smi --lock-memory-clocks` was used.
+
+- **Cause:** the perf-limit arbiter (`PerfPerfLimitsGetStatus`) shows the DRAM clock set by limit
+  `PERF_CF_CONTROLLER_DRAM_MAX`. Of the PMU PERF_CF controllers (`PerfPerfCfControllerGetStatus`,
+  limits[5] = DRAM max), only **controller 11 (type 8, DLPPC)** requests it: 13701 MHz DRAM max
+  and 3045 MHz GPC max. DLPPC chooses the memory clock with NVIDIA's learned power model to give
+  the core more of the power limit. Not CUDA: DRS "CUDA – Force P2 State" off and power
+  management mode changed nothing.
+- **Switch:** its policy (label DLPPC_1X = 7, policy 7 here) via `PerfPerfCfPolicySetControl`
+  (0x4D1C7D6E) `bActivate = 0`, selecting only that policy. Effect is immediate; idle
+  downclocking (UTIL controllers, P8 / 405 MHz) is unaffected. A GPU restart resets it.
+- **A/B in-game (171.7 W, power-limited):** on 2787 MHz / 13701 MHz P2; off 2749 MHz /
+  16701 MHz P0, current-controller cap unchanged (3041 → 3036 MHz). Jon: FPS equal to his
+  locked-clock script.
+- **Why the old workaround needed GPU clock locks:** the nvidia-smi memory lock (client limit
+  `CLIENT_LOW_STRICT_DRAM_MIN`) collapsed the current controller's cap (~2390 MHz, MSVDD binding)
+  unless a GPU-lock lower bound was also set. Switching DLPPC off reaches P0 without that.
+- mVolt+ "Boost Lock" is unrelated: `PerfClientLimitsSetStatus` voltage-point request (ID 6, 1.5 V).
+- Name: NVIDIA doesn't publish it. DLPPC's power model (DLPPM) references an NNE (neural network
+  engine) descriptor (`nneDescIdx`) and has a `vfInferenceBatchSize`, so most likely "Deep
+  Learning Power/Performance Controller".
+- App: Power tab "Disable DLPPC (AI-controlled GPU memory clock)" (`NvidiaDlppc.cs`).
+
 ## Evidence
 
+- `C:\Temp\tandem\perfcf-probe\` (PERF_CF policies/controllers dump, `watch`, `policy <i> <0|1>`;
+  `abtest1.txt` = the A/B run), `mvolt-boostlock\findings.md`.
 - `C:\Temp\tandem\limit-probe\` (run 1, 20 ms cadence checks), `telemetry-live\` (production read
   code, run 2), `perfcap-probe\`, `bic-probe\` (idle board input RE).
 - `C:\Temp\tandem\limiter-log\`: logger (`LimiterLog.exe log <maxSeconds> <intervalMs> <outDir>`),

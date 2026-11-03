@@ -46,6 +46,9 @@ class GpuPowerControl
     public int MinDbWatts => _dbLimit.Min;
     public int MaxDbWatts => _dbLimit.Max;
     private readonly bool _canExtendEcLimit;
+    // NVIDIA's DLPPC (AI-controlled memory clock) disabled, so memory stays at full speed under load.
+    // A GPU restart re-enables it; ReassertDriverRequest disables it again.
+    public bool DlppcDisabled { get; private set; }
     // The last driver request MechControl set, and the values it came from (for resume).
     private int? _driverWatts;
     private (int Tgp, bool DynamicBoost, int DbWatts)? _lastRequest;
@@ -124,6 +127,19 @@ class GpuPowerControl
     public void ReassertDriverRequest(bool onAc)
     {
         if (PowerOverride is not { } driver) return;
+        // Never wakes a sleeping GPU for this.
+        if (DlppcDisabled && driver.IsGpuAwake())
+        {
+            try
+            {
+                if (driver.ReadDlppc()?.Active == true)
+                {
+                    DiagnosticLog.Write("[NVIDIA Power] DLPPC was re-enabled (GPU restart); disabling it again.");
+                    driver.SetDlppc(false);
+                }
+            }
+            catch (Exception ex) { DiagnosticLog.Warn($"[NVIDIA Power] DLPPC check failed: {ex.Message}"); }
+        }
         if (_lastRequest is { } last && _driverWatts is int watts && driver.Enabled && !driver.IsPowerLimitApplied(watts))
         {
             DiagnosticLog.Write($"[NVIDIA Power] Driver request or laptop budget below {watts} W; reapplying.");
@@ -285,6 +301,26 @@ class GpuPowerControl
         // The restart cleared the driver request; reassert the EC request within the new range.
         var ec = ReadGpuPower();
         ApplyGpuPower(Math.Clamp(ec.TgpWatts, MinTgpWatts, MaxTgpWatts), ec.DynamicBoostEnabled, ec.DbWatts);
+    }
+
+    /// <summary>
+    /// Disable NVIDIA's DLPPC or re-enable it. It lowers the memory clock under load to give the
+    /// core more of the power limit, which can cost performance.
+    /// </summary>
+    public void SetDlppcDisabled(bool disabled)
+    {
+        var driver = EnsurePowerOverride();
+        if (driver.ReadDlppc() == null)
+            throw new NotSupportedException("This NVIDIA GPU or driver has no DLPPC policy to disable.");
+        driver.SetDlppc(!disabled);
+        DlppcDisabled = disabled;
+    }
+
+    // For display: never opens NVIDIA or reads a GPU Windows reports asleep.
+    public GpuDlppc? ReadDisplayDlppc()
+    {
+        try { return PowerOverride is { } driver && driver.IsGpuAwake() ? driver.ReadDlppc() : null; }
+        catch (Exception) { return null; }
     }
 
     /// <summary>Firmware Defaults: remove the unlock (GPU restart) or reset live currents.</summary>

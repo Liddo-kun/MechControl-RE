@@ -311,12 +311,15 @@ partial class MainForm : Form
                     // Open now only to resume or recover saved NVIDIA state; stock users never touch NVAPI.
                     if (NvidiaPowerControl.HasSavedState())
                         try { _gpuControl.EnsurePowerOverride(); } catch { /* Logged; the unlock stays unavailable. */ }
+                    if (_profileManager.DisableDlppc)
+                        try { _gpuControl.SetDlppcDisabled(true); }
+                        catch (Exception ex) { DiagnosticLog.Warn($"[NVIDIA Power] DLPPC not disabled: {ex.Message}"); }
                 }
                 if (_gpuControl.CanUnlockTgp)
                     DiagnosticLog.Write($"GPU TGP unlock: {(_gpuControl.TgpUnlocked ? "ON" : "OFF")} " +
                         $"(normal TGP {_gpuControl.NormalMinTgpWatts}-{_gpuControl.NormalMaxTgpWatts} W, unlocked {_gpuControl.UnlockedMinTgpWatts}-{_gpuControl.UnlockedMaxTgpWatts} W)");
             }
-            _powerTab = new PowerTab(_cpuControl, _gpuControl, profile, _validator);
+            _powerTab = new PowerTab(_cpuControl, _gpuControl, profile, _validator, disabled => _profileManager.DisableDlppc = disabled);
             var powerPage = new TabPage("Power");
             _powerTab.Dock = DockStyle.Fill;
             powerPage.Controls.Add(_powerTab);

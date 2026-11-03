@@ -26,6 +26,7 @@ MechControl/
   Hardware/Nvidia/
     NvidiaApi.cs                   Versioned NVAPI BIOS/power/current requests; live limit telemetry (policies, controller caps)
     NvidiaInlinePower.cs           Inline power controller (IPC) activity from ADC_IPC thermal-monitor counters
+    NvidiaDlppc.cs                 DLPPC (AI memory-clock controller) PERF_CF policy on/off (memory held at P2 in games)
     NvidiaRuntimeNvml.cs           Selected-adapter PCI identity, enforced power limit, graphics clock
     NvidiaBudget.cs                Laptop/shared-budget reads and writes (originals kept in memory)
     NvidiaBudgetTransport.cs       Validated native F7 transport discovery (no copied driver RVAs)

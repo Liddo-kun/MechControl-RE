@@ -17,6 +17,14 @@ the limits act on the clock: `nvidia_gpu_limiters.md`.
   the Power tab. EC controls are unaffected.
 - The driver power request (F8) is written only while unlocked. Stock users get EC
   registers only.
+- "Disable DLPPC (AI-controlled GPU memory clock)" (`settings.json` `disableDlppc`) also
+  opens NVAPI at startup when on. It disables NVIDIA's DLPPC PERF_CF policy, found by its
+  DLPPC_1X label (`nvidia_gpu_limiters.md` §6), independent of the unlock. The tooltip shows
+  the detected policy/controller indices. A GPU restart re-enables it; the driver check
+  (resume, charger change, 3 s after each GPU power apply) disables it again, only while
+  Windows reports the GPU awake. Unticking re-enables it; quitting the app leaves it disabled
+  until a reboot or driver restart. GPUs/drivers without a DLPPC_1X policy get an error and
+  the setting stays off.
 
 ## Unlock and GPU restart
 

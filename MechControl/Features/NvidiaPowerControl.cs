@@ -216,6 +216,23 @@ sealed class NvidiaPowerControl : IGpuPowerOverride, IDisposable
 
     public bool IsGpuAwake() => store.IsAwake();
 
+    public GpuDlppc? ReadDlppc()
+    {
+        using (Enter())
+            return api.ReadDlppc() is { } d
+                ? new(d.Active, d.Policy, Enumerable.Range(0, 32).Where(i => (d.ControllerMask & (1u << i)) != 0).ToArray())
+                : null;
+    }
+
+    public void SetDlppc(bool active)
+    {
+        using (Enter())
+        {
+            api.SetDlppc(active);
+            DiagnosticLog.Write($"[NVIDIA Power] DLPPC (AI-controlled memory clock) {(active ? "enabled" : "disabled")}.");
+        }
+    }
+
     public bool IsPowerLimitAtMost(int watts)
     {
         using (Enter())

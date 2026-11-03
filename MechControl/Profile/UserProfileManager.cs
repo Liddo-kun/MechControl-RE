@@ -21,6 +21,9 @@ class UserProfileSettings
 
     [JsonPropertyName("thermalProtection")]
     public ThermalProtectionState? ThermalProtection { get; set; }
+
+    [JsonPropertyName("disableDlppc")]
+    public bool DisableDlppc { get; set; }
 }
 
 class UserProfileManager
@@ -52,6 +55,17 @@ class UserProfileManager
             int old = _settings.LastProfile;
             _settings.LastProfile = value;
             try { SaveSettings(); } catch { _settings.LastProfile = old; throw; }
+        }
+    }
+
+    public bool DisableDlppc
+    {
+        get => _settings.DisableDlppc;
+        set
+        {
+            bool old = _settings.DisableDlppc;
+            _settings.DisableDlppc = value;
+            try { SaveSettings(); } catch { _settings.DisableDlppc = old; throw; }
         }
     }
 
@@ -173,6 +187,7 @@ class UserProfileManager
                 if (settings.LastProfile is < 0 or > 5) { Warn("Invalid lastProfile; requested protection settings were not armed. Select a valid profile."); settings.LastProfile = 0; }
                 settings.ProfileNames = Read(root, "profileNames", context.ListString, settings.ProfileNames);
                 if (settings.ProfileNames.Count != 5 || settings.ProfileNames.Any(string.IsNullOrWhiteSpace)) Warn("Invalid profile names repaired; operational protection is unchanged.");
+                settings.DisableDlppc = Read(root, "disableDlppc", context.Boolean, false);
                 var state = new ThermalProtectionState();
                 if (root.TryGetProperty("thermalProtection", out var block))
                 {
