@@ -3,7 +3,7 @@
 An open-source replacement for the OEM Control Center on Uniwill-built gaming laptops sold as **MECHREVO**, **XMG** and **Eluktronics**. It talks to the laptop's embedded controller (EC) directly, so you don't need the Control Center app or its background services.
 
 > [!WARNING]
-> MechControl writes to the EC, the chip that runs your fans and power limits. Use it at your own risk. Only the MECHREVO IDY_7Y (board `X6AR55xY`) has been tested on hardware. Other models load a profile built from OEM data. At startup MechControl checks each feature's registers and turns off any feature that doesn't pass. The reasons are written to `mechcontrol.log`.
+> MechControl writes to the EC, the chip that runs your fans and power limits. Use it at your own risk. Only the MECHREVO IDY_7Y (board `X6AR55xY`) has been tested on hardware. Other models load a profile built from OEM data. At startup MechControl checks each feature's registers and turns off any feature that doesn't pass. The reasons are written to `mechcontrol.log`. Send this log if you want to improve compatability for your model.
 
 ## Features
 
