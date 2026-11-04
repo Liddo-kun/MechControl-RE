@@ -93,11 +93,12 @@ sealed class NvidiaPowerControl : IGpuPowerOverride, IDisposable
     private GpuCurrentLimits Limits()
     {
         var rails = api.ReadCurrentLimits();
-        GpuCurrentLimit Convert(NvidiaCurrentLimit rail, NvidiaBiosField stock) => new(
+        GpuCurrentLimit Convert(NvidiaCurrentLimit rail, NvidiaBiosField stock, int unlockPercent = Profile.UniversalDefaults.GpuCurrentUnlockPercent) => new(
             checked((int)Math.Max(rail.MinimumMa, stock.Minimum)), checked((int)stock.Default), checked((int)rail.MaximumMa),
-            checked((int)rail.CurrentMa), checked((int)stock.Maximum));
+            checked((int)rail.CurrentMa), checked((int)stock.Maximum), unlockPercent);
         return new(Convert(rails.Nvvdd, original.Nvvdd), Convert(rails.Msvdd, original.Msvdd),
-            boardInputVerified && original.BoardInput is { } input && rails.BoardInput is { } liveInput ? Convert(liveInput, input) : null);
+            boardInputVerified && original.BoardInput is { } input && rails.BoardInput is { } liveInput
+                ? Convert(liveInput, input, Profile.UniversalDefaults.BoardInputUnlockPercent) : null);
     }
 
     public bool RequiresRestart(bool enabled, int? nvvddMilliamps, int? msvddMilliamps, int? boardInputMilliamps)

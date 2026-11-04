@@ -192,7 +192,8 @@ class PowerTab : UserControl
                 _rowMsvdd = AddCurrentSlider(gpuLayout, "MSVDD / Fabric current limit", 1000);
                 // Board input is ~10 A, so a whole amp would be a ~10% (~20 W) step: exact
                 // milliamps, with arrow keys moving 0.1 A.
-                _rowBoardInput = AddCurrentSlider(gpuLayout, "Board input current limit", 1, smallChange: 100);
+                _rowBoardInput = AddCurrentSlider(gpuLayout, "Board input current limit", 1, smallChange: 100,
+                    unlockPercent: UniversalDefaults.BoardInputUnlockPercent);
                 _limitsView = new GpuLimitsView(_tooltip);
                 _lblDriverLimits = new Label { AutoSize = true, ForeColor = UiColors.Hint, MaximumSize = new Size(600, 0) };
                 gpuLayout.Controls.Add(_lblDriverLimits);
@@ -382,14 +383,15 @@ class PowerTab : UserControl
     // Positions are milliamps / stepMilliamps, rounded down, so the detected request never sits
     // above the slider maximum. An unmoved slider keeps that exact request, which some BIOSes
     // define in fractional amps, and writes nothing.
-    private UiHelpers.SliderRow AddCurrentSlider(TableLayoutPanel layout, string name, int stepMilliamps, int smallChange = 1)
+    private UiHelpers.SliderRow AddCurrentSlider(TableLayoutPanel layout, string name, int stepMilliamps, int smallChange = 1,
+        int unlockPercent = UniversalDefaults.GpuCurrentUnlockPercent)
     {
         UiHelpers.SliderRow? row = null;
         row = UiHelpers.BuildSliderRow(name, 1, 2, "A", formatter: v => FormatCurrent(row?.Slider, v));
         row.Slider.Tag = new CurrentSlider(stepMilliamps, null);
         row.Slider.SmallChange = smallChange;
         UiHelpers.AddSliderRow(layout, row);
-        _tooltip.SetToolTip(row.Slider, $"Applies live within the active ceiling. The unlock allows up to {UniversalDefaults.GpuCurrentUnlockPercent}% of the stock current; raising an older ceiling restarts the GPU.");
+        _tooltip.SetToolTip(row.Slider, $"Applies live within the active ceiling. The unlock allows up to {unlockPercent}% of the stock current; raising an older ceiling restarts the GPU.");
         return row;
     }
 
