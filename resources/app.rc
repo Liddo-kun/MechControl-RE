@@ -1,0 +1,61 @@
+#include <windows.h>
+1000 RCDATA "TrayIcons/kekwait_000.png"
+1001 RCDATA "TrayIcons/kekwait_001.png"
+1002 RCDATA "TrayIcons/kekwait_002.png"
+1003 RCDATA "TrayIcons/kekwait_003.png"
+1004 RCDATA "TrayIcons/kekwait_004.png"
+1005 RCDATA "TrayIcons/kekwait_005.png"
+1006 RCDATA "TrayIcons/kekwait_006.png"
+1007 RCDATA "TrayIcons/kekwait_007.png"
+1008 RCDATA "TrayIcons/kekwait_008.png"
+1009 RCDATA "TrayIcons/kekwait_009.png"
+1010 RCDATA "TrayIcons/kekwait_010.png"
+1011 RCDATA "TrayIcons/kekwait_011.png"
+1012 RCDATA "TrayIcons/kekwait_012.png"
+1013 RCDATA "TrayIcons/kekwait_013.png"
+1014 RCDATA "TrayIcons/kekwait_014.png"
+1015 RCDATA "TrayIcons/kekwait_015.png"
+1016 RCDATA "TrayIcons/kekwait_016.png"
+1017 RCDATA "TrayIcons/kekwait_017.png"
+1018 RCDATA "TrayIcons/kekwait_018.png"
+1019 RCDATA "TrayIcons/kekwait_019.png"
+1020 RCDATA "TrayIcons/kekwait_020.png"
+1021 RCDATA "TrayIcons/kekwait_021.png"
+1022 RCDATA "TrayIcons/kekwait_022.png"
+1023 RCDATA "TrayIcons/kekwait_023.png"
+1024 RCDATA "TrayIcons/kekwait_024.png"
+1025 RCDATA "TrayIcons/kekwait_025.png"
+1026 RCDATA "TrayIcons/kekwait_026.png"
+1027 RCDATA "TrayIcons/kekwait_027.png"
+1028 RCDATA "TrayIcons/kekwait_028.png"
+1029 RCDATA "TrayIcons/kekwait_029.png"
+1030 RCDATA "TrayIcons/kekwait_030.png"
+1031 RCDATA "TrayIcons/kekwait_031.png"
+1032 RCDATA "TrayIcons/kekwait_032.png"
+1033 RCDATA "TrayIcons/kekwait_033.png"
+1034 RCDATA "TrayIcons/kekwait_034.png"
+1035 RCDATA "TrayIcons/kekwait_035.png"
+1036 RCDATA "TrayIcons/kekwait_036.png"
+1037 RCDATA "TrayIcons/kekwait_037.png"
+1038 RCDATA "TrayIcons/kekwait_038.png"
+1039 RCDATA "TrayIcons/kekwait_039.png"
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 0,1,0,0
+ PRODUCTVERSION 0,1,0,0
+ FILEOS VOS_NT_WINDOWS32
+ FILETYPE VFT_APP
+BEGIN
+ BLOCK "StringFileInfo"
+ BEGIN
+  BLOCK "040904b0"
+  BEGIN
+    VALUE "FileDescription", "MechControl native\0"
+   VALUE "FileVersion", "0.1.0\0"
+   VALUE "ProductName", "MechControl Native\0"
+  END
+ END
+ BLOCK "VarFileInfo"
+ BEGIN
+  VALUE "Translation", 0x409, 1200
+ END
+END

@@ -1,0 +1,156 @@
+{
+  "description": "Firmware defaults for IDY_7Y — captured after clean power cycle with OEM services disabled",
+  "captureDate": "2026-03-30",
+  "captureMethod": "ec_snapshot.exe diff: snap_1 (OEM app applied) vs snap_2 (firmware defaults after power cycle)",
+
+  "notes": {
+    "powerLimits": "All 0 = EC firmware uses its own internal defaults. Writing 0 hands control back to EC.",
+    "gpuPower": "All 0 = GPU boost features disabled. EC firmware manages GPU power.",
+    "fanTable": "OEM default fan curve from Frida capture of GCUService startup.",
+    "fanCurveEnable": "0x7C5 bit 7 clear = custom fan curve disabled, EC uses internal fan control.",
+    "batteryMode": "0x08 = High Capacity mode (performance, no charge limiting).",
+    "logoLed": "Firmware defaults to blue=50 (0x32) on the logo."
+  },
+
+  "defaults": {
+    "cpuPower": {
+      "0x783": { "name": "PL1", "value": 0 },
+      "0x784": { "name": "PL2", "value": 0 },
+      "0x785": { "name": "PL4", "value": 0 },
+      "0x786": { "name": "CpuTempLimit_Write", "value": 138 }
+    },
+
+    "gpuPower": {
+      "0x743": { "name": "TGP_DB_Control", "value": 0 },
+      "0x744": { "name": "ConfigurableTGP", "value": 0 },
+      "0x745": { "name": "DB_TotalPower", "value": 0 },
+      "0x746": { "name": "DB_MaxTGP", "value": 0 }
+    },
+
+    "fanControl": {
+      "0x751": { "name": "FanControlMode", "value": 0 },
+      "0x7C5": { "name": "AP_OEM_BYTE5", "value": 64, "hex": "0x40", "note": "bit 7 clear = fan curve disabled, other bits = 0x40" },
+      "0x7C6": { "name": "AP_OEM_BYTE6", "value": 0 }
+    },
+
+    "fanTableCpu": {
+      "0xF00": { "name": "CPU_TempUp[0]", "value": 48 },
+      "0xF01": { "name": "CPU_TempUp[1]", "value": 52 },
+      "0xF02": { "name": "CPU_TempUp[2]", "value": 56 },
+      "0xF03": { "name": "CPU_TempUp[3]", "value": 60 },
+      "0xF04": { "name": "CPU_TempUp[4]", "value": 64 },
+      "0xF05": { "name": "CPU_TempUp[5]", "value": 68 },
+      "0xF06": { "name": "CPU_TempUp[6]", "value": 72 },
+      "0xF07": { "name": "CPU_TempUp[7]", "value": 76 },
+      "0xF08": { "name": "CPU_TempUp[8]", "value": 80 },
+      "0xF09": { "name": "CPU_TempUp[9]", "value": 85 },
+      "0xF0A": { "name": "CPU_TempUp[10] (pad)", "value": 255 },
+      "0xF0B": { "name": "CPU_TempUp[11] (pad)", "value": 255 },
+      "0xF0C": { "name": "CPU_TempUp[12] (pad)", "value": 255 },
+      "0xF0D": { "name": "CPU_TempUp[13] (pad)", "value": 255 },
+      "0xF0E": { "name": "CPU_TempUp[14] (pad)", "value": 255 },
+      "0xF0F": { "name": "CPU_TempUp[15] (pad)", "value": 255 },
+      "0xF10": { "name": "CPU_TempDown[0]", "value": 0 },
+      "0xF11": { "name": "CPU_TempDown[1]", "value": 46 },
+      "0xF12": { "name": "CPU_TempDown[2]", "value": 50 },
+      "0xF13": { "name": "CPU_TempDown[3]", "value": 54 },
+      "0xF14": { "name": "CPU_TempDown[4]", "value": 58 },
+      "0xF15": { "name": "CPU_TempDown[5]", "value": 62 },
+      "0xF16": { "name": "CPU_TempDown[6]", "value": 66 },
+      "0xF17": { "name": "CPU_TempDown[7]", "value": 70 },
+      "0xF18": { "name": "CPU_TempDown[8]", "value": 74 },
+      "0xF19": { "name": "CPU_TempDown[9]", "value": 78 },
+      "0xF1A": { "name": "CPU_TempDown[10] (pad)", "value": 82 },
+      "0xF1B": { "name": "CPU_TempDown[11] (pad)", "value": 255 },
+      "0xF1C": { "name": "CPU_TempDown[12] (pad)", "value": 255 },
+      "0xF1D": { "name": "CPU_TempDown[13] (pad)", "value": 255 },
+      "0xF1E": { "name": "CPU_TempDown[14] (pad)", "value": 255 },
+      "0xF1F": { "name": "CPU_TempDown[15] (pad)", "value": 255 },
+      "0xF20": { "name": "CPU_Duty[0]", "value": 0 },
+      "0xF21": { "name": "CPU_Duty[1]", "value": 64 },
+      "0xF22": { "name": "CPU_Duty[2]", "value": 70 },
+      "0xF23": { "name": "CPU_Duty[3]", "value": 80 },
+      "0xF24": { "name": "CPU_Duty[4]", "value": 100 },
+      "0xF25": { "name": "CPU_Duty[5]", "value": 110 },
+      "0xF26": { "name": "CPU_Duty[6]", "value": 120 },
+      "0xF27": { "name": "CPU_Duty[7]", "value": 140 },
+      "0xF28": { "name": "CPU_Duty[8]", "value": 160 },
+      "0xF29": { "name": "CPU_Duty[9]", "value": 180 },
+      "0xF2A": { "name": "CPU_Duty[10] (pad)", "value": 180 },
+      "0xF2B": { "name": "CPU_Duty[11] (pad)", "value": 180 },
+      "0xF2C": { "name": "CPU_Duty[12] (pad)", "value": 180 },
+      "0xF2D": { "name": "CPU_Duty[13] (pad)", "value": 180 },
+      "0xF2E": { "name": "CPU_Duty[14] (pad)", "value": 180 },
+      "0xF2F": { "name": "CPU_Duty[15] (pad)", "value": 180 }
+    },
+
+    "fanTableGpu": {
+      "0xF30": { "name": "GPU_TempUp[0]", "value": 46 },
+      "0xF31": { "name": "GPU_TempUp[1]", "value": 50 },
+      "0xF32": { "name": "GPU_TempUp[2]", "value": 54 },
+      "0xF33": { "name": "GPU_TempUp[3]", "value": 58 },
+      "0xF34": { "name": "GPU_TempUp[4]", "value": 62 },
+      "0xF35": { "name": "GPU_TempUp[5]", "value": 66 },
+      "0xF36": { "name": "GPU_TempUp[6]", "value": 70 },
+      "0xF37": { "name": "GPU_TempUp[7]", "value": 74 },
+      "0xF38": { "name": "GPU_TempUp[8]", "value": 78 },
+      "0xF39": { "name": "GPU_TempUp[9]", "value": 81 },
+      "0xF3A": { "name": "GPU_TempUp[10] (pad)", "value": 255 },
+      "0xF3B": { "name": "GPU_TempUp[11] (pad)", "value": 255 },
+      "0xF3C": { "name": "GPU_TempUp[12] (pad)", "value": 255 },
+      "0xF3D": { "name": "GPU_TempUp[13] (pad)", "value": 255 },
+      "0xF3E": { "name": "GPU_TempUp[14] (pad)", "value": 255 },
+      "0xF3F": { "name": "GPU_TempUp[15] (pad)", "value": 255 },
+      "0xF40": { "name": "GPU_TempDown[0]", "value": 0 },
+      "0xF41": { "name": "GPU_TempDown[1]", "value": 44 },
+      "0xF42": { "name": "GPU_TempDown[2]", "value": 48 },
+      "0xF43": { "name": "GPU_TempDown[3]", "value": 52 },
+      "0xF44": { "name": "GPU_TempDown[4]", "value": 56 },
+      "0xF45": { "name": "GPU_TempDown[5]", "value": 60 },
+      "0xF46": { "name": "GPU_TempDown[6]", "value": 64 },
+      "0xF47": { "name": "GPU_TempDown[7]", "value": 68 },
+      "0xF48": { "name": "GPU_TempDown[8]", "value": 72 },
+      "0xF49": { "name": "GPU_TempDown[9]", "value": 76 },
+      "0xF4A": { "name": "GPU_TempDown[10] (pad)", "value": 80 },
+      "0xF4B": { "name": "GPU_TempDown[11] (pad)", "value": 255 },
+      "0xF4C": { "name": "GPU_TempDown[12] (pad)", "value": 255 },
+      "0xF4D": { "name": "GPU_TempDown[13] (pad)", "value": 255 },
+      "0xF4E": { "name": "GPU_TempDown[14] (pad)", "value": 255 },
+      "0xF4F": { "name": "GPU_TempDown[15] (pad)", "value": 255 },
+      "0xF50": { "name": "GPU_Duty[0]", "value": 0 },
+      "0xF51": { "name": "GPU_Duty[1]", "value": 60 },
+      "0xF52": { "name": "GPU_Duty[2]", "value": 70 },
+      "0xF53": { "name": "GPU_Duty[3]", "value": 80 },
+      "0xF54": { "name": "GPU_Duty[4]", "value": 102 },
+      "0xF55": { "name": "GPU_Duty[5]", "value": 110 },
+      "0xF56": { "name": "GPU_Duty[6]", "value": 120 },
+      "0xF57": { "name": "GPU_Duty[7]", "value": 140 },
+      "0xF58": { "name": "GPU_Duty[8]", "value": 160 },
+      "0xF59": { "name": "GPU_Duty[9]", "value": 180 },
+      "0xF5A": { "name": "GPU_Duty[10] (pad)", "value": 180 },
+      "0xF5B": { "name": "GPU_Duty[11] (pad)", "value": 180 },
+      "0xF5C": { "name": "GPU_Duty[12] (pad)", "value": 180 },
+      "0xF5D": { "name": "GPU_Duty[13] (pad)", "value": 180 },
+      "0xF5E": { "name": "GPU_Duty[14] (pad)", "value": 180 },
+      "0xF5F": { "name": "GPU_Duty[15] (pad)", "value": 180 }
+    },
+
+    "battery": {
+      "0x7A6": { "name": "BatteryMode", "value": 8, "hex": "0x08", "mode": "High Capacity (Performance)" }
+    },
+
+    "logoLed": {
+      "0x769": { "name": "Logo_R", "value": 0 },
+      "0x76A": { "name": "Logo_G", "value": 0 },
+      "0x76B": { "name": "Logo_B", "value": 50, "hex": "0x32" },
+      "0x7AB": { "name": "Logo_OnOff", "value": 0, "note": "bit 7 clear = unknown default state" }
+    },
+
+    "other": {
+      "0x741": { "name": "Unknown_0x741", "value": 0, "oemValue": 129, "note": "OEM sets to 0x81, firmware defaults to 0" },
+      "0x766": { "name": "SupportByte2", "value": 144, "hex": "0x90", "oemValue": 147, "note": "OEM 0x93 vs firmware 0x90 — some support flags differ" },
+      "0x7D4": { "name": "Unknown_0x7D4", "value": 0, "oemValue": 255, "note": "OEM sets to 0xFF" },
+      "0x7D5": { "name": "Unknown_0x7D5", "value": 5, "oemValue": 24, "note": "OEM sets to 24" }
+    }
+  }
+}

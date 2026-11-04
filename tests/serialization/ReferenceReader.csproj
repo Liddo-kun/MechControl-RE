@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="$(ReferenceSource)/AppJsonContext.cs" />
+    <Compile Include="$(ReferenceSource)/Profile/ProfileSchema.cs" />
+    <Compile Include="$(ReferenceSource)/Profile/UniversalDefaults.cs" />
+    <Compile Include="$(ReferenceSource)/Profile/UserProfile.cs" />
+    <Compile Include="$(ReferenceSource)/Profile/UserProfileManager.cs" />
+    <Compile Include="$(ReferenceSource)/Profile/GpuFailsafeSettings.cs" />
+    <Compile Include="$(ReferenceSource)/Profile/ThermalProtectionState.cs" />
+    <Compile Include="$(ReferenceSource)/Features/LightingState.cs" />
+    <Compile Include="$(ReferenceSource)/Features/LiquidCoolerState.cs" />
+    <Compile Include="$(ReferenceSource)/Features/LiquidCoolerControl.cs" />
+  </ItemGroup>
+</Project>
