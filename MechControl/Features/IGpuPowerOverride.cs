@@ -2,11 +2,12 @@ namespace MechControl.Features;
 
 // Driver units are retained in profiles/readback: no rounding of a detected rail limit.
 // Default/StockMaximum come from the original BIOS; Maximum/Current are live.
-record GpuCurrentLimit(int MinimumMilliamps, int DefaultMilliamps, int MaximumMilliamps, int CurrentMilliamps, int StockMaximumMilliamps)
+record GpuCurrentLimit(int MinimumMilliamps, int DefaultMilliamps, int MaximumMilliamps, int CurrentMilliamps, int StockMaximumMilliamps,
+    int UnlockPercent = Profile.UniversalDefaults.GpuCurrentUnlockPercent)
 {
-    // UI policy, not a hardware rating: all three currents share the same unlock headroom.
+    // UI policy, not a hardware rating: the unlock allows up to UnlockPercent of the stock default.
     public int AllowedMaximumMilliamps(bool unlocked) =>
-        unlocked ? Math.Max(StockMaximumMilliamps, checked((int)((long)DefaultMilliamps * Profile.UniversalDefaults.GpuCurrentUnlockPercent / 100))) : StockMaximumMilliamps;
+        unlocked ? Math.Max(StockMaximumMilliamps, checked((int)((long)DefaultMilliamps * UnlockPercent / 100))) : StockMaximumMilliamps;
 }
 record GpuCurrentLimits(GpuCurrentLimit Nvvdd, GpuCurrentLimit Msvdd, GpuCurrentLimit? BoardInput = null);
 // Live driver ceiling, enforced limit and request (null when none is set, e.g. after a GPU restart).

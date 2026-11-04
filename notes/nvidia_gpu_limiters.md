@@ -34,7 +34,7 @@ input RE), `nvidia_power_override_research.md` (BIOS overrides).
 | GPU power (TGP) | Lowest of our request (F8) and the laptop budget (F7: firmware/Dynamic Boost from EC TGP + DB) | 175 W (BIOS max) | 250 W | Power policy 2 → power controller |
 | NVVDD (core) current | Policy 13 limit (slider) | 210 A | 294 A | Current controller |
 | MSVDD (fabric) current | Policy 14 limit (slider) | 60 A | 84 A | Current controller |
-| Board input current | Policy 9 limit (slider) | 11.053 A | 15.474 A | Hardware threshold → IPC |
+| Board input current | Policy 9 limit (slider) | 11.053 A | 17.021 A (15.474 A before v1.6.0) | Hardware threshold → IPC |
 
 - The power policy's limit arbitration lists its client requests (0xF7 laptop budget, 0xF8 ours,
   0xFC/0xFE unlimited); its output equals NVML's enforced limit, the lowest request.

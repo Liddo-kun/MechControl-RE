@@ -63,6 +63,8 @@ static class UniversalDefaults
     // extension with the detected BIOS ceiling and the EC register encoding.
     public const int TgpUnlockHeadroomWatts = 75;
     public const int GpuCurrentUnlockPercent = 140;
+    // Board input (supply-side) current gets more room: 11.053 A stock -> 17.02 A on the RTX 5090 Laptop.
+    public const int BoardInputUnlockPercent = 154;
     // Unlocked TGP floor as a percentage of the model's minimum (its base TGP), so it
     // scales with the GPU. Below the EC minimum only the NVIDIA driver request applies.
     public const int TgpUnlockMinimumPercent = 60;
