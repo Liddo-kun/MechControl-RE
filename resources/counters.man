@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<instrumentationManifest xmlns="http://schemas.microsoft.com/win/2004/08/events">
+  <instrumentation><counters xmlns="http://schemas.microsoft.com/win/2005/12/counters" schemaVersion="1.1">
+    <provider providerGuid="{78D1FCD4-2A33-4DD9-9C89-EC307B75E1F4}" applicationIdentity="MechControl.exe"
+      providerType="userMode" symbol="MechControlProvider">
+      <counterSet guid="{D82CB8AE-087D-4BD0-9117-43154F055549}" uri="MechControl.Native.Fans"
+        name="MechControl" description="MechControl passive embedded-controller fan telemetry"
+        instances="single" symbol="MechControlCounters">
+        <counter id="1" uri="MechControl.Native.Fans.CpuFanRpm" name="CPU Fan RPM"
+          description="CPU fan speed in RPM" type="perf_counter_large_rawcount" detailLevel="standard"/>
+        <counter id="2" uri="MechControl.Native.Fans.GpuFanRpm" name="GPU Fan RPM"
+          description="GPU fan speed in RPM" type="perf_counter_large_rawcount" detailLevel="standard"/>
+      </counterSet>
+    </provider>
+  </counters></instrumentation>
+</instrumentationManifest>

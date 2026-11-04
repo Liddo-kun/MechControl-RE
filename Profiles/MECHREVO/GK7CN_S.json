@@ -1,0 +1,35 @@
+{
+  "projectId": "GK7CN_S",
+  "projectIdValue": 7,
+  "verified": false,
+  "driver": { "devicePath": "\\\\.\\ACPIDriver" },
+  "registers": {
+    "PL1": "0x783", "PL2": "0x784", "PL4": "0x785",
+    "cpuTempLimitRead": "0x463", "cpuTempLimitWrite": "0x786",
+    "tgpDbCtrl": "0x743", "tgp": "0x744", "dbTotalPower": "0x745", "dbMaxTgp": "0x746",
+    "fanControlMode": "0x751", "fanCurveEnable": "0x7C5",
+    "cpuFanDuty": "0x75B", "gpuFanDuty": "0x75C",
+    "cpuTemp": "0x43E", "gpuTemp": "0x44F",
+    "cpuFanRpmLo": "0x464", "cpuFanRpmHi": "0x465",
+    "gpuFanRpmLo": "0x46B", "gpuFanRpmHi": "0x46C",
+    "statusByte": "0x768",
+    "batteryMode": "0x7A6", "batterySoc": "0x4AB",
+    "logoOnOff": "0x7AB", "logoR": "0x769", "logoG": "0x76A", "logoB": "0x76B",
+    "logoTrigger": "0x767", "logoCommit": "0x78C",
+    "projectId": "0x740",
+    "fanSwitchSpeed": "0x787"
+  },
+  "fanTable": {
+    "format": "RamFan1",
+    "cpuTempUpBase": "0xF00", "cpuTempDownBase": "0xF10", "cpuDutyBase": "0xF20",
+    "gpuTempUpBase": "0xF30", "gpuTempDownBase": "0xF40", "gpuDutyBase": "0xF50",
+    "entriesPerArray": 16, "activeEntries": 10,
+    "paddingTemp": 255, "paddingDuty": 200
+  },
+  "limits": {},
+  "bitfields": {},
+  "batteryModes": [],
+  "skipVerify": ["0x741", "0x7C6"],
+  "verifyRedirect": {},
+  "writeAllowlist": ["0x741", "0x7C6"]
+}

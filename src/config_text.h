@@ -1,0 +1,12 @@
+#pragma once
+#include <string>
+#include <string_view>
+
+namespace mech::config {
+std::wstring wide(std::string_view text);
+std::wstring lower_invariant(std::wstring_view text);
+bool equal_ignore_case(std::string_view left,std::string_view right);
+bool blank(std::wstring_view text);
+bool blank(std::string_view text);
+bool letter_or_digit(wchar_t character);
+}
