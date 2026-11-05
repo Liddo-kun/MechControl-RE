@@ -407,7 +407,6 @@ void Controller::recover_settings() {
     }
 }
 std::optional<Sensors> Controller::tick(ULONGLONG now) {
-    if(suspended_) return {};
     if(resume_at_ && now>=resume_at_ && !nvidia_busy_) { // In-flight NVIDIA work cannot verify the GPU hold.
         resume_at_=0;watchdog_=now+30000;
         try {if(!recover()) thermal_->enforce();} catch(const std::exception& ex){diagnostic_(ex.what());}
@@ -459,9 +458,8 @@ ControlResult Controller::execute(const ControlCommand& command) {
         data["ui"]=presentation(true,false,c->page);r.peripherals=std::move(data);return r;
     }
     if(auto c=std::get_if<AcEvent>(&command)) {if(on_ac_!=c->on_ac) {on_ac_=c->on_ac;gpu_check_at_=GetTickCount64()+5000;}return state();}
-    if(auto c=std::get_if<PowerEvent>(&command)) {
-        suspended_=c->suspended;
-        if(!c->suspended) {thermal_->invalidate();++epoch_;fan_application_=FanApplication::unapplied;resume_at_=GetTickCount64()+3000;watchdog_=resume_at_;gpu_check_at_=GetTickCount64()+8000;if(lighting_) lighting_->resume(GetTickCount64());}
+    if(std::holds_alternative<Resume>(command)) {
+        thermal_->invalidate();++epoch_;fan_application_=FanApplication::unapplied;resume_at_=GetTickCount64()+3000;watchdog_=resume_at_;gpu_check_at_=GetTickCount64()+8000;if(lighting_) lighting_->resume(GetTickCount64());
         return state();
     }
     ControlResult result;writes_started_=false;application_completed_=false;

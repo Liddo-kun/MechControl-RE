@@ -37,11 +37,11 @@ struct DefaultsApply { std::string mode; }; // Empty means firmware defaults.
 struct ThermalReset {};
 struct ThermalTest {std::optional<config::ProtectionSettings> expected;};
 struct Visibility { bool visible; };
-struct PowerEvent { bool suspended; };
+struct Resume {};
 struct CliCommand { std::vector<std::string> arguments; };
 using ControlCommand=std::variant<CpuApply,GpuApply,FanApply,FanBoost,BatteryApply,SwitchApply,
     ProtectionApply,SlotLoad,SlotSave,SlotRename,SlotClear,DefaultsApply,ThermalReset,ThermalTest,
-    Visibility,PowerEvent,AcEvent,GpuUnlock,DlppcApply,CliCommand,LightingApply,LightingIdle,DimmingApply,PeripheralRead,CoolerRequest,BatteryPage,UiRead,UiPage,UiPreflight,FanMaster,FanEdit,FanRead>;
+    Visibility,Resume,AcEvent,GpuUnlock,DlppcApply,CliCommand,LightingApply,LightingIdle,DimmingApply,PeripheralRead,CoolerRequest,BatteryPage,UiRead,UiPage,UiPreflight,FanMaster,FanEdit,FanRead>;
 // Status of the current curve/master/link request, not boost/switch, physical cooling or saved state.
 enum class FanApplication { unapplied, applied, partial };
 struct ControlResult {
@@ -158,7 +158,7 @@ private:
     FanApplication fan_application_=FanApplication::unapplied;
     bool fan_review_required_=false;
     int active_slot_=0,epoch_=0,last_duty_=-1,last_cpu_ramp_=-1,last_gpu_ramp_=-1;
-    bool linked_=false,visible_=false,suspended_=false,recovering_=false,reapply_=false;
+    bool linked_=false,visible_=false,recovering_=false,reapply_=false;
     bool writes_started_=false,monitor_stopped_=false;
     bool application_completed_=false;
     int ui_page_=0;

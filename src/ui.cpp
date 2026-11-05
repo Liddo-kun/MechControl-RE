@@ -996,7 +996,7 @@ private:
         case trayMessage:if(LOWORD(lp)==WM_CONTEXTMENU) menu();else if(LOWORD(lp)==NIN_SELECT || LOWORD(lp)==NIN_KEYSELECT) show();return 0;
         case WM_POWERBROADCAST:
             if(worker_ && wp==PBT_APMPOWERSTATUSCHANGE) {SYSTEM_POWER_STATUS s{};if(GetSystemPowerStatus(&s) && s.ACLineStatus!=255) worker_->request(AcEvent{s.ACLineStatus==1});}
-            if(worker_ && (wp==PBT_APMSUSPEND || wp==PBT_APMRESUMEAUTOMATIC)) worker_->request(PowerEvent{wp==PBT_APMSUSPEND});return TRUE;
+            if(worker_ && wp==PBT_APMRESUMEAUTOMATIC) worker_->request(Resume{});return TRUE;
         case WM_CLOSE:ShowWindow(window_,SW_HIDE);return 0;
         case WM_QUERYENDSESSION:return TRUE;
         case WM_ENDSESSION:if(wp) DestroyWindow(window_);return 0;
