@@ -271,7 +271,7 @@ std::string Controller::defaults(const std::string& key) {
     if(!key.empty()) {
         if(!p.modes || !p.modes->contains(key)) throw std::runtime_error("Requested defaults unavailable for this model");
         auto m=p.modes->at(key);
-        if(enabled("cpuPower")) {auto c=cpu();append(cpu_writes(p,m.pl1,m.pl2,m.pl4.value_or(c.pl4),m.tcc_offset.value_or(c.temp_limit)));}
+        if(enabled("cpuPower")) {auto c=cpu();auto cw=cpu_writes(p,m.pl1,m.pl2,m.pl4.value_or(c.pl4),m.tcc_offset.value_or(c.temp_limit));log_cpu(cw);append(cw);}
         if(enabled("gpuPower") && m.ctgp) {GpuSettings g;g.tgp=*m.ctgp;g.dynamic_boost_enabled=m.dynamic_boost.value_or(0)>0;g.dynamic_boost_watts=m.dynamic_boost.value_or(0);gpu_plan(g);gpu_default=g;}
         if(curves_supported() && m.fan_curve && m.fan_curve->cpu) {
             auto c=active_curve(*m.fan_curve->cpu,p.fan_table.entries);std::optional<Curve> g;
@@ -340,6 +340,7 @@ std::string Controller::defaults(const std::string& key) {
     if(!curves_supported()) text+="; unsupported fan curves skipped";
     else if(fan && fan->curve && !full_curves) text+="; preset has no GPU curve, GPU table unchanged and full fan intent not applied";
     if(fan_review_required_) text+="; editable fan seed still requires review";
+    diagnostic_((key.empty()?std::string("Firmware"):key)+" defaults: "+text);
     return text;
 }
 }

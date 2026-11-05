@@ -57,7 +57,8 @@ Identity collect_identity(const std::function<uint8_t(int)>& read_ec={});
 struct Selection { std::filesystem::path path; std::string method; };
 std::vector<std::filesystem::path> manual_profiles(const std::filesystem::path& directory);
 Selection select_profile(const std::filesystem::path&,const Identity&,
-    const std::function<std::optional<std::filesystem::path>(const std::vector<std::filesystem::path>&)>& manual={});
+    const std::function<std::optional<std::filesystem::path>(const std::vector<std::filesystem::path>&)>& manual={},
+    const std::function<void(const std::string&)>& log={});
 
 using ReadByte = std::function<uint8_t(int)>;
 struct Hardware {

@@ -96,9 +96,10 @@ private:
     bool initialize(std::vector<std::string>& errors);
     void seed_fans();
     bool curves_supported() const;
-    bool recover();
+    bool recover(const char* reason);
     void recover_settings();
     void batch(const std::vector<EcWrite>&);
+    void log_cpu(const std::vector<EcWrite>&);
     void peripheral_io(const std::function<void()>&);
     void dimming(bool);
     void explicit_apply(const std::function<void()>&);

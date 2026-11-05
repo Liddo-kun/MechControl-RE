@@ -9,4 +9,5 @@ bool equal_ignore_case(std::string_view left,std::string_view right);
 bool blank(std::wstring_view text);
 bool blank(std::string_view text);
 bool letter_or_digit(wchar_t character);
+std::string hex_text(unsigned value,int digits=2); // 0x-prefixed, upper case, zero padded.
 }
