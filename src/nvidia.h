@@ -25,7 +25,7 @@ struct Bios {
 };
 struct Identity {uint16_t device=0;uint32_t subsystem=0,domain=0,bus=0,slot=0,function=0;std::string bios,name,driver;bool operator==(const Identity&) const=default;};
 struct PowerLimits {uint32_t min,def,max,enforced;std::optional<uint32_t> requested;};
-struct Rail {uint32_t min,def,max,current,stock_max=0;int allowed(bool unlock) const;bool operator==(const Rail&) const=default;};
+struct Rail {uint32_t min,def,max,current,stock_max=0,unlock_percent=140;int allowed(bool unlock) const;bool operator==(const Rail&) const=default;};
 struct Currents {Rail nv,ms;std::optional<Rail> input;};
 struct Budget {uint32_t f7,platform;Budget raise(uint32_t,Budget baseline) const;bool operator==(const Budget&) const=default;};
 struct Dlppc {bool active;int policy;uint32_t controllers;};

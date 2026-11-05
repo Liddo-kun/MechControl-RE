@@ -29,7 +29,8 @@
     "paddingTemp": 255, "paddingDuty": 200
   },
   "limits": {},
-  "bitfields": {},
+  "bitfields": { "fanCurveLatch": { "register": "0x7C6", "mask": "0x04" } },
+  "modePresets": ["gaming", "office"],
   "batteryModes": [],
   "skipVerify": [],
   "verifyRedirect": {},

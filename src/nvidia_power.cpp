@@ -22,7 +22,8 @@ void Power::verify(const Bytes& active) {
 }
 Currents Power::currents() {
     auto c=api_->currents();auto convert=[](Rail r,Field f){r.min=std::max(r.min,f.min);r.def=f.def;r.stock_max=f.max;return r;};c.nv=convert(c.nv,original_.nv);c.ms=convert(c.ms,original_.ms);
-    if(board_verified_ && c.input && original_.input) c.input=convert(*c.input,*original_.input);else c.input={};return c;
+    // Board input gets more unlock room than the core rails, as in the source (11.053 A stock -> 17.02 A).
+    if(board_verified_ && c.input && original_.input) {c.input=convert(*c.input,*original_.input);c.input->unlock_percent=154;}else c.input={};return c;
 }
 Telemetry Power::telemetry() {auto t=api_->telemetry();if(!board_verified_) {t.input={};t.input_limit={};}return t;}
 bool Power::needs_restart(bool unlock,const config::GpuSettings& g) {

@@ -30,7 +30,7 @@ void from_json(const Json& j,MachineProfile& v) {
     F("registers",registers); F("fanTable",fan_table); F("limits",limits); F("bitfields",bitfields);
     F("batteryModes",battery_modes); F("baseboardPatterns",baseboard_patterns); F("cpuVendor",cpu_vendor);
     F("skipVerify",skip_verify); F("verifyRedirect",redirects); F("defaultFanCurve",default_fan);
-    F("defaultLogo",default_logo); F("modeDefaults",modes); F("writeAllowlist",allowlist);
+    F("defaultLogo",default_logo); F("modeDefaults",modes); F("modePresets",mode_presets); F("writeAllowlist",allowlist);
 }
 #undef F
 int hex(const std::string& text) {
@@ -143,7 +143,8 @@ Selection select_profile(const std::filesystem::path& dir,const Identity& id,
 Hardware collect_hardware(const ReadByte& read,const std::function<uint32_t(int)>& spec) {
     Hardware h;
     for(int a:{0x765,0x766,0x742,0x78E,0x7A4,0x7D3,0x7D2,0x771,0x772,0x454,0x47D,0x456,0x727,
-        0x730,0x731,0x732,0x733,0x7D8,0x734,0x735,0x736,0x737,0x7D9,0x7A7,0x7A8,0x7A9,0x7AA,0x7DA,0x753,0x754}) h.bytes[a]=read(a);
+        0x730,0x731,0x732,0x733,0x7D8,0x734,0x735,0x736,0x737,0x7D9,0x7A7,0x7A8,0x7A9,0x7AA,0x7DA,0x753,0x754})
+        try { h.bytes[a]=read(a); } catch(const std::exception&) { /* the reader logs it; dependent features treat the byte as unknown */ }
     try { std::array<uint32_t,12> s{}; for(int i=0;i<12;++i) s[i]=spec(i); h.ecspec=s; } catch(const std::exception& ex) { h.ecspec_error=ex.what(); }
     return h;
 }
@@ -152,7 +153,7 @@ std::map<std::string,Limit> Hardware::extract_limits() const {
     std::array<int,9> b{}; for(int i=0;i<9;++i) b[i]=(*ecspec)[i]&255;
     if(b[0]>=15 && b[0]<=253) r["PL1"]={10,b[0],"direct",{},{}};
     if(b[1]>=15 && b[1]<=253) r["PL2"]={10,b[1],"direct",{},{}};
-    if(b[2]>=15 && b[2]<=250) r["PL4"]={20,pl4_doubled()?b[2]*2:b[2],pl4_doubled()?"double":"direct",{},{}};
+    if(auto d=pl4_doubled(); d && b[2]>=15 && b[2]<=250) r["PL4"]={20,*d?b[2]*2:b[2],*d?"double":"direct",{},{}};
     if(b[3]<=40) r["cpuTempLimit"]={80,105-b[3],"inverted_offset",105,{}};
     else if(b[3]>=80 && b[3]<=120) r["cpuTempLimit"]={80,b[3],"direct",{},{}};
     if(b[7]>=50 && b[7]<=200 && b[4]!=255 && b[4]+b[7]<=300) r["TGP"]={b[7],b[4]+b[7],"offset",{},b[7]};
@@ -162,10 +163,11 @@ std::map<std::string,Limit> Hardware::extract_limits() const {
 std::optional<std::map<std::string,Mode>> Hardware::extract_modes(bool absolute) const {
     std::map<std::string,Mode> r;
     for(auto [name,base,tcc]:{std::tuple{"gaming",0x730,0x7D8},std::tuple{"office",0x734,0x7D9},std::tuple{"batterySaver",0x7A7,0}}) {
-        int a=at(base),b=at(base+1),c=at(base+2),t=tcc?at(tcc):255;
+        // Unread bytes become 255, which every range check below rejects.
+        int a=at(base).value_or(255),b=at(base+1).value_or(255),c=at(base+2).value_or(255),t=tcc?at(tcc).value_or(255):255;
         if(a<5 || a>200) continue;
         Mode m; m.pl1=a; m.pl2=(b>=5 && b<=200)?b:a;
-        if(c>=5 && c<=250) m.pl4=pl4_doubled()?c*2:c;
+        if(auto d=pl4_doubled(); d && c>=5 && c<=250) m.pl4=*d?c*2:c;
         if(absolute && t>=60 && t<=120) m.tcc_offset=t;
         else if(!absolute && t<=40) m.tcc_offset=105-t;
         r[name]=m;
@@ -182,8 +184,11 @@ Enrichment enrich(MachineProfile& p,const Hardware& h) {
     auto temp=limits.find("cpuTempLimit");
     if(temp!=limits.end() && temp->second.encoding=="direct") { p.limits["cpuTempLimit"]=temp->second; p.redirects["0x786"]={"0x463","direct",{}}; }
     e.cpu_encoding_confirmed=temp!=limits.end() && temp->second.encoding==p.cpu_encoding();
-    if(p.limits.contains("PL4")) p.limits["PL4"].encoding=h.pl4_doubled()?"double":"direct";
-    if(!p.modes) p.modes=h.extract_modes(p.cpu_encoding()=="direct");
+    if(auto d=h.pl4_doubled()) { if(p.limits.contains("PL4")) p.limits["PL4"].encoding=*d?"double":"direct"; } else e.pl4_unknown=true;
+    if(!p.modes) {
+        p.modes=h.extract_modes(p.cpu_encoding()=="direct");
+        if(p.modes && p.mode_presets) std::erase_if(*p.modes,[&](const auto& m){return std::ranges::find(*p.mode_presets,m.first)==p.mode_presets->end();});
+    }
     return e;
 }
 bool gpu_recovery_supported(const MachineProfile& p,uint8_t module) { return module>0 && module<255 && !p.tgp_fallback && p.registers.contains("gpuTemp") && p.registers.contains("tgp"); }
@@ -220,6 +225,7 @@ Validation validate_startup(const MachineProfile& p,const ReadByte& read,uint8_t
     if(!e.cpu_encoding_confirmed && vendor && p.cpu_encoding()!=(*vendor=="amd"?"direct":"inverted_offset")) {
         r.enabled.erase("cpuPower"); r.disabled["cpuPower"]="CPU temperature encoding contradicts CPU vendor without ECSpec confirmation";
     }
+    if(e.pl4_unknown) { r.enabled.erase("cpuPower"); r.disabled["cpuPower"]="PL4 encoding unknown (0x727 read failed)"; }
     return r;
 }
 namespace encoding {

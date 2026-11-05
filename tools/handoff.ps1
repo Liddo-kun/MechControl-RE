@@ -56,7 +56,7 @@ foreach ($directory in @($FromDirectory, $ToDirectory)) {
 }
 $task = Get-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath
 if ($task.Settings.Enabled -or $task.State -eq 'Running') { throw 'Disable the logon task and exit its controller before transfer.' }
-if (Get-Process -Name MechControl,ui-fixture,ui-pages-check,foundation-check -ErrorAction SilentlyContinue) { throw 'Exit every controller and counter publisher before transfer.' }
+if (Get-Process -Name MechControl,ui-pages-check,foundation-check -ErrorAction SilentlyContinue) { throw 'Exit every controller and counter publisher before transfer.' }
 $mutex = $null
 try { $mutex = [Threading.Mutex]::OpenExisting('Global\MechControl') } catch [Threading.WaitHandleCannotBeOpenedException] { }
 if ($mutex) { $mutex.Dispose(); throw 'Global\MechControl still exists. Wait for its owner to exit.' }

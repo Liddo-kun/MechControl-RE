@@ -1,7 +1,6 @@
 # Architecture and ownership
 
-`src/ui.cpp` is the production Win32 application. `src/main.cpp` is the older
-foundation fixture, not the shipping UI. The UI owns controls, tray state and
+`src/ui.cpp` is the production Win32 application. The UI owns controls, tray state and
 presentation. `ControlWorker` (`worker.*`) owns a serialized command queue,
 controller and monitor on one `std::jthread`. `Delivery` posts owned results to
 the UI; it is detached before destruction. Shutdown stops producers and joins
@@ -18,6 +17,10 @@ Detection preserves baseboard-pattern precedence, CPU-vendor filtering, direct
 then shifted project IDs, filename fallback and manual selection. Runtime models
 live in the one `Profiles/MECHREVO` tree. Device capabilities, encodings and limits
 come from that model and runtime validation, not assumptions about this host.
+A `fanCurveLatch` bitfield selects read-modify-write of the `0x7C6` latch, and
+`modePresets` limits which EC presets are exposed. X6FR5xxY uses both: firmware
+`XxFR5xxx_Pro_14.810` shares other bits in `0x7C6`, and its `0x7A7` preset is 145 W,
+not Battery Saver.
 
 `ec.*` and `ec_session.*` own the OEM transport, activation and central WriteGuard.
 `controller*` coordinates power, fans, presets and partial outcomes. Thermal

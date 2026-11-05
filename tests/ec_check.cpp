@@ -116,9 +116,11 @@ void snapshots_and_startup() {
     amd.apply(cpu_writes(p,50,80,180,95));
     require(s->bytes[0x786]==0xDF && s->bytes[0x463]==95,"AMD CPU group writes absolute temperature payload through redirect verification");
     s->bytes[0x463]=0xD5;
-    s->calls.clear(); auto sample=read_sensors(ec,p,false);
+    s->calls.clear(); auto sample=read_sensors(ec,p,Detail::full);
     require(sample.cpu_rpm==0x1234 && sample.gpu_rpm==0x5678 && sample.cpu_limit==85 && s->calls.size()==18,"X6FR profile RPM byte order, direct high-bit masked temperature and 18-byte full sample");
-    s->calls.clear(); sample=read_sensors(ec,p,true); require(s->calls.size()==4 && !sample.cpu_temp,"lightweight sample reads just four RPM bytes");
+    s->calls.clear(); sample=read_sensors(ec,p,Detail::rpm); require(s->calls.size()==4 && !sample.cpu_temp,"tray sample reads just four RPM bytes");
+    s->calls.clear(); sample=read_sensors(ec,p,Detail::monitor); require(s->calls.size()==11 && sample.curve_enabled && !sample.cpu_temp && !sample.system_watts,"monitor bar sample skips temperatures and System Info sensors");
+    s->calls.clear(); sample=read_sensors(ec,p,Detail::temperatures,Sensors{.gpu_temp=50}); require(s->calls.size()==12 && sample.cpu_temp && sample.gpu_temp==50 && !sample.system_watts,"Fans tab sample adds temperatures, reusing a shared reading");
     s=machine(); ChannelFactory factory=[s](const std::wstring& path){require(path==LR"(\\.\ACPIDriver)","profile device path passed to EC owner");return std::make_unique<Fake>(s);};
     {
         EcSession session(factory,{},true,{},config::profiles_directory(),config::Identity{"YAOSHI Series-X6AR55xY","fixture","intel",uint8_t{26}});
@@ -147,7 +149,6 @@ void worker_owner(const std::filesystem::path& scratch) {
     options.identity=config::Identity{"X6AR55xY","fixture","intel",uint8_t{26}};
     options.channel_factory=[&](const std::wstring&,HANDLE){owner=std::this_thread::get_id();return std::make_unique<Fake>(s);};
     ControlWorker worker(delivery,log,std::move(options));
-    require(!worker.submit({1,25}),"production worker refuses integer prototype commands");
     require(worker.wait()==0 && owner!=std::this_thread::get_id() && s->live==0,"worker owns startup, EC I/O, delivery and destruction without a window");
     require(config::read_json(scratch/L"diagnostic.json")["model"]=="IDY_7Y" && writes(*s).empty(),"worker diagnostic writes report, never hardware");
 }

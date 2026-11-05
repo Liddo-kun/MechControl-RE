@@ -68,7 +68,7 @@ public:
         std::unique_ptr<nv::Power> driver={},bool peripheral_hardware=true,
         std::function<void(config::Json)> cooler_delivery={},Lighting::Send lighting_send={});
     ~Controller();
-    void start();
+    std::vector<std::string> start(); // Returns EC init errors; startup continues with them.
     ControlResult execute(const ControlCommand&);
     std::optional<Sensors> tick(ULONGLONG now=GetTickCount64());
     std::optional<config::Json> take_battery();
@@ -82,7 +82,7 @@ public:
     bool fan_review_required() const { return fan_review_required_; }
     config::Json presentation(bool read=false,bool gpu_live=false,int page=-1);
     int ui_page() const {return ui_page_;}
-    bool gpu_presentation() const { return visible_ && (ui_page_==0 || ui_page_==5); }
+    bool gpu_presentation() const { return visible_ && ui_page_==0 && enabled("gpuPower"); } // The Power tab's live table.
 private:
     bool enabled(const char*) const;
     uint8_t read(const char*);
@@ -93,7 +93,7 @@ private:
     config::CpuSettings minimum_cpu();
     void emergency(int);
     bool matches(int);
-    void initialize();
+    bool initialize(std::vector<std::string>& errors);
     void seed_fans();
     bool curves_supported() const;
     bool recover();
@@ -114,7 +114,7 @@ private:
     std::string defaults(const std::string&);
     cli::Reply cli(const std::vector<std::string>&);
     config::Json status();
-    config::Json cpu_status(),gpu_status(bool presentation=false),fans_status();
+    config::Json cpu_status(),gpu_status(bool presentation=false),fans_status(),gpu_telemetry(),gpu_budget();
     void apply_slot(const config::UserProfile&,const nv::ProfilePlan&,int,bool,bool);
     bool gpu_extend() const;int gpu_min() const;int gpu_max() const;
     int gpu_unlock_min() const;int gpu_unlock_max() const;
@@ -144,7 +144,7 @@ private:
     std::function<void(config::Json)> cooler_delivery_;
     Lighting::Send lighting_send_;
     bool peripheral_busy_=false,battery_page_=false;
-    ULONGLONG battery_at_=0;
+    ULONGLONG battery_at_=0,budget_at_=0;
     std::optional<config::Json> battery_sample_;
     bool peripheral_hardware_=true,dimming_available_=false;
     std::unique_ptr<ThermalProtection> thermal_;

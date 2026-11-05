@@ -35,20 +35,22 @@ FanSnapshot read_fans(EcTransport& ec,const config::FanTable& ft) {
     s.enable=ec.read(0x7C5); s.mode=ec.read(0x7C6);
     return s;
 }
-Sensors read_sensors(EcTransport& ec,const config::MachineProfile& p,bool lightweight,const std::optional<Sensors>& shared) {
+Sensors read_sensors(EcTransport& ec,const config::MachineProfile& p,Detail detail,const std::optional<Sensors>& shared) {
     auto read=[&](const char* name){return ec.read(p.reg(name));};
     Sensors s=shared.value_or(Sensors{});
     auto cpu_a=read("cpuFanRpmLo"),cpu_b=read("cpuFanRpmHi");
     auto gpu_a=read("gpuFanRpmLo"),gpu_b=read("gpuFanRpmHi");
     s.cpu_rpm=(cpu_a<<8)|cpu_b; s.gpu_rpm=(gpu_b<<8)|gpu_a;
-    if(lightweight) return s;
+    if(detail==Detail::rpm) return s;
     s.cpu_percent=config::encoding::decode_fan_duty(read("cpuFanDuty"));
     s.gpu_percent=config::encoding::decode_fan_duty(read("gpuFanDuty"));
     s.cpu_limit=config::encoding::decode_cpu_temperature(read("cpuTempLimitRead"),p.cpu_encoding()=="direct",p.tj_max());
     s.battery_soc=read("batterySoc");s.battery_raw=read("batteryMode");s.battery_mode=config::encoding::decode_battery(uint8_t(*s.battery_raw));
     s.boost=(read("statusByte")&4)!=0; s.curve_enabled=(read("fanCurveEnable")&128)!=0;
+    if(detail==Detail::monitor) return s;
     if(p.registers.contains("cpuTemp") && !s.cpu_temp) s.cpu_temp=read("cpuTemp");
     if(p.registers.contains("gpuTemp") && !s.gpu_temp) s.gpu_temp=read("gpuTemp");
+    if(detail==Detail::temperatures) return s;
     s.adapter_amps=ec.read(0x449)/10.0;
     auto lo=ec.read(0x60C),hi=ec.read(0x60D); s.system_watts=lo|(hi<<8);
     s.db_live=ec.read(0x7D5); s.tgp_live=ec.read(0x788)+p.tgp_offset();
@@ -73,11 +75,9 @@ EcSession::EcSession(ChannelFactory factory,const std::function<void(const std::
     // Includes the original 0x727 flag before any possible activation operation.
     hardware=config::collect_hardware(read,[&](int index){return ec_->spec(index);});
     auto enrichment=config::enrich(profile,hardware);
-    // The reviewed X6FR 0x7A7 preset is 145 W, not Battery Saver. Do not expose
-    // that interpretation, or invent a new preset, for this model.
-    if(config::equal_ignore_case(profile.project_id,"X6FR5xxY") && profile.modes) profile.modes->erase("batterySaver");
-    validation=config::validate_startup(profile,read,hardware.at(0x7D2),enrichment,identity.cpu_vendor);
-    battery_bit3=read(profile.reg("batteryMode"))&8;
+    validation=config::validate_startup(profile,read,hardware.gpu_module(),enrichment,identity.cpu_vendor);
+    try { battery_bit3=uint8_t(read(profile.reg("batteryMode"))&8); }
+    catch(const std::exception& ex) { validation.enabled.erase("battery"); validation.disabled["battery"]=std::string("Battery mode variant read failed: ")+ex.what(); }
     // Log the unmapped bitfields too; startup validation intentionally only gates mapped features.
     for(const auto& [name,b]:profile.bitfields) {
         try { auto value=read(config::hex(b.reg)); if(diagnostic) diagnostic("Bitfield "+name+" raw="+std::to_string(value)+" mask="+std::to_string(b.get_mask())); }
@@ -101,7 +101,7 @@ void EcSession::snapshot_fans() {
 }
 config::Json EcSession::diagnostic_report() {
     using config::Json;
-    auto s=sample(false);
+    auto s=sample(Detail::full);
     Json limits=Json::object(),raw=Json::object();
     auto nullable=[](const auto& v)->Json {if(v)return *v;return nullptr;};
     for(const auto& [name,l]:profile.limits) limits[name]={{"min",l.min},{"max",l.max},{"encoding",l.encoding},{"offset",nullable(l.offset)},{"tjMax",nullable(l.tj_max)}};
@@ -112,7 +112,7 @@ config::Json EcSession::diagnostic_report() {
         {"cpuVendor",identity.cpu_vendor.value_or("unknown")},{"selection",selection.method},{"profile",selection.path.string()},
         {"ecspec",spec},{"ecspecError",hardware.ecspec_error},{"startupReadsDecimalAddresses",raw},
         {"limits",limits},{"enabled",validation.enabled},{"disabled",validation.disabled},
-        {"pl4Doubled",profile.pl4_doubled()},{"batteryBit3",battery_bit3},
+        {"pl4Doubled",profile.pl4_doubled()},{"batteryBit3",nullable(battery_bit3)},
         {"fans",{{"cpu",fans.cpu},{"gpu",fans.gpu},{"probe",fans.probe},{"enableRaw",fans.enable},{"modeRaw",fans.mode},
             {"valid",fans.valid()},{"activeEntries",fans.active_entries()},{"gpuPresent",gpu_present},
             {"latchInterpretation","Raw only. X6FR XxFR5xxx_Pro_14.810 static evidence tests bit 2 and shares bits 6/7; no universal equality or Intel inference."}}},

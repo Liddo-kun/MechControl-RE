@@ -12,7 +12,7 @@ Json Controller::presentation(bool read,bool gpu_live,int page) {
     Json j={{"activeSlot",active_slot_},{"warning",store_.warning()},{"monitorStopped",monitor_stopped_},
         {"fanApplication",int(fan_application_)},{"fanReview",fan_review_required_},{"linked",linked_},
         {"protection",thermal_->settings()},
-        {"tripped",thermal_->tripped()},{"complete",thermal_->complete()},{"thermalStatus",thermal_->status()},
+        {"tripped",thermal_->tripped()},{"complete",thermal_->complete()},{"thermalLostAlerts",thermal_->lost_alerts()},{"thermalStatus",thermal_->status()},
         {"temperature",nullable(thermal_->temperature())},{"average",nullable(thermal_->average())},
         {"peak",nullable(thermal_->peak_temperature())},{"dlppcDisabled",dlppc_disabled_}};
     if(read) j["readPage"]=page;
@@ -49,9 +49,47 @@ Json Controller::presentation(bool read,bool gpu_live,int page) {
             auto speed=encoding::decode_switch_speed(this->read("fanSwitchSpeed"));j["switchEnabled"]=speed.first;j["switchMs"]=speed.second;
         }catch(const std::exception& e){j["fanError"]=e.what();}
     if(read && page==3 && enabled("battery")) try {j["batteryMode"]=encoding::decode_battery(this->read("batteryMode"));}catch(const std::exception& e){j["batteryError"]=e.what();}
-    if(gpu_live || (read && page==5)) {
-        try {j["gpuLive"]=gpu_status(true);}catch(const std::exception& e){j["gpuError"]=e.what();}
-    }
+    if(gpu_live && page==0) j["gpuLive"]=gpu_telemetry();
+    if(page==5 && visible_ && (read || GetTickCount64()>=budget_at_)) {budget_at_=GetTickCount64()+5000;j["gpuBudget"]=gpu_budget();}
+    return j;
+}
+static Json maybe(std::optional<uint32_t> value) {return value?Json(*value):Json(nullptr);}
+// Driver readings shared by the Power tab's editor read and its twice-a-second live refresh.
+static void live_fields(Json& g,const nv::Telemetry& t) {
+    auto mhz=[&](std::optional<uint32_t> khz){return khz?Json(*khz/1000):Json(nullptr);};
+    g["currentCapMhz"]=mhz(t.current_khz);g["powerCapMhz"]=mhz(t.power_khz);g["maxClockMhz"]=mhz(t.ceiling_khz);
+    g["clockMhz"]=maybe(t.clock_mhz);g["gpuPowerMw"]=maybe(t.gpu_mw);g["corePowerMw"]=maybe(t.core_mw);if(t.ipc) g["boardInputLimiterActivity"]=*t.ipc;
+}
+// The live refresh reads driver telemetry only, like the source: no EC, limit, budget or DLPPC reads.
+Json Controller::gpu_telemetry() {
+    if(!enabled("gpuPower")) return nullptr;
+    Json g={{"nvidia",nvidia_unavailable()}};
+    if(nvidia_busy_) {g["nvidia"]="NVIDIA operation in progress";return g;}
+    if(gpu_driver_uncertain_) {g["nvidia"]=nvidia_error_;return g;}
+    if(!nvidia_) return g;
+    if(!nvidia_->awake()) {g["nvidia"]="GPU asleep, not read";return g;}
+    g["nvidia"]=nullptr;
+    try {
+        nv::Telemetry t;nvidia_work([&]{t=nvidia_->telemetry();});
+        g["nvvdd"]={{"measuredMa",t.nv},{"liveLimitMa",maybe(t.nv_limit)}};g["msvdd"]={{"measuredMa",t.ms},{"liveLimitMa",maybe(t.ms_limit)}};
+        if(t.input || t.input_limit) g["boardInput"]={{"measuredMa",maybe(t.input)},{"liveLimitMa",maybe(t.input_limit)}};
+        g["enforcedMw"]=maybe(t.enforced_mw);live_fields(g,t);
+    } catch(const std::exception& e) {g["telemetryError"]=e.what();}
+    thermal_->enforce(true);
+    return g;
+}
+// System Info's driver budgets, at most every 5 s while that tab is shown, like the source.
+Json Controller::gpu_budget() {
+    if(!enabled("gpuPower")) return nullptr;
+    auto reason=[](const std::string& text){return Json{{"reason",text}};};
+    if(nvidia_busy_) return reason("NVIDIA operation in progress");
+    if(gpu_driver_uncertain_) return reason(nvidia_error_);
+    if(!nvidia_) return reason("NVIDIA not connected");
+    if(!nvidia_->awake()) return reason("GPU asleep, not read");
+    Json j;
+    try {nv::Budget b;nvidia_work([&]{b=nvidia_->budget();});j={{"laptopWatts",b.f7/1000},{"platformWatts",b.platform/1000}};}
+    catch(const std::exception& e) {j=reason(e.what());}
+    thermal_->enforce(true);
     return j;
 }
 Json Controller::cpu_status() {
@@ -64,7 +102,7 @@ Json Controller::gpu_status(bool presentation) {
     Json g={{"tgp",setting(v.tgp,l)},{"dynamicBoost",v.dynamic_boost_enabled},
             {"dynamicBoostWatts",setting(v.dynamic_boost_watts,control_limit(p,"dynamicBoost"))},{"unlocked",gpu_unlocked_},{"unlockAvailable",gpu_extend() && nvidia_available_},
              {"nvidia",nvidia_unavailable()}};
-    if(presentation) {g["stockWatts"]=nvidia_?nvidia_->stock_watts():0;g["unlockMin"]=gpu_unlock_min();g["unlockMax"]=gpu_unlock_max();}
+    if(presentation) {g["stockWatts"]=nvidia_?nvidia_->stock_watts():0;g["unlockMin"]=gpu_unlock_min();g["unlockMax"]=gpu_unlock_max();g["dlppcAvailable"]=nvidia_available_;}
         for(const char* key:{"ceilingWatts","enforcedWatts","requestedWatts","nvvdd","msvdd","boardInput","currentCapMhz","powerCapMhz","maxClockMhz",
             "clockMhz","gpuPowerMw","corePowerMw","boardInputLimiterActivity"}) g[key]=nullptr;
     // This guard precedes EVERY driver read, including below-EC-floor readback.
@@ -79,9 +117,8 @@ Json Controller::gpu_status(bool presentation) {
         nvidia_work([&]{
             auto attempt=[&](const char* key,const auto& work) {try {work();}catch(const std::exception& e){if(presentation) g[key]=e.what();else g["nvidia"]=std::string("NVIDIA readback failed: ")+e.what();}};
             attempt("powerError",[&]{power=nvidia_->limits();});attempt("currentsError",[&]{currents=nvidia_->currents();});attempt("telemetryError",[&]{telemetry=nvidia_->telemetry();});
-            // F7 and DLPPC are independent. Their failure never hides telemetry or currents.
+            // DLPPC is independent. Its failure never hides telemetry or currents.
             if(presentation) {
-                attempt("budgetError",[&]{auto b=nvidia_->budget();g["laptopBudgetWatts"]=b.f7/1000;g["platformBudgetWatts"]=b.platform/1000;});
                 attempt("dlppcError",[&]{auto d=nvidia_->dlppc();g["dlppc"]=d?Json{{"active",d->active},{"policy",d->policy},{"controllers",d->controllers}}:Json(nullptr);});
             }
         });
@@ -90,24 +127,21 @@ Json Controller::gpu_status(bool presentation) {
             int floor=control_limit(p,"TGP").min;
             int below=power->requested?int(*power->requested/1000)-(v.dynamic_boost_enabled?v.dynamic_boost_watts:0):floor;g["tgp"]["value"]=std::clamp(below,gpu_min(),floor);
         }
-        auto optional=[](std::optional<uint32_t> value)->Json {return value?Json(*value):Json(nullptr);};
         // The Power tab's live table compares readings with the limits the driver reports alongside them.
         auto rail=[&](nv::Rail r,std::optional<uint32_t> measured,std::optional<uint32_t> predicted,std::optional<uint32_t> live) -> Json {
-            Json j={{"limitMa",r.current},{"minMa",std::max(1000,int(r.min))},{"maxMa",std::min(r.allowed(gpu_unlocked_),int(r.max))},{"stockMa",r.def},{"measuredMa",optional(measured)},{"atClockCapMa",optional(predicted)}};
-            if(presentation) j["liveLimitMa"]=optional(live);return j;
+            Json j={{"limitMa",r.current},{"minMa",std::max(1000,int(r.min))},{"maxMa",std::min(r.allowed(gpu_unlocked_),int(r.max))},{"stockMa",r.def},{"measuredMa",maybe(measured)},{"atClockCapMa",maybe(predicted)}};
+            if(presentation) j["liveLimitMa"]=maybe(live);return j;
         };
         nv::Telemetry t=telemetry.value_or(nv::Telemetry{});
         if(currents) {auto c=*currents;g["nvvdd"]=rail(c.nv,telemetry?std::optional(t.nv):std::nullopt,t.nv_prediction,t.nv_limit);g["msvdd"]=rail(c.ms,telemetry?std::optional(t.ms):std::nullopt,t.ms_prediction,t.ms_limit);if(c.input) g["boardInput"]=rail(*c.input,t.input,{},t.input_limit);}
-        if(presentation) g["enforcedMw"]=optional(t.enforced_mw);
-        auto mhz=[&](std::optional<uint32_t> khz){return khz?Json(*khz/1000):Json(nullptr);};
-        g["currentCapMhz"]=mhz(t.current_khz);g["powerCapMhz"]=mhz(t.power_khz);g["maxClockMhz"]=mhz(t.ceiling_khz);
-        g["clockMhz"]=optional(t.clock_mhz);g["gpuPowerMw"]=optional(t.gpu_mw);g["corePowerMw"]=optional(t.core_mw);if(t.ipc) g["boardInputLimiterActivity"]=*t.ipc;
+        if(presentation) g["enforcedMw"]=maybe(t.enforced_mw);
+        live_fields(g,t);
     } catch(const std::exception& ex) {g["nvidia"]=std::string("NVIDIA readback failed: ")+ex.what();}
     thermal_->enforce(true);
     return g;
 }
 Json Controller::fans_status() {
-    auto& p=session_.profile;auto s=session_.sample(false);
+    auto& p=session_.profile;auto s=session_.sample(Detail::temperatures);
     Json boost_value=nullptr;if(enabled("fanControl")) boost_value=(read("fanControlMode")&p.bitfields.at("fanBoost").get_mask())!=0;
     return {{"boost",boost_value},{"cpuRpm",s.cpu_rpm},{"gpuRpm",s.gpu_rpm},{"cpuDutyPercent",s.cpu_percent.value_or(0)},
         {"gpuDutyPercent",s.gpu_percent.value_or(0)},{"cpuTempC",s.cpu_temp.value_or(0)},{"gpuTempC",s.gpu_temp.value_or(0)}};
@@ -261,7 +295,7 @@ std::string Controller::defaults(const std::string& key) {
             append(fan_curve_writes(p,*fan->cpu_curve,p.fan_table.has_gpu?std::optional(g):std::nullopt,false,latch_mask_));
             full_curves=true;
         }
-        if(!p.battery_modes.empty()) append({{p.reg("batteryMode"),encoding::battery(0,session_.battery_bit3),p.bitfields.at("batteryMode").get_mask()}});
+        if(!p.battery_modes.empty() && session_.battery_bit3) append({{p.reg("batteryMode"),encoding::battery(0,*session_.battery_bit3),p.bitfields.at("batteryMode").get_mask()}});
     }
     for(auto x:w) session_.guard->admit(x.address);
     explicit_apply([&] {

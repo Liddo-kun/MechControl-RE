@@ -83,7 +83,7 @@ std::vector<Record> Bios::build(const Override& request) const {
         char name[32];sprintf_s(name,"romOverride%02X",static_cast<unsigned>(records.size()));records.push_back({name,std::move(data)});}
     return records;
 }
-int Rail::allowed(bool unlock) const {return static_cast<int>(unlock?std::max<uint64_t>(stock_max,uint64_t(def)*140/100):stock_max);}
+int Rail::allowed(bool unlock) const {return static_cast<int>(unlock?std::max<uint64_t>(stock_max,uint64_t(def)*unlock_percent/100):stock_max);}
 Budget Budget::raise(uint32_t requested,Budget baseline) const {
     uint32_t f=std::max(baseline.f7,requested);uint64_t p=uint64_t(baseline.platform)+(f-baseline.f7);
     if(p>UINT32_MAX) throw std::runtime_error("NVIDIA shared budget overflow");return {f,static_cast<uint32_t>(p)};

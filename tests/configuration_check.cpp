@@ -141,7 +141,7 @@ int main(int argc,char** argv) try {
     require(!defaults.gpu->bios_override_enabled && !defaults.gpu->nvvdd_ma && Json(defaults)["gpu"]["boardInputMilliamps"].is_null(),"Nullable GPU rails preserved");
     Hardware h=collect_hardware([](int a)->uint8_t { if(a==0x727)return 128; if(a==0x7A4)return 128; if(a==0x730)return 80; if(a==0x731)return 100; if(a==0x732)return 100; if(a==0x7D8)return 95; return 0; },
         [](int i)->uint32_t { const uint32_t b[]{150,160,180,95,50,25,87,90,255,187,0,0}; return b[i]; });
-    require(h.decoded() && h.liquid_cooling() && h.pl4_doubled(),"Hardware capture and capabilities");
+    require(h.decoded() && h.liquid_cooling() && h.pl4_doubled()==true,"Hardware capture and capabilities");
     p=load_machine(profiles/"IDY_7Y.json"); apply_universal_defaults(p); auto enriched=enrich(p,h);
     require(p.cpu_encoding()=="direct" && p.tgp_offset()==90 && p.limits.at("PL4").max==360 && p.redirects.at("0x786").transform=="direct" && enriched.cpu_encoding_confirmed,"ECSpec enrichment");
     require(p.modes && p.modes->at("gaming").tcc_offset==95 && p.modes->at("gaming").pl4==200,"EC mode defaults decode");
