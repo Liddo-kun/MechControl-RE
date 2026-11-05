@@ -17,6 +17,7 @@ nv::Power& Controller::open_nvidia() {
     if(nvidia_busy_) throw std::runtime_error("NVIDIA operation in progress; try again in a few seconds");
     if(gpu_driver_uncertain_) throw std::runtime_error(nvidia_error_);
     if(nvidia_) return *nvidia_;if(!nvidia_available_) throw std::runtime_error(nvidia_error_.empty()?"No NVIDIA GPU control on this machine":nvidia_error_);
+    dlppc_api_.reset(); // One NVAPI owner: Power replaces the DLPPC-only Api; a refusal reopens it on demand.
     try {std::unique_ptr<nv::Power> opened;nvidia_work([&]{opened=std::make_unique<nv::Power>(control_limit(session_.profile,"TGP").min,diagnostic_);});nvidia_=std::move(opened);gpu_unlocked_=nvidia_->enabled;nvidia_min_watts_=nvidia_->minimum_watts();thermal_->invalidate();thermal_->enforce();return *nvidia_;}
     catch(const std::exception& ex) {nvidia_available_=false;nvidia_error_=ex.what();diagnostic_("NVIDIA unavailable: "+nvidia_error_);throw;}
 }
@@ -74,11 +75,11 @@ void Controller::validate_currents(const GpuSettings& g) {
     if(gpu_driver_uncertain_) throw std::runtime_error(nvidia_error_);
     if(nvidia_busy_ || !nvidia_) throw std::runtime_error(nvidia_unavailable());
     nv::Currents c;nvidia_work([&]{c=nvidia_->currents();});bool unlock=nvidia_->enabled;
-    auto validate=[&](std::optional<int> v,std::optional<nv::Rail> r) {
-        if(!v) return;if(!r) throw std::runtime_error("This GPU has no board input current limit");
+    auto validate=[&](std::optional<int> v,std::optional<nv::Rail> r,const char* name) {
+        if(!v) return;if(!r) throw std::runtime_error(std::string("This GPU has no ")+name+" current limit");
         if(*v<std::max(1000,int(r->min)) || *v>std::min(r->allowed(unlock),int(r->max))) throw std::runtime_error("Current outside active range; higher ceilings require manual unlock/GPU restart from the Power tab");
     };
-    validate(g.nvvdd_ma,c.nv);validate(g.msvdd_ma,c.ms);validate(g.board_input_ma,c.input);
+    validate(g.nvvdd_ma,c.nv,"NVVDD");validate(g.msvdd_ma,c.ms,"MSVDD");validate(g.board_input_ma,c.input,"board input");
     bool restart=false;nvidia_work([&]{restart=nvidia_->needs_restart(unlock,g);});if(restart) throw std::runtime_error("Current limits need a GPU restart; apply manually from the Power tab");
 }
 void Controller::apply_gpu(GpuSettings g) {
@@ -109,9 +110,23 @@ void Controller::unlock_gpu(bool enabled_value) {
     nv::ProfilePlan plan;plan.unlock=enabled_value;plan.restart=true;configure_gpu(plan);
     auto g=gpu();g.tgp=std::clamp(g.tgp,gpu_min(),gpu_max());apply_gpu(g);
 }
+// DLPPC needs only NVAPI, so unsupported BIOS limits (no nv::Power) do not block it.
+void Controller::open_dlppc() {
+    if(nvidia_busy_) throw std::runtime_error("NVIDIA operation in progress; try again in a few seconds");
+    if(gpu_driver_uncertain_) throw std::runtime_error(nvidia_error_);
+    if(nvidia_ || dlppc_api_) return;if(!dlppc_available_) throw std::runtime_error(nvidia_unavailable());
+    std::unique_ptr<nv::Api> opened;
+    try {nvidia_work([&]{opened=std::make_unique<nv::Api>();});}
+    catch(const std::exception& ex) {dlppc_available_=false;diagnostic_(std::string("NVIDIA DLPPC unavailable: ")+ex.what());throw;}
+    dlppc_api_=std::move(opened);
+}
+// Call inside nvidia_work after open_dlppc.
+std::optional<nv::Dlppc> Controller::read_dlppc() {return nvidia_?nvidia_->dlppc():dlppc_api_->dlppc();}
+void Controller::write_dlppc(bool active) {if(nvidia_) nvidia_->set_dlppc(active);else dlppc_api_->set_dlppc(active);}
 void Controller::dlppc(bool disabled) {
-    auto& driver=open_nvidia();bool write=false;
-    try {nvidia_work([&]{if(!driver.dlppc()) throw std::runtime_error("This GPU/driver has no DLPPC policy");write=true;driver.set_dlppc(!disabled);});}
+    if(!nvidia_ && nvidia_available_) try {open_nvidia();} catch(const std::exception&) {} // Logged by open_nvidia.
+    open_dlppc();bool write=false;
+    try {nvidia_work([&]{if(!read_dlppc()) throw std::runtime_error("This GPU/driver has no DLPPC policy");write=true;write_dlppc(!disabled);});}
     catch(...) {writes_started_|=write;throw;}
     writes_started_=true;dlppc_disabled_=disabled;
     store_.set_disable_dlppc(disabled); // The store owns preference save and rollback.

@@ -127,8 +127,10 @@ private:
     void apply_gpu(config::GpuSettings);
     void validate_currents(const config::GpuSettings&);
     void check_gpu();void unlock_gpu(bool);void dlppc(bool);
+    void open_dlppc();std::optional<nv::Dlppc> read_dlppc();void write_dlppc(bool active);
     std::unique_ptr<nv::Power> nvidia_;
-    bool nvidia_available_=false,nvidia_busy_=false,dlppc_disabled_=false,on_ac_=false;
+    std::unique_ptr<nv::Api> dlppc_api_; // DLPPC needs only NVAPI; used while nvidia_ is unavailable (unsupported BIOS limits).
+    bool nvidia_available_=false,nvidia_busy_=false,dlppc_available_=false,dlppc_disabled_=false,on_ac_=false;
     bool gpu_unlocked_=false,gpu_driver_uncertain_=false;int nvidia_min_watts_=1;
     std::string nvidia_error_,gpu_notice_;
     std::optional<int> driver_watts_;

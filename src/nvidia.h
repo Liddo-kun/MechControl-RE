@@ -17,7 +17,8 @@ struct Override {std::optional<uint32_t> power;std::optional<RailOverride> nv,ms
 struct Record {std::string name;Bytes data;};
 struct Bios {
     Bytes image;std::array<uint8_t,5> version_bytes{};uint16_t device=0;
-    Field power{},nv{},ms{};std::optional<Field> input;
+    Field power{},nv{};std::optional<Field> ms,input;
+    bool ada=false; // RTX 40 table: no MSVDD policy; board input patches only its maximum, as mVolt does.
     static Bios parse(Bytes);
     std::string version() const;
     std::vector<int> offsets() const;
@@ -26,11 +27,11 @@ struct Bios {
 struct Identity {uint16_t device=0;uint32_t subsystem=0,domain=0,bus=0,slot=0,function=0;std::string bios,name,driver;bool operator==(const Identity&) const=default;};
 struct PowerLimits {uint32_t min,def,max,enforced;std::optional<uint32_t> requested;};
 struct Rail {uint32_t min,def,max,current,stock_max=0,unlock_percent=140;int allowed(bool unlock) const;bool operator==(const Rail&) const=default;};
-struct Currents {Rail nv,ms;std::optional<Rail> input;};
+struct Currents {Rail nv;std::optional<Rail> ms,input;};
 struct Budget {uint32_t f7,platform;Budget raise(uint32_t,Budget baseline) const;bool operator==(const Budget&) const=default;};
 struct Dlppc {bool active;int policy;uint32_t controllers;};
 struct Telemetry {
-    uint32_t nv=0,ms=0;std::optional<uint32_t> input,nv_prediction,ms_prediction,nv_limit,ms_limit,input_limit;
+    uint32_t nv=0;std::optional<uint32_t> ms,input,nv_prediction,ms_prediction,nv_limit,ms_limit,input_limit;
     std::optional<uint32_t> current_khz,power_khz,ceiling_khz,clock_mhz,gpu_mw,core_mw,enforced_mw;
     std::optional<double> ipc;
 };
@@ -55,7 +56,7 @@ private:
     Call call_;
     struct Board {int index;uint32_t min,def,max;};
     struct Policy {int index;uint32_t type,min,def,max;};
-    struct Rails {Policy nv,ms;std::optional<Policy> input;uint32_t mask;Bytes info;};
+    struct Rails {Policy nv;std::optional<Policy> ms,input;uint32_t mask;Bytes info;};
     Board board();Rails rails();Bytes control(uint32_t);Rail rail(const Policy&,const Bytes&);
     Bytes power_control(int);Bytes policy_control(int);
     std::optional<std::pair<int,uint32_t>> find_dlppc();

@@ -90,7 +90,7 @@ void peripheral_intent(const std::filesystem::path& root) {
 }
 struct GpuFixture : nv::Power {
     bool sleeping=false,dlppc_active=true,fail_configure=false,fail_currents=false,fail_budget=false;int reads=0,sets=0,restarts=0;DWORD restart_delay=0;std::atomic<DWORD> read_delay=0;std::optional<uint32_t> request;
-    nv::Currents rails{{1,120000,168000,140000,120000},{1,30000,42000,40000,30000},{}};
+    nv::Currents rails{{1,120000,168000,140000,120000},nv::Rail{1,30000,42000,40000,30000},{}};
     GpuFixture() {enabled=true;}
     int stock_watts() const override {return 175;}
     int minimum_watts() const override {return 5;}
@@ -102,12 +102,12 @@ struct GpuFixture : nv::Power {
     nv::Budget budget() override {read();if(fail_budget) throw std::runtime_error("Unsupported fixture F7 value");return {250000,350000};}
     std::optional<nv::Dlppc> dlppc() override {read();return nv::Dlppc{dlppc_active,7,2048};}
     void set_dlppc(bool active) override {++sets;dlppc_active=active;}
-    bool needs_restart(bool unlock,const GpuSettings& g) override {return unlock!=enabled || (g.nvvdd_ma && *g.nvvdd_ma>int(rails.nv.max)) || (g.msvdd_ma && *g.msvdd_ma>int(rails.ms.max));}
+    bool needs_restart(bool unlock,const GpuSettings& g) override {return unlock!=enabled || (g.nvvdd_ma && *g.nvvdd_ma>int(rails.nv.max)) || (g.msvdd_ma && *g.msvdd_ma>int(rails.ms->max));}
     void configure(bool unlock,const GpuSettings& g,bool allow) override {
         modified=false;
-        if(needs_restart(unlock,g)) {if(!allow) throw std::runtime_error("Fixture restart required");modified=uncertain=true;if(fail_configure) throw std::runtime_error("Fixture unverified staging/restart failure");if(restart_delay) Sleep(restart_delay);++restarts;request={};dlppc_active=true;rails.nv.max=unlock?168000:120000;rails.ms.max=unlock?42000:30000;uncertain=false;}
+        if(needs_restart(unlock,g)) {if(!allow) throw std::runtime_error("Fixture restart required");modified=uncertain=true;if(fail_configure) throw std::runtime_error("Fixture unverified staging/restart failure");if(restart_delay) Sleep(restart_delay);++restarts;request={};dlppc_active=true;rails.nv.max=unlock?168000:120000;rails.ms->max=unlock?42000:30000;uncertain=false;}
         if(g.nvvdd_ma || g.msvdd_ma || g.board_input_ma) modified=true;
-        enabled=unlock;if(g.nvvdd_ma) rails.nv.current=*g.nvvdd_ma;if(g.msvdd_ma) rails.ms.current=*g.msvdd_ma;++sets;
+        enabled=unlock;if(g.nvvdd_ma) rails.nv.current=*g.nvvdd_ma;if(g.msvdd_ma) rails.ms->current=*g.msvdd_ma;++sets;
     }
     void apply(int watts) override {read();request=watts*1000;++sets;}
     bool at_most(int watts) override {read();return request && *request<=uint32_t(watts*1000);}
@@ -182,7 +182,7 @@ void gpu_integration(const std::filesystem::path& root) {
     driver->request={};status=c.execute(CliCommand{{"status","--json"}});j=parse(status.text);
     check(j["gpu"]["tgp"]["value"]==95 && j["gpu"]["requestedWatts"].is_null(),"awake status drops cached below-floor setpoint when driver reset cleared the actual request");
     auto p=profile();p.gpu->bios_override_enabled=false;write_json(root/"gpu/userprofile_1.json",p,true);
-    auto loaded=c.execute(SlotLoad{1,false});check(loaded.code==0 && driver->enabled && driver->rails.nv.current==120000 && driver->rails.ms.current==30000,"automatic legacy slot retains unlock but restores unspecified stock currents");
+    auto loaded=c.execute(SlotLoad{1,false});check(loaded.code==0 && driver->enabled && driver->rails.nv.current==120000 && driver->rails.ms->current==30000,"automatic legacy slot retains unlock but restores unspecified stock currents");
     p.gpu->bios_override_enabled=true;p.gpu->nvvdd_ma=160000;p.gpu->board_input_ma=12000;driver->rails.nv.max=130000;write_json(root/"gpu/userprofile_1.json",p,true);
     loaded=c.execute(SlotLoad{1,false});check(loaded.code==0 && driver->restarts==0 && driver->rails.nv.current==130000 && loaded.text.find("restart")!=std::string::npos,"automatic slot clamps active currents, skips only unsupported board input, and reports notice");
     check(c.execute(DlppcApply{true}).code==0 && read_json(root/"gpu/settings.json")["disableDlppc"]==true,"DLPPC uses existing global preference storage");
@@ -586,7 +586,7 @@ int main(int argc,char** argv) {
             {nv::Api api;auto d=api.dlppc();if(!d) throw std::runtime_error("No DLPPC policy for same-value check");active=d->active;
              nv::Store store(api.identity);auto image=api.bios();bool staged=false,discarded=false;auto original=store.open(image,staged,discarded);auto c=api.currents();
              auto rail=[](nv::Rail r,nv::Field f,uint32_t percent=140){r.def=f.def;r.stock_max=f.max;r.unlock_percent=percent;return nv::RailOverride{r.current,static_cast<uint32_t>(r.allowed(true))};};
-             if(staged) {nv::Override same; same.power=original.power.max+75000;same.nv=rail(c.nv,original.nv);same.ms=rail(c.ms,original.ms);if(c.input && original.input) same.input=rail(*c.input,*original.input,154);
+             if(staged) {nv::Override same; same.power=original.power.max+75000;same.nv=rail(c.nv,original.nv);if(c.ms && original.ms) same.ms=rail(*c.ms,*original.ms);if(c.input && original.input) same.input=rail(*c.input,*original.input,154);
                  check(store.matches(original.build(same)),"same-value current workflow will not change existing BIOS override records");}
              auto start=GetTickCount64();for(int i=0;i<100;++i) api.telemetry();
              PROCESS_MEMORY_COUNTERS memory{};K32GetProcessMemoryInfo(GetCurrentProcess(),&memory,sizeof(memory));
@@ -605,7 +605,8 @@ int main(int argc,char** argv) {
             ControlWorker worker(delivery,log,std::move(options));
             auto status=worker.request(CliCommand{{"status","--json"}}).get();check(status.code==0,"integrated NVIDIA worker status succeeds");auto before=parse(status.text);write_json(directory/"status-before.json",before,false);
             auto& gpu=before["gpu"];check(gpu["nvidia"].is_null() && !gpu["nvvdd"].is_null(),"F7 failure does not discard known override state, telemetry or rail policies");
-            std::vector<std::string> args={"gpu","--nvvdd",std::to_string(gpu["nvvdd"]["limitMa"].get<int>())+"mA","--msvdd",std::to_string(gpu["msvdd"]["limitMa"].get<int>())+"mA","--json"};
+            std::vector<std::string> args={"gpu","--nvvdd",std::to_string(gpu["nvvdd"]["limitMa"].get<int>())+"mA","--json"};
+            if(!gpu["msvdd"].is_null()) {args.insert(args.end(),{"--msvdd",std::to_string(gpu["msvdd"]["limitMa"].get<int>())+"mA"});}
             if(!gpu["boardInput"].is_null()) {args.insert(args.end(),{"--board-input",std::to_string(gpu["boardInput"]["limitMa"].get<int>())+"mA"});}
             auto currents=worker.request(CliCommand{args}).get();check(currents.code==0,"integrated same-value current command succeeds through the real owner");write_json(directory/"currents.json",parse(currents.text),false);
             auto dlp=worker.request(DlppcApply{!active}).get();check(dlp.code==0 && dlp.saved,"integrated same-value DLPPC applies and saves through the same worker");

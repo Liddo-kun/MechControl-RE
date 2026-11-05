@@ -30,7 +30,7 @@ public:
     int stock_watts() const override {return 175;}int minimum_watts() const override {return 5;}
     bool awake() const override {return !state_->asleep;}
     mech::nv::PowerLimits limits() override {return {5000,95000,250000,uint32_t(requested_*1000),uint32_t(requested_*1000)};}
-    mech::nv::Currents currents() override {return {{1000,120000,168000,120000,120000},{1000,30000,42000,30000,30000},mech::nv::Rail{1000,11053,15474,11053,11053}};}
+    mech::nv::Currents currents() override {return {{1000,120000,168000,120000,120000},mech::nv::Rail{1000,30000,42000,30000,30000},mech::nv::Rail{1000,11053,15474,11053,11053}};}
     // Loaded readings that span the live table's green-to-red tints.
     mech::nv::Telemetry telemetry() override {
         mech::nv::Telemetry t;t.nv=110400;t.ms=21300;t.input=8150;t.nv_limit=120000;t.ms_limit=30000;t.input_limit=11053;
