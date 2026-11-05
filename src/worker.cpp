@@ -161,7 +161,7 @@ void ControlWorker::run(std::stop_token stop) {
                           {std::lock_guard lock(mutex_);
                            for(auto i=commands_.begin();i!=commands_.end();) {
                                auto& c=i->command;
-                                 if(std::holds_alternative<Visibility>(c) || std::holds_alternative<UiPage>(c) || std::holds_alternative<BatteryPage>(c) || std::holds_alternative<AcEvent>(c) || std::holds_alternative<PowerEvent>(c)) {notifications.push_back(std::move(*i));i=commands_.erase(i);}else ++i;
+                                 if(std::holds_alternative<Visibility>(c) || std::holds_alternative<UiPage>(c) || std::holds_alternative<BatteryPage>(c) || std::holds_alternative<AcEvent>(c) || std::holds_alternative<Resume>(c)) {notifications.push_back(std::move(*i));i=commands_.erase(i);}else ++i;
                            }}
                            for(auto& p:notifications) p.reply.set_value(controller->execute(p.command));cadence();
                       }
@@ -226,7 +226,7 @@ void ControlWorker::run(std::stop_token stop) {
         publish_state();
         // Status/watch is a query, not a UI refresh subscription. Writes,
         // including partial writes, still notify the application owner.
-        if(!std::holds_alternative<FanEdit>(pending->command) && !std::holds_alternative<Visibility>(pending->command) && !std::holds_alternative<UiPage>(pending->command) && !std::holds_alternative<BatteryPage>(pending->command) && !std::holds_alternative<PowerEvent>(pending->command) &&
+        if(!std::holds_alternative<FanEdit>(pending->command) && !std::holds_alternative<Visibility>(pending->command) && !std::holds_alternative<UiPage>(pending->command) && !std::holds_alternative<BatteryPage>(pending->command) && !std::holds_alternative<Resume>(pending->command) &&
             (!std::holds_alternative<CliCommand>(pending->command) || result.applied || result.partial))
             delivery_->post({ResultKind::command,pending->sequence,config::wide(result.text),{},result});
         if(controller) {

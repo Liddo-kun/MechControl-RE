@@ -126,7 +126,7 @@ void peripheral_regressions(const std::filesystem::path& root) {
     r.state->ignore=0x769;r.state->bytes[0x741]=0;r.state->recover_on_activation=true;
     auto result=pending->execute(LightingApply{3,{true,255,128,0,75}});
     check(result.code==1 && result.partial && result.text.find("reactivated")!=std::string::npos,"logo reactivation participates in controller epoch and partial-application accounting");
-    pending->execute(PowerEvent{true});pending->execute(PowerEvent{false});reports=0;simulate_gpu=true;
+    pending->execute(Resume{});reports=0;simulate_gpu=true;
     result=pending->execute(CliCommand{{"status","--json"}});
     check(result.code==0 && reports>0,"HID resume runs during NVIDIA work instead of pausing behind its busy flag");
     pending->execute(BatteryPage{true});auto now=GetTickCount64()+2001;
@@ -166,7 +166,7 @@ void gpu_integration(const std::filesystem::path& root) {
     GpuSettings g;g.tgp=70;check(c.execute(GpuApply{g}).code==0 && r.state->bytes[0x744]==0 && driver->request==70000u,"below-EC-floor request uses EC minimum plus real driver path");
     driver->sleeping=true;int before=driver->reads;auto status=c.execute(CliCommand{{"status","--json"}});auto j=parse(status.text);
     check(status.code==0 && j["gpu"]["tgp"]["value"]==70 && j["gpu"]["requestedWatts"].is_null() && driver->reads==before,"entire passive status path preserves below-floor intent without touching sleeping driver");
-    c.execute(AcEvent{true});c.tick(GetTickCount64()+9000);c.execute(PowerEvent{true});c.execute(PowerEvent{false});c.tick(GetTickCount64()+9000);
+    c.execute(AcEvent{true});c.tick(GetTickCount64()+9000);c.execute(Resume{});c.tick(GetTickCount64()+9000);
     check(driver->reads==before,"AC/resume delayed checks do not contact sleeping GPU");driver->sleeping=false;
     auto response=c.execute(CliCommand{{"gpu","--nvvdd","125.001A","--json"}});j=parse(response.text);
     check(response.code==0 && driver->rails.nv.current==125001 && j["nvvdd"]["limitMa"]==125001 && driver->request==70000u,"current-only CLI parses exact milliamps once and does not rewrite GPU power");
@@ -299,8 +299,7 @@ void integration(const std::filesystem::path& root) {
     s->bytes[0x741]=0;s->ignore=0x783;s->recover_on_activation=true;s->bytes[0x783]=100;
     auto lost=c.execute(CpuApply{{90,150,200,95}});check(lost.code==1 && lost.partial,"activation loss cannot falsely complete a recovered single-write retry");
     c.tick();check(s->bytes[0x783]==80,"deferred nonrecursive recovery reapplies active saved slot once");
-    c.execute(PowerEvent{true});s->reads.clear();c.tick();check(s->reads.empty(),"suspend stops monitoring until resume");
-    c.execute(PowerEvent{false});s->reads.clear();c.tick();check(!s->reads.contains(0x741),"resume defers activation probing during three-second settle");
+    c.execute(Resume{});s->reads.clear();c.tick();check(!s->reads.empty() && !s->reads.contains(0x741),"resume keeps monitoring and defers activation probing during three-second settle");
     Sleep(3100);s->reads.clear();c.tick();check(s->reads[0x741]==1,"settled resume and watchdog share one activation probe");
 }
 void thermal(const std::filesystem::path& root) {
@@ -316,7 +315,7 @@ void thermal(const std::filesystem::path& root) {
     s->writes.clear();for(int i=0;i<5;++i)c.tick();check(s->writes.empty(),"five-tick held maintenance uses verified same-epoch readback");
     check(c.execute(ThermalReset{}).code==1 && c.thermal().tripped(),"enabled reset refuses a fresh valid reading while rolling average remains above trigger");
     s->bytes[0x751]&=~64;for(int i=0;i<5;++i)c.tick();check((s->bytes[0x751]&64)!=0 && c.thermal().lost_alerts()==0,"maintenance reasserts firmware-cleared boost without a lost-protection alert");
-    c.execute(PowerEvent{true});c.execute(PowerEvent{false});Sleep(3100);c.tick();
+    c.execute(Resume{});Sleep(3100);c.tick();
     check(c.thermal().complete() && c.thermal().lost_alerts()==0,"resume invalidation alone does not raise a lost-protection alert");
     s->bytes[0x751]&=~64;s->fail_write=0x751;for(int i=0;i<5;++i)c.tick();
     check(!c.thermal().complete() && c.thermal().lost_alerts()==1,"failed maintenance write counts one lost-protection alert");
