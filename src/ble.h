@@ -6,7 +6,6 @@
 #include <winrt/Windows.Devices.Radios.h>
 
 namespace mech {
-class Delivery;
 enum class CoolerAction { scan,connect,disconnect,apply,firmware,auto_connect,availability };
 enum class CoolerSection { all,fan,pump,rgb };
 struct CoolerRequest {
@@ -32,19 +31,4 @@ private:
     struct Impl;std::unique_ptr<Impl> impl_;
 };
 std::vector<std::vector<uint8_t>> cooler_packets(const config::CoolerSettings&,CoolerSection section=CoolerSection::all);
-#ifdef MECHCONTROL_BLE_PROTOTYPE
-// This owner is confined to the UI thread. The coroutine is static and holds only shared delivery.
-class BleDiscovery {
-public:
-    explicit BleDiscovery(std::shared_ptr<Delivery> delivery) : delivery_(std::move(delivery)) {}
-    ~BleDiscovery();
-    void start();
-    void cancel();
-    winrt::Windows::Foundation::AsyncStatus status() const;
-private:
-    static winrt::Windows::Foundation::IAsyncAction discover(std::shared_ptr<Delivery> delivery);
-    std::shared_ptr<Delivery> delivery_;
-    winrt::Windows::Foundation::IAsyncAction action_{nullptr};
-};
-#endif
 }

@@ -31,6 +31,7 @@ struct MachineProfile {
     std::optional<FanDefaults> default_fan;
     std::optional<Logo> default_logo;
     std::optional<std::map<std::string,Mode>> modes;
+    std::optional<std::vector<std::string>> mode_presets; // EC presets extraction may expose; absent keeps all three.
     int reg(const std::string& name) const;
     int tj_max() const;
     int tgp_offset() const;
@@ -63,15 +64,17 @@ struct Hardware {
     std::map<int,uint8_t> bytes;
     std::optional<std::array<uint32_t,12>> ecspec;
     std::string ecspec_error;
-    uint8_t at(int address) const { return bytes.at(address); }
+    // Bytes whose startup read failed are absent and treated as unknown.
+    std::optional<uint8_t> at(int address) const { auto i=bytes.find(address); if(i==bytes.end()) return {}; return i->second; }
     bool decoded() const { return ecspec && ((*ecspec)[9]&255)==0xBB; }
-    bool pl4_doubled() const { return (at(0x727)&0x80)!=0; }
-    bool liquid_cooling() const { return (at(0x7A4)&0x80)!=0; }
+    std::optional<bool> pl4_doubled() const { auto v=at(0x727); if(!v) return {}; return (*v&0x80)!=0; }
+    bool liquid_cooling() const { return (at(0x7A4).value_or(0)&0x80)!=0; }
+    uint8_t gpu_module() const { return at(0x7D2).value_or(255); } // 255: not reported
     std::map<std::string,Limit> extract_limits() const;
     std::optional<std::map<std::string,Mode>> extract_modes(bool absolute) const;
 };
 Hardware collect_hardware(const ReadByte&,const std::function<uint32_t(int)>& read_spec);
-struct Enrichment { std::set<std::string> limits; bool cpu_encoding_confirmed=false; };
+struct Enrichment { std::set<std::string> limits; bool cpu_encoding_confirmed=false,pl4_unknown=false; };
 Enrichment enrich(MachineProfile&,const Hardware&);
 struct Validation { std::set<std::string> enabled; std::map<std::string,std::string> disabled; };
 Validation validate_startup(const MachineProfile&,const ReadByte&,uint8_t gpu_module=255,

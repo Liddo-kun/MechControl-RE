@@ -15,7 +15,7 @@
 
 namespace mech {
 inline constexpr UINT resultMessage = WM_APP + 1;
-enum class ResultKind { sample, command, ble, battery, failure, presentation, selection };
+enum class ResultKind { sample, command, ble, battery, failure, presentation, selection, warning };
 struct ModelSelection {
     std::vector<std::filesystem::path> paths;
     std::optional<std::filesystem::path> chosen;
@@ -43,10 +43,7 @@ private:
     bool notified_ = false;
     std::vector<Result> pending_;
 };
-struct Command { std::uint64_t id; int value; std::chrono::milliseconds duration{0}; };
 struct WorkerOptions {
-    // Only hardware-free check executables set fixture. Production has no bypass switch.
-    bool fixture=false;
     bool once=false;
     std::filesystem::path report;
     std::function<std::unique_ptr<EcChannel>(const std::wstring&,HANDLE)> channel_factory;
@@ -63,7 +60,6 @@ class ControlWorker {
 public:
     ControlWorker(std::shared_ptr<Delivery> delivery, Log& log,WorkerOptions options={});
     ~ControlWorker();
-    bool submit(Command command);
     std::future<ControlResult> request(ControlCommand command,std::uint64_t sequence=0);
     void stop();
     int wait();
@@ -75,7 +71,7 @@ private:
     int outcome_=0;
     std::mutex mutex_;
     struct Pending { ControlCommand command; std::promise<ControlResult> reply; std::uint64_t sequence=0; };
-    std::deque<std::variant<Command,Pending>> commands_;
+    std::deque<Pending> commands_;
     bool closing_ = false;
     Handle wake_;
     Handle stopping_;

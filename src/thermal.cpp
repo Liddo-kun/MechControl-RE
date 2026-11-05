@@ -36,14 +36,16 @@ void ThermalProtection::add(int t) {
     current_temperature_=t;peak_temperature_=std::max(peak_temperature_.value_or(t),t);
     invalid_=0;window_.push_back(t);if(window_.size()>5) window_.pop_front();
 }
-void ThermalProtection::sample(std::optional<int> t) {
+void ThermalProtection::sample(std::optional<int> t,bool defer_maintenance) {
     if(!monitoring()) return;
     if(valid(t)) add(*t); else {current_temperature_.reset();++invalid_;}
     if(!tripped() && settings_.enabled) {
         if(invalid_>=5) {trip("GPU temperature unavailable for 5 consecutive checks",{});return;}
         if(valid(t) && over()) {trip("GPU rolling average reached the configured trigger",static_cast<int>(*average()+0.5));return;}
     }
-    if(tripped() && ++retry_>=5) enforce(true);
+    // Periodic re-verification waits out in-flight NVIDIA work, which cannot verify the GPU hold;
+    // a new trip above still enforces immediately.
+    if(tripped() && ++retry_>=5 && !defer_maintenance) enforce(true);
 }
 void ThermalProtection::check_before_apply() {
     if(!settings_.enabled || tripped() || enforcing_) return;
@@ -90,13 +92,14 @@ void ThermalProtection::enforce(bool maintenance) {
         if(persistence_error_!=ex.what() && diagnostic_) diagnostic_(std::string("[Thermal] Persistence not verified: ")+ex.what());
         persistence_error_=ex.what();
     }
-    enforcing_=false;
+    if(was_complete_ && !complete()) ++lost_alerts_;
+    was_complete_=complete();enforcing_=false;
 }
 void ThermalProtection::release() {
     if(!tripped()) return;
     auto next=state_;next.stage=config::Released;next.held=0;next.recovery_details.clear();
     try {store_.save_thermal(next);} catch(...) {persisted_=false;throw;}
-    state_=std::move(next);persisted_=true;verified_=0;invalid_=0;peak_temperature_=current_temperature_;persistence_error_.clear();errors_.clear();
+    state_=std::move(next);persisted_=true;verified_=0;invalid_=0;was_complete_=false;peak_temperature_=current_temperature_;persistence_error_.clear();errors_.clear();
 }
 void ThermalProtection::reset() {
     if(!tripped()) return;

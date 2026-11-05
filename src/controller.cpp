@@ -51,7 +51,7 @@ Curve linked_curve(int duty,int ramp) {
 Controller::Controller(EcSession& session,std::filesystem::path directory,std::function<void(const std::string&)> diagnostic,
     std::function<void(unsigned)> wait,std::function<void(std::function<void()>)> run_blocking,bool nvidia_hardware,std::unique_ptr<nv::Power> driver,bool peripheral_hardware,
     std::function<void(Json)> cooler_delivery,Lighting::Send lighting_send):session_(session),
-    store_(std::move(directory),gpu_recovery_supported(session.profile,session.hardware.at(0x7D2)),diagnostic),
+    store_(std::move(directory),gpu_recovery_supported(session.profile,session.hardware.gpu_module()),diagnostic),
     diagnostic_(std::move(diagnostic)),wait_(std::move(wait)),run_blocking_(std::move(run_blocking)),cooler_delivery_(std::move(cooler_delivery)),lighting_send_(std::move(lighting_send)),peripheral_hardware_(peripheral_hardware) {
     if(!wait_) wait_=[](unsigned ms){std::this_thread::sleep_for(std::chrono::milliseconds(ms));};
     if(!run_blocking_) run_blocking_=[](std::function<void()> work){work();};
@@ -59,9 +59,9 @@ Controller::Controller(EcSession& session,std::filesystem::path directory,std::f
     nvidia_=std::move(driver);if(nvidia_) {nvidia_available_=true;gpu_unlocked_=nvidia_->enabled;nvidia_min_watts_=nvidia_->minimum_watts();}
     SYSTEM_POWER_STATUS power{};on_ac_=GetSystemPowerStatus(&power) && power.ACLineStatus==1;
     const auto& p=session_.profile;
-    // Model-qualified correction based on XxFR5xxx_Pro_14.810's shared mode bits.
-    // Other profiles retain the reference whole-byte contract, not inferred Intel bit semantics.
-    if(equal_ignore_case(p.project_id,"X6FR5xxY")) latch_mask_=4;
+    // A profile fanCurveLatch bitfield qualifies shared mode bits at 0x7C6.
+    // Other profiles retain the reference whole-byte contract, not inferred bit semantics.
+    if(auto i=p.bitfields.find("fanCurveLatch");i!=p.bitfields.end()) latch_mask_=i->second.get_mask();
     try {
         if(enabled("cpuPower") && !p.cpu_fallback && p.limits.contains("PL1") && p.limits.contains("PL2") && p.limits.contains("PL4")) {
             auto m=minimum_cpu();auto w=cpu_writes(p,m.pl1,m.pl2,m.pl4,m.temp_limit);
@@ -71,7 +71,7 @@ Controller::Controller(EcSession& session,std::filesystem::path directory,std::f
         }
     } catch(const std::exception& ex) {diagnostic_(std::string("CPU emergency capability unavailable: ")+ex.what());}
     try {
-        if(enabled("gpuPower") && gpu_recovery_supported(p,session.hardware.at(0x7D2)) && p.limits.contains("TGP") && p.limits.at("TGP").offset) {
+        if(enabled("gpuPower") && gpu_recovery_supported(p,session.hardware.gpu_module()) && p.limits.contains("TGP") && p.limits.at("TGP").offset) {
             auto g=gpu();int minimum=control_limit(p,"TGP").min;
             auto w=gpu_writes(p,minimum,false,0);
             gpu_minimum_=minimum>0 && g.tgp>=p.tgp_offset() && g.tgp<=control_limit(p,"TGP").max+75 && g.dynamic_boost_watts<=control_limit(p,"dynamicBoost").max && read("tgpDbCtrl")!=255;
@@ -170,26 +170,39 @@ bool Controller::matches(int action) {
     if(action==Gpu && (gpu_unlocked_ || gpu_driver_uncertain_)) {bool minimum=false;nvidia_work([&]{minimum=nvidia_->at_most(control_limit(p,"TGP").min);});return minimum;}
     return true;
 }
-void Controller::initialize() {
+bool Controller::initialize(std::vector<std::string>& errors) {
     // Each reference init step runs even after an independent step fails.
     const std::vector<std::vector<EcWrite>> steps={{{0x709,5},{0x708,1}},{{0x741,5}},{{0x748,129}},
         {{0x726,128,128},{0x727,64,64}},{{0x7C5,96,96}},{{0x7C7,12}},{{0x706,65}}};
-    for(const auto& step:steps) {try {session_.guard->apply(step);} catch(const std::exception& ex) {diagnostic_(std::string("EC init step failed: ")+ex.what());} wait_(150);}
-    for(unsigned i=0;i<=30;++i) {
-        if((session_.transport().read(0x741)&5)==1) return;
-        if(i!=30) wait_(100);
+    for(const auto& step:steps) {
+        try {session_.guard->apply(step);}
+        catch(const std::exception& ex) {
+            std::string label;for(const auto& w:step) {char address[8];snprintf(address,sizeof address,"0x%03X",w.address);label+=(label.empty()?"":", ")+std::string(address);}
+            errors.push_back(label+": "+ex.what());diagnostic_("EC init step failed: "+errors.back());
+        }
+        wait_(150);
     }
-    throw std::runtime_error("EC activation not acknowledged (bit 0 set, bit 2 cleared required)");
+    bool acknowledged=false;
+    for(unsigned i=0;i<=30 && !acknowledged;++i) {acknowledged=(session_.transport().read(0x741)&5)==1;if(!acknowledged && i!=30) wait_(100);}
+    if(!acknowledged) errors.push_back("EC activation not acknowledged (0x741 bit 0 set, bit 2 cleared required); the EC may ignore power limit and fan writes");
+    diagnostic_(errors.empty()?"EC init: all steps completed; activation acknowledged":"EC init: completed with "+std::to_string(errors.size())+" error(s)");
+    return acknowledged;
 }
 bool Controller::recover() {
     if(recovering_ || (session_.transport().read(0x741)&1)) return false;
     recovering_=true;++epoch_;thermal_->invalidate();last_duty_=-1;fan_application_=FanApplication::unapplied;
-    try {initialize();recovering_=false;reapply_=true;watchdog_=GetTickCount64()+30000;return true;}
+    try {
+        std::vector<std::string> errors;
+        if(!initialize(errors)) throw std::runtime_error(errors.back());
+        recovering_=false;reapply_=true;watchdog_=GetTickCount64()+30000;return true;
+    }
     catch(...) {recovering_=false;throw;}
 }
-void Controller::start() {
+std::vector<std::string> Controller::start() {
+    std::vector<std::string> init_errors;
     recovering_=true;
-    try {initialize();} catch(...) {recovering_=false;throw;}
+    // As in the source, a missing acknowledgement is only a warning here; the watchdog retries it.
+    try {initialize(init_errors);} catch(...) {recovering_=false;throw;}
     recovering_=false;watchdog_=GetTickCount64()+30000;
     session_.snapshot_fans();seed_fans();
     diagnostic_("Post-activation fan snapshot: active="+std::to_string(session_.fans.active_entries())+"; valid="+std::to_string(session_.fans.valid())+"; GPU="+std::to_string(session_.profile.fan_table.has_gpu));
@@ -210,11 +223,12 @@ void Controller::start() {
     catch(const std::exception& ex) {startup.reset();diagnostic_(std::string("Startup profile preflight refused: ")+ex.what());}
     thermal_->enforce(); // Recovered obligations precede all automatic normal settings.
     if(startup) try {apply_slot(*startup,gpu_plan_value,slot,false,false);} catch(const std::exception& ex) {diagnostic_(std::string("Startup profile not applied: ")+ex.what());}
-    if(!slot && enabled("fanControl") && !session_.fans.valid()) {
+    if(!slot && enabled("fanControl") && !session_.fans.valid()) try {
         batch({{session_.profile.reg("fanCurveEnable"),0,128}});fan_intent_.curve=false;
         diagnostic_("EC fan table invalid at startup; custom mode disabled without applying seed curves");
-    }
+    } catch(const std::exception& ex) {diagnostic_(std::string("EC fan table invalid at startup; custom mode not disabled: ")+ex.what());}
     if(cooler_) cooler_->start(); // Selected-slot intent is installed before auto-connect can write it.
+    return init_errors;
 }
 void Controller::explicit_apply(const std::function<void()>& apply) {
     thermal_->check_before_apply();
@@ -243,7 +257,7 @@ nv::ProfilePlan Controller::plan(const UserProfile& profile,bool automatic) {
     }
     if(enabled("battery")) {
         if(profile.battery->mode<0 || profile.battery->mode>2) throw std::runtime_error("Battery mode must be 0-2");
-        append({{p.reg("batteryMode"),encoding::battery(profile.battery->mode,session_.battery_bit3),p.bitfields.at("batteryMode").get_mask()}});
+        append({{p.reg("batteryMode"),encoding::battery(profile.battery->mode,*session_.battery_bit3),p.bitfields.at("batteryMode").get_mask()}});
     }
     for(auto w:writes) session_.guard->admit(w.address);
     return gpu_value;
@@ -297,7 +311,7 @@ void Controller::boost(bool value) {
 void Controller::battery(int mode) {
     if(!enabled("battery")) throw std::runtime_error("Battery control unavailable");
     if(mode<0 || mode>2) throw std::runtime_error("Battery mode must be 0-2");
-    auto& p=session_.profile;batch({{p.reg("batteryMode"),encoding::battery(mode,session_.battery_bit3),p.bitfields.at("batteryMode").get_mask()}});
+    auto& p=session_.profile;batch({{p.reg("batteryMode"),encoding::battery(mode,*session_.battery_bit3),p.bitfields.at("batteryMode").get_mask()}});
 }
 void Controller::speed(bool enabled_value,int ms) {
     if(!enabled("fanControl")) throw std::runtime_error("Fan control unavailable");
@@ -393,13 +407,13 @@ void Controller::recover_settings() {
 }
 std::optional<Sensors> Controller::tick(ULONGLONG now) {
     if(suspended_) return {};
-    if(resume_at_ && now>=resume_at_) {
+    if(resume_at_ && now>=resume_at_ && !nvidia_busy_) { // In-flight NVIDIA work cannot verify the GPU hold.
         resume_at_=0;watchdog_=now+30000;
         try {if(!recover()) thermal_->enforce();} catch(const std::exception& ex){diagnostic_(ex.what());}
     }
     if(now>=watchdog_) {watchdog_=now+30000;try {recover();} catch(const std::exception& ex){diagnostic_(ex.what());}}
     Sensors shared;bool safety=thermal_->monitoring();
-    if(safety || linked_) {shared.gpu_temp=temperature("gpuTemp").value_or(0);thermal_->sample(shared.gpu_temp);}
+    if(safety || linked_) {shared.gpu_temp=temperature("gpuTemp").value_or(0);thermal_->sample(shared.gpu_temp,nvidia_busy_);}
     if(lighting_ && !peripheral_busy_) lighting_->tick(now);
     if(reapply_ && !nvidia_busy_ && !peripheral_busy_) try {recover_settings();} catch(const std::exception& ex) {diagnostic_(std::string("Recovery not applied: ")+ex.what());}
     if(gpu_check_at_ && now>=gpu_check_at_ && !nvidia_busy_ && !peripheral_busy_) {gpu_check_at_=0;try {check_gpu();} catch(const std::exception& ex){diagnostic_(std::string("NVIDIA delayed check failed: ")+ex.what());}thermal_->enforce(true);}
@@ -417,7 +431,8 @@ std::optional<Sensors> Controller::tick(ULONGLONG now) {
         catch(const std::exception& ex) {if(linked_error_.empty()) diagnostic_(ex.what());linked_error_=ex.what();}
     }
     try {
-        auto s=read_sensors(session_.transport(),session_.profile,!visible_,shared);telemetry_failures_=0;monitor_stopped_=false;return s;
+        auto detail=!visible_?Detail::rpm:ui_page_==5?Detail::full:ui_page_==1?Detail::temperatures:Detail::monitor;
+        auto s=read_sensors(session_.transport(),session_.profile,detail,shared);telemetry_failures_=0;monitor_stopped_=false;return s;
     } catch(const std::exception& ex) {
         ++telemetry_failures_;
         if(telemetry_failures_<=5 || telemetry_failures_%60==0) diagnostic_(std::string("EC telemetry failed: ")+ex.what());
@@ -432,9 +447,9 @@ ControlResult Controller::execute(const ControlCommand& command) {
     };
     // Lifecycle notifications may pass the exclusive NVIDIA wait. They do not
     // reset the pending command's partial-application accounting or call NVIDIA.
-    if(auto c=std::get_if<Visibility>(&command)) {visible_=c->visible;battery_at_=GetTickCount64()+2000;if(c->visible) {monitor_stopped_=false;telemetry_failures_=0;}else battery_sample_.reset();return state();}
+    if(auto c=std::get_if<Visibility>(&command)) {visible_=c->visible;battery_at_=GetTickCount64()+2000;budget_at_=0;if(c->visible) {monitor_stopped_=false;telemetry_failures_=0;}else battery_sample_.reset();return state();}
     if(auto c=std::get_if<BatteryPage>(&command)) {battery_page_=c->active;battery_at_=GetTickCount64()+2000;if(!c->active) battery_sample_.reset();return state();}
-    if(auto c=std::get_if<UiPage>(&command)) {ui_page_=c->page;return state();}
+    if(auto c=std::get_if<UiPage>(&command)) {ui_page_=c->page;budget_at_=0;return state();}
     if(auto c=std::get_if<UiRead>(&command)) {
         auto r=state();Json data=Json::object();
         if(c->page==4) data=*execute(PeripheralRead{}).peripherals;
@@ -459,9 +474,11 @@ ControlResult Controller::execute(const ControlCommand& command) {
                 if(!enabled("gpuPower")) throw std::runtime_error("GPU control unavailable");
                 std::vector<EcWrite> cpu;if(c.cpu) {if(!enabled("cpuPower")) throw std::runtime_error("CPU control unavailable");auto v=*c.cpu;cpu=cpu_writes(p,v.pl1,v.pl2,v.pl4,v.temp_limit);}
                 auto g=c.settings;if(nvidia_busy_) throw std::runtime_error("NVIDIA operation in progress");if(c.power) gpu_plan(g);
+                // Thermal sampling continues during NVIDIA work; a CPU hold latched there outranks the prepared writes.
+                auto cpu_apply=[&]{if(!cpu.empty() && !thermal_->holds(Cpu)) batch(cpu);};
                 if(c.restart_confirmed) {
-                    auto plan=plan_gpu(g,false);explicit_apply([&]{configure_gpu(plan);if(!cpu.empty()) batch(cpu);if(c.power) apply_gpu(g);});
-                } else {validate_currents(g);explicit_apply([&]{if(g.nvvdd_ma || g.msvdd_ma || g.board_input_ma) nvidia_work([&]{nvidia_->configure(gpu_unlocked_,g,false);});if(!cpu.empty()) batch(cpu);if(c.power) apply_gpu(g);});}result.applied=true;
+                    auto plan=plan_gpu(g,false);explicit_apply([&]{configure_gpu(plan);cpu_apply();if(c.power) apply_gpu(g);});
+                } else {validate_currents(g);explicit_apply([&]{if(g.nvvdd_ma || g.msvdd_ma || g.board_input_ma) nvidia_work([&]{nvidia_->configure(gpu_unlocked_,g,false);});cpu_apply();if(c.power) apply_gpu(g);});}result.applied=true;
             } else if constexpr(std::is_same_v<T,UiPreflight>) {
                 if(c.cpu && enabled("cpuPower")) {auto v=*c.cpu;cpu_writes(p,v.pl1,v.pl2,v.pl4,v.temp_limit);}
                 std::optional<UserProfile> profile;if(c.slot) {profile=store_.load(c.slot);if(!profile) throw std::runtime_error("Requested slot is missing");}

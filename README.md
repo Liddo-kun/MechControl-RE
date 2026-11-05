@@ -96,8 +96,7 @@ operation enabled. There is no in-application startup installer.
 `ui-pages-check.exe --ui-check C:/Temp/tandem/<fresh-existing-directory>` exercises
 the production pages and controllers with synthetic hardware, injected live-read
 failures and 100/150/200% DPI captures. Run it on an interactive desktop and inspect
-the captures; it does not establish physical hardware qualification. The older
-`ui-fixture.exe` retains isolated foundation/session checks, not production pages.
+the captures; it does not establish physical hardware qualification.
 Final candidate identities/checks and open qualification are recorded in
 `docs/phase-9-result.md`; prior measurements remain in `docs/phase-8-result.md`.
 `mechcontrol.log` retains the first session and five recent

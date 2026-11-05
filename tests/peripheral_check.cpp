@@ -99,6 +99,12 @@ void pending(const std::filesystem::path& root) {
         check(refused && !std::filesystem::exists(root/"liquid_cooler_state.json"),"disconnected manual Apply truthfully refuses without writing standalone state");
     }
     {
+        auto path=root/"invalid-saved";std::filesystem::create_directories(path);
+        write_json(path/"liquid_cooler_state.json",Json{{"fanDuty",150},{"pumpDuty",-5},{"pumpVoltage",9},{"rgbMode",7}},false);
+        ProfileStore saved(path,false,log);Cooler owner(saved,log);auto i=owner.intent();
+        check(i.fan_duty==100 && i.pump_duty==0 && i.voltage==PumpVoltage::V8 && i.rgb_mode==CoolerRgbMode::BreatheColor,"saved cooler file gets request limits before auto-connect can send it");
+    }
+    {
         auto path=root/"auto";std::filesystem::create_directories(path);ProfileStore saved(path,false,log);CoolerState preference;preference.address=7;preference.auto_connect=true;saved.save_cooler(preference);
         auto p=std::make_shared<Pending>();SetEvent(p->release.get());std::atomic<int> calls=0;auto start=GetTickCount64();
         std::atomic<bool> completion=false;

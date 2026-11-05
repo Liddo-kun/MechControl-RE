@@ -20,7 +20,11 @@ struct Sensors {
     std::optional<double> adapter_amps;
     std::optional<bool> boost,curve_enabled;
 };
-Sensors read_sensors(EcTransport&,const config::MachineProfile&,bool lightweight,
+// Each EC byte costs about 1 ms of kernel time, so a sample reads only what is shown:
+// RPM for the counters in the tray, the monitor bar when visible, temperatures for the
+// Fans tab's markers and the remaining sensors for System Info.
+enum class Detail {rpm,monitor,temperatures,full};
+Sensors read_sensors(EcTransport&,const config::MachineProfile&,Detail,
     const std::optional<Sensors>& shared={});
 using ChannelFactory=std::function<std::unique_ptr<EcChannel>(const std::wstring&)>;
 class EcSession {
@@ -34,7 +38,7 @@ public:
         std::function<void(unsigned)> wait={},const std::filesystem::path& directory=config::profiles_directory(),
         std::optional<config::Identity> identity={},
         const std::function<std::optional<std::filesystem::path>(const std::vector<std::filesystem::path>&)>& manual={});
-    Sensors sample(bool lightweight) { return read_sensors(*ec_,profile,lightweight); }
+    Sensors sample(Detail detail) { return read_sensors(*ec_,profile,detail); }
     EcTransport& transport() { return *ec_; }
     void snapshot_fans(); // Control startup calls this after activation; diagnostics never activate.
     config::Json diagnostic_report();
@@ -43,7 +47,7 @@ public:
     config::MachineProfile profile;
     config::Hardware hardware;
     config::Validation validation;
-    uint8_t battery_bit3=0;
+    std::optional<uint8_t> battery_bit3; // Unknown only when battery control is disabled.
     FanSnapshot fans;
     std::unique_ptr<WriteGuard> guard;
 };

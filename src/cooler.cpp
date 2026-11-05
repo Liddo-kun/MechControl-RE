@@ -40,6 +40,12 @@ void merge(CoolerSettings& target,const CoolerSettings& value,CoolerSection sect
     else if(section==CoolerSection::pump) {target.pump_on=value.pump_on;target.pump_duty=value.pump_duty;target.voltage=value.voltage;}
     else {target.rgb_on=value.rgb_on;target.r=value.r;target.g=value.g;target.b=value.b;target.rgb_mode=value.rgb_mode;}
 }
+// Requests and the saved cooler file get the same limits; unknown voltages use the source's V8 default.
+void normalize(CoolerSettings& s) {
+    s.fan_duty=std::clamp(s.fan_duty,0,100);s.pump_duty=std::clamp(s.pump_duty,0,100);
+    if(uint8_t(s.voltage)>3) s.voltage=config::PumpVoltage::V8;
+    s.rgb_mode=static_cast<config::CoolerRgbMode>(std::clamp<int>(uint8_t(s.rgb_mode),0,3));
+}
 }
 struct Cooler::Impl {
     struct Queue {
@@ -58,7 +64,7 @@ struct Cooler::Impl {
     ULONGLONG retry_at=0;size_t attempt=0;
     std::jthread thread;
     Impl(config::ProfileStore& s,std::function<void(const std::string&)> l,Resolver r,std::function<void(config::Json)> d):store(s),log(std::move(l)),resolver(std::move(r)),delivery(std::move(d)) {
-        queue->state=store.load_cooler();queue->intent=queue->state;if(!queue->wake || !queue->stop || !queue->superseded) throw std::runtime_error("Cannot create cooler wait handles");
+        queue->state=store.load_cooler();normalize(queue->state);queue->intent=queue->state;if(!queue->wake || !queue->stop || !queue->superseded) throw std::runtime_error("Cannot create cooler wait handles");
     }
     void start() {if(!thread.joinable()) thread=std::jthread([this]{run();});}
     ~Impl() {
@@ -205,10 +211,7 @@ Cooler::Cooler(config::ProfileStore& store,std::function<void(const std::string&
 Cooler::~Cooler()=default;
 void Cooler::start() {if(impl_->started) return;impl_->started=true;auto s=impl_->state();if(s.auto_connect && s.address) request({CoolerAction::connect,s.address});}
 void Cooler::request(const CoolerRequest& request) {
-    auto c=request;
-    c.settings.fan_duty=std::clamp(c.settings.fan_duty,0,100);c.settings.pump_duty=std::clamp(c.settings.pump_duty,0,100);
-    if(uint8_t(c.settings.voltage)>3) c.settings.voltage=config::PumpVoltage::V8;
-    c.settings.rgb_mode=static_cast<config::CoolerRgbMode>(std::clamp<int>(uint8_t(c.settings.rgb_mode),0,3));
+    auto c=request;normalize(c.settings);
     auto q=impl_->queue;std::unique_lock lock(q->mutex);if(q->closed) return;
     if(c.action==CoolerAction::apply) {
         if(c.persist && c.section==CoolerSection::all) throw std::invalid_argument("Manual cooler Apply requires fan, pump or RGB section");

@@ -138,6 +138,21 @@ void peripheral_regressions(const std::filesystem::path& root) {
     Mode mode;mode.pl1=80;mode.pl2=120;mode.pl4=200;mode.tcc_offset=95;r.session->profile.modes=std::map<std::string,Mode>{{"gaming",mode}};
     result=pending->execute(DefaultsApply{"gaming"});check(result.code==0 && result.text.find("logo defaults restored")==std::string::npos,"mode defaults do not claim logo restoration");
 }
+void startup_degradation(const std::filesystem::path& root) {
+    auto start=[&](const char* name,const std::function<void(State&)>& setup,bool& cpu,std::vector<std::string>& errors) {
+        auto path=root/name;std::filesystem::create_directories(path);auto s=std::make_shared<State>();setup(*s);
+        EcSession session([&](const std::wstring&){return std::make_unique<Fake>(s);},[](const std::string&){},false,[](unsigned){},profiles_directory(),Identity{"X6AR55xY","fixture","intel",uint8_t{26}});
+        cpu=session.validation.enabled.contains("cpuPower");
+        Controller c(session,path,[](const std::string&){},[](unsigned){},{},false,{},false);errors=c.start();
+    };
+    bool cpu=false;std::vector<std::string> errors;
+    start("diagnostic-read-failure",[](State& s){s.fail_read=0x753;},cpu,errors);
+    check(cpu && errors.empty(),"failed diagnostic-only startup read leaves control and EC init intact");
+    start("pl4-flag-read-failure",[](State& s){s.fail_read=0x727;},cpu,errors);
+    check(!cpu && errors.size()==1 && errors[0].starts_with("0x726, 0x727: "),"unknown PL4 encoding disables CPU power and failed init step is reported");
+    start("activation-not-acknowledged",[](State& s){s.bytes[0x741]=0;s.fail_write=0x741;},cpu,errors);
+    check(errors.size()==2 && errors[0].starts_with("0x741: ") && errors[1].find("not acknowledged")!=std::string::npos,"unacknowledged activation is a startup warning, not a controller failure");
+}
 void gpu_integration(const std::filesystem::path& root) {
     auto backend=std::make_unique<GpuFixture>();auto driver=backend.get();Rig r(root/"gpu",true,std::move(backend));auto& c=*r.controller;
     GpuSettings combined;combined.tgp=70;auto sets=driver->sets;
@@ -156,6 +171,10 @@ void gpu_integration(const std::filesystem::path& root) {
     auto response=c.execute(CliCommand{{"gpu","--nvvdd","125.001A","--json"}});j=parse(response.text);
     check(response.code==0 && driver->rails.nv.current==125001 && j["nvvdd"]["limitMa"]==125001 && driver->request==70000u,"current-only CLI parses exact milliamps once and does not rewrite GPU power");
     auto plain=c.execute(CliCommand{{"status"}});check(plain.code==0 && plain.text.find("NVVDD limit 125.001 A")!=std::string::npos && plain.text.find("Clock caps: current controller")!=std::string::npos && plain.text.find("board input limiter (IPC)")!=std::string::npos,"plain GPU status retains source current/telemetry fields and units");
+    c.execute(Visibility{true});r.state->reads.clear();before=driver->reads;auto live=c.presentation(false,true,0);
+    check(r.state->reads.empty() && driver->reads==before+1 && live["gpuLive"]["nvvdd"]["measuredMa"]==123456,"Power tab live refresh reads only driver telemetry, no EC bytes");
+    c.execute(UiPage{5});before=driver->reads;auto info=c.presentation(false,false,5);auto again=c.presentation(false,false,5);
+    check(info["gpuBudget"]["laptopWatts"]==250 && !again.contains("gpuBudget") && driver->reads==before+1,"System Info reads driver budgets at most every five seconds");c.execute(UiPage{0});c.execute(Visibility{false});
     before=driver->sets;check(c.execute(CliCommand{{"gpu","--nvvdd","125.0001A"}}).code==2 && driver->sets==before,"fractional milliamp request fails without writes");
     check(c.execute(CliCommand{{"gpu","--nvvdd","200A"}}).code==1 && driver->sets==before,"CLI above active ceiling refuses without restart or current writes");
     driver->fail_budget=true;r.state->writes.clear();GpuSettings above;above.tgp=200;
@@ -212,6 +231,15 @@ void gpu_integration(const std::filesystem::path& root) {
     });capture_pending=&interrupted_capture;
     interrupted_capture.controller->execute(ProtectionApply{{true,50,true,true,false}});
     check(interrupted_capture.controller->execute(SlotSave{1}).code==1 && !std::filesystem::exists(root/"gpu-capture-trip/userprofile_1.json") && interrupted_capture.controller->thermal().complete(),"trip during slow NVIDIA capture cannot overwrite a normal slot with emergency settings");
+    Rig* combined_pending=nullptr;bool combined_trip=true;auto combined_driver=std::make_unique<GpuFixture>();auto combined_gpu=combined_driver.get();size_t trip_writes=0;
+    Rig combined_rig(root/"gpu-combined-trip",true,std::move(combined_driver),[&](std::function<void()> work) {
+        auto sets=combined_gpu->sets;work();
+        if(combined_pending && combined_trip && combined_gpu->sets>sets) {combined_trip=false;combined_pending->state->bytes[0x44F]=80;for(int i=0;i<3;++i) combined_pending->controller->tick();trip_writes=combined_pending->state->writes.size();}
+    });combined_pending=&combined_rig;
+    combined_rig.controller->execute(ProtectionApply{{true,50,true,true,false}});
+    GpuSettings with_currents;with_currents.tgp=120;with_currents.nvvdd_ma=125000;auto& cs=*combined_rig.state;
+    combined_rig.controller->execute(GpuApply{with_currents,true,false,CpuSettings{110,150,200,95}});
+    check(!combined_trip && combined_rig.controller->thermal().tripped() && std::none_of(cs.writes.begin()+trip_writes,cs.writes.end(),[](auto w){return w.first==0x783 && w.second==110;}) && cs.bytes[0x783]==control_limit(combined_rig.session->profile,"PL1").min,"trip during NVIDIA work of a combined apply keeps the CPU hold without a transient normal write");
     auto startup_path=root/"gpu-saved-dlppc";std::filesystem::create_directories(startup_path);{ProfileStore store(startup_path,false);store.set_disable_dlppc(true);}
     auto saved_driver=std::make_unique<GpuFixture>();auto saved_gpu=saved_driver.get();Rig saved_rig(startup_path,true,std::move(saved_driver));
     check(!saved_gpu->dlppc_active,"only saved DLPPC disable is reapplied at controller startup");
@@ -287,7 +315,13 @@ void thermal(const std::filesystem::path& root) {
     check(first_fan<first_cpu && read_json(path/"settings.json")["thermalProtection"]["Held"]==7,"GPU then fan then CPU actions precede durable trip state");
     s->writes.clear();for(int i=0;i<5;++i)c.tick();check(s->writes.empty(),"five-tick held maintenance uses verified same-epoch readback");
     check(c.execute(ThermalReset{}).code==1 && c.thermal().tripped(),"enabled reset refuses a fresh valid reading while rolling average remains above trigger");
-    s->bytes[0x751]&=~64;for(int i=0;i<5;++i)c.tick();check((s->bytes[0x751]&64)!=0,"maintenance reasserts firmware-cleared boost");
+    s->bytes[0x751]&=~64;for(int i=0;i<5;++i)c.tick();check((s->bytes[0x751]&64)!=0 && c.thermal().lost_alerts()==0,"maintenance reasserts firmware-cleared boost without a lost-protection alert");
+    c.execute(PowerEvent{true});c.execute(PowerEvent{false});Sleep(3100);c.tick();
+    check(c.thermal().complete() && c.thermal().lost_alerts()==0,"resume invalidation alone does not raise a lost-protection alert");
+    s->bytes[0x751]&=~64;s->fail_write=0x751;for(int i=0;i<5;++i)c.tick();
+    check(!c.thermal().complete() && c.thermal().lost_alerts()==1,"failed maintenance write counts one lost-protection alert");
+    s->fail_write.reset();for(int i=0;i<5;++i)c.tick();
+    check(c.thermal().complete() && c.thermal().lost_alerts()==1,"restored protection does not alert again");
     s->writes.clear();check(c.execute(CpuApply{{80,150,200,95}}).code==1 && s->writes.empty(),"held state blocks deliberate power writes");
     check(c.execute(FanBoost{false}).code==1 && c.execute(FanBoost{true}).code==0,"fan hold refuses off but allows added cooling");
     check(c.execute(SlotSave{1}).code==1 && !std::filesystem::exists(path/"userprofile_1.json"),"tripped emergency settings cannot overwrite a normal slot");
@@ -412,7 +446,9 @@ void monitor(const std::filesystem::path& root) {
     ProtectionSettings protection;protection.enabled=true;protection.threshold=95;c.execute(ProtectionApply{protection});s->reads.clear();c.tick();
     check(s->reads[0x44F]==1 && s->reads[0x43E]==1 && s->reads[0x464]==1 && s->reads.size()==6,"hidden tick shares each required temperature once plus four RPM bytes");
     c.execute(Visibility{true});s->reads.clear();c.tick();int count=0;for(auto [a,n]:s->reads)count+=n;
-    check(count==18 && s->reads[0x44F]==1 && s->reads[0x43E]==1,"visible full tick reuses shared samples for eighteen EC bytes");
+    check(count==13 && s->reads[0x44F]==1 && s->reads[0x43E]==1 && !s->reads.contains(0x60C),"visible Power tab tick reads the monitor bar, not System Info sensors");
+    c.execute(UiPage{5});s->reads.clear();c.tick();count=0;for(auto [a,n]:s->reads)count+=n;
+    check(count==18 && s->reads[0x44F]==1 && s->reads[0x43E]==1,"System Info tick reuses shared samples for eighteen EC bytes");c.execute(UiPage{0});
     s->fail_read=0x464;s->bytes[0x44F]=110;for(int i=0;i<5;++i)c.tick();
     check(c.thermal().tripped(),"unrelated RPM/telemetry failures cannot suppress safety dispatch");
     Rig retry(root/"monitor-restart");auto t=GetTickCount64();auto rs=retry.state;rs->fail_read=0x464;
@@ -549,8 +585,8 @@ int main(int argc,char** argv) {
             bool active=false;
             {nv::Api api;auto d=api.dlppc();if(!d) throw std::runtime_error("No DLPPC policy for same-value check");active=d->active;
              nv::Store store(api.identity);auto image=api.bios();bool staged=false,discarded=false;auto original=store.open(image,staged,discarded);auto c=api.currents();
-             auto rail=[](nv::Rail r,nv::Field f){r.def=f.def;r.stock_max=f.max;return nv::RailOverride{r.current,static_cast<uint32_t>(r.allowed(true))};};
-             if(staged) {nv::Override same; same.power=original.power.max+75000;same.nv=rail(c.nv,original.nv);same.ms=rail(c.ms,original.ms);if(c.input && original.input) same.input=rail(*c.input,*original.input);
+             auto rail=[](nv::Rail r,nv::Field f,uint32_t percent=140){r.def=f.def;r.stock_max=f.max;r.unlock_percent=percent;return nv::RailOverride{r.current,static_cast<uint32_t>(r.allowed(true))};};
+             if(staged) {nv::Override same; same.power=original.power.max+75000;same.nv=rail(c.nv,original.nv);same.ms=rail(c.ms,original.ms);if(c.input && original.input) same.input=rail(*c.input,*original.input,154);
                  check(store.matches(original.build(same)),"same-value current workflow will not change existing BIOS override records");}
              auto start=GetTickCount64();for(int i=0;i<100;++i) api.telemetry();
              PROCESS_MEMORY_COUNTERS memory{};K32GetProcessMemoryInfo(GetCurrentProcess(),&memory,sizeof(memory));
@@ -595,7 +631,7 @@ int main(int argc,char** argv) {
         std::filesystem::create_directories(base);
         auto stem=std::to_string(GetCurrentProcessId());auto root=base/stem;
         for(unsigned suffix=1;!std::filesystem::create_directory(root);++suffix) root=base/(stem+"-"+std::to_string(suffix));
-        integration(root);gpu_integration(root);thermal(root);recovery(root);defaults_and_no_slot(root);startup_and_eligibility(root);capture_preservation(root);peripheral_intent(root);peripheral_regressions(root);monitor(root);x6fr(root);worker(root);worker_restart(root);worker_hid_delay(root);
+        integration(root);startup_degradation(root);gpu_integration(root);thermal(root);recovery(root);defaults_and_no_slot(root);startup_and_eligibility(root);capture_preservation(root);peripheral_intent(root);peripheral_regressions(root);monitor(root);x6fr(root);worker(root);worker_restart(root);worker_hid_delay(root);
         check(!GetModuleHandleW(L"nvapi64.dll") && !GetModuleHandleW(L"nvml.dll"),"injected/stock controller status and capture do not load physical NVIDIA libraries");
         std::cout<<"Evidence: "<<root.string()<<'\n';return 0;
     } catch(const std::exception& ex) {std::cerr<<"FAIL "<<ex.what()<<'\n';return 1;}

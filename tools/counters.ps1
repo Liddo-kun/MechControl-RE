@@ -8,7 +8,7 @@ $principal = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIde
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Run this script from an elevated shell.' }
 $Manifest = (Resolve-Path $Manifest).Path
 $BackupDirectory = [IO.Path]::GetFullPath($BackupDirectory)
-if (Get-Process -Name MechControl,ui-fixture,ui-pages-check,foundation-check -ErrorAction SilentlyContinue) { throw 'Stop every MechControl publisher before changing counter registration.' }
+if (Get-Process -Name MechControl,ui-pages-check,foundation-check -ErrorAction SilentlyContinue) { throw 'Stop every MechControl publisher before changing counter registration.' }
 $key = 'HKLM\SYSTEM\CurrentControlSet\Services\MechControl\Performance'
 $provider = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Perflib\_V2Providers\{78D1FCD4-2A33-4DD9-9C89-EC307B75E1F4}'
 function NativeCommand([string]$Program, [string[]]$Arguments) {

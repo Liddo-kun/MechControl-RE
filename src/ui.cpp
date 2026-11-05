@@ -263,7 +263,7 @@ private:
         tooltip_=CreateWindowExW(WS_EX_TOPMOST,TOOLTIPS_CLASSW,nullptr,WS_POPUP|TTS_ALWAYSTIP|TTS_NOPREFIX,CW_USEDEFAULT,CW_USEDEFAULT,CW_USEDEFAULT,CW_USEDEFAULT,window_,nullptr,instance_,nullptr);
         for(UINT_PTR i=0;i<std::size(liveTips);++i) tip(i+1,liveTips[i]); // Rectangles follow the painted table.
         tip(reinterpret_cast<UINT_PTR>(get(dlppcId)),dlppcTip_=dlppcTip(nullptr),TTF_IDISHWND);
-        for(int id:{nvId,msId,inputId}) tip(reinterpret_cast<UINT_PTR>(get(id)),L"Applies live within the active ceiling. The unlock allows up to 140% of the stock current; raising an older ceiling restarts the GPU.",TTF_IDISHWND);
+        for(int id:{nvId,msId,inputId}) tip(reinterpret_cast<UINT_PTR>(get(id)),(L"Applies live within the active ceiling. The unlock allows up to "+std::wstring(id==inputId?L"154":L"140")+L"% of the stock current; raising an older ceiling restarts the GPU."),TTF_IDISHWND);
         check(1,boostId,L"Enable Fan Boost");button(1,boostApplyId,L"Apply Boost");check(1,switchId,L"Enable Fan Switch Speed");slider(1,switchMsId,L"Fan switching interval (ms)",100,12700,300);button(1,switchApplyId,L"Apply fan switch speed");
         check(1,curveId,L"Custom Fan Curve");check(1,linkId,L"Link Fans");
         row(1,cpuChartId,L"CPU fan curve",chartClass,WS_TABSTOP,250);row(1,gpuChartId,L"GPU fan curve",chartClass,WS_TABSTOP,250);
@@ -401,7 +401,7 @@ private:
     // Each limit next to the clock: its setting, reading, share of the setting and the clock cap of the driver
     // controller enforcing it. No verdicts: several limits hold the clock back at once, so only numbers are shown.
     void paintLive(HDC dc) {
-        const Json& g=gpuTelemetry_;bool live=liveReason_.empty() && g.is_object();
+        const Json& g=live_;bool live=liveReason_.empty() && g.is_object();
         auto number=[&](const Json& j,const char* key)->std::optional<double> {if(!live || !j.is_object() || !j.contains(key) || !j[key].is_number()) return {};return j[key].get<double>();};
         auto rail=[&](const char* key){return live && g.contains(key)?g[key]:Json(nullptr);};
         auto nv=rail("nvvdd"),ms=rail("msvdd"),input=rail("boardInput");
@@ -454,7 +454,7 @@ private:
         cpuNote_=state_.contains("cpu") && state_["cpu"].is_null()?L"CPU power controls disabled — register validation failed. See log for details."
             :state_.contains("cpuError")?L"CPU read failed: "+w(state_["cpuError"].get<std::string>()):L"";
         gpuNote_=state_.contains("gpu") && state_["gpu"].is_null()?L"GPU power controls disabled — register validation failed. See log for details.":L"";
-        powerHint_.clear();
+        powerHint_=gpuError_;
         if(gpuError_.empty() && g.is_object()) {
             auto failed=g.value("powerError",std::string{});if(failed.empty()) failed=g.value("currentsError",std::string{});
             auto stock=[&](const char* key){return compact(g[key]["stockMa"].get<int>()/1000.0);};
@@ -464,8 +464,9 @@ private:
                 powerHint_=L"Driver ceiling "+std::to_wstring(g["ceilingWatts"].get<int>())+L" W · enforced "+std::to_wstring(g["enforcedWatts"].get<int>())+L" W · stock currents "
                     +stock("nvvdd")+L" / "+stock("msvdd")+(g.value("boardInput",Json(nullptr)).is_object()?L" / "+stock("boardInput"):L"")+L" A";
         }
-        liveReason_=!gpuError_.empty()?gpuError_:!g.is_object()?L"not read yet":nvidia.is_string()?w(nvidia.get<std::string>())
-            :g.contains("telemetryError")?L"NVIDIA readback failed: "+w(g["telemetryError"].get<std::string>()):L"";
+        auto liveNvidia=live_.is_object()?live_.value("nvidia",Json(nullptr)):Json(nullptr);
+        liveReason_=!live_.is_object()?L"not read yet":liveNvidia.is_string()?w(liveNvidia.get<std::string>())
+            :live_.contains("telemetryError")?L"NVIDIA readback failed: "+w(live_["telemetryError"].get<std::string>()):L"";
         auto dlppc=dlppcTip(g.is_object()?g.value("dlppc",Json(nullptr)):Json(nullptr));
         if(dlppc!=dlppcTip_) {dlppcTip_=std::move(dlppc);tip(reinterpret_cast<UINT_PTR>(get(dlppcId)),dlppcTip_,TTF_IDISHWND,TTM_UPDATETIPTEXTW);}
         // Text that changes the layout relays out the page; live readings only repaint it.
@@ -780,10 +781,16 @@ private:
         if(j.contains("identity")) {identity_=j["identity"];SetWindowTextW(window_,(L"MechControl — "+w(state_.value("model",std::string{}))).c_str());}
         bool selection=old!=state_.value("activeSlot",0);if(selection) target_=state_.value("activeSlot",0);if(selection || j.contains("slots") || j.contains("names")) updateSlots();
         bool wasTripped=tripped_;tripped_=state_.value("tripped",false);warning_=state_.value("warning",std::string{});if(!configurationWarning_.empty()) warning_+=(warning_.empty()?"":"\n")+configurationWarning_;
-        if(j.contains("gpu") || j.contains("gpuLive")) {gpuTelemetry_=j.contains("gpuLive")?j["gpuLive"]:j["gpu"];gpuError_.clear();state_.erase("gpuError");}
-        if(j.contains("gpuError")) gpuError_=L"Live read failed: "+w(j["gpuError"].get<std::string>());
-        if(IsWindowVisible(window_)) {int page=TabCtrl_GetCurSel(tabs_);if(readPage>=0 || readPage==-1 || initial || page==1 || page==2 || j.contains("gpuLive") || j.contains("gpuError")) bindPage(page);}
-        updateTray();if(tripped_ && !wasTripped) alert();
+        if(j.contains("gpu")) {gpuTelemetry_=live_=j["gpu"];gpuError_.clear();state_.erase("gpuError");}
+        if(j.contains("gpuError")) gpuError_=L"GPU read failed: "+w(j["gpuError"].get<std::string>());
+        if(j.contains("gpuLive")) live_=j["gpuLive"];if(j.contains("gpuBudget")) gpuBudget_=j["gpuBudget"];
+        if(IsWindowVisible(window_)) {
+            int page=TabCtrl_GetCurSel(tabs_);
+            if(readPage>=0 || readPage==-1 || initial || page==1 || page==2 || j.contains("gpuError") || (page==5 && j.contains("gpuBudget"))) bindPage(page);
+            else if(ready_ && page==0 && j.contains("gpuLive")) refreshPower(); // Live readings repaint the table; the editor keeps its values.
+        }
+        int lost=state_.value("thermalLostAlerts",0);bool protectionLost=lost>lostAlerts_;lostAlerts_=lost;
+        updateTray();if(tripped_ && (!wasTripped || protectionLost)) alert(); // Like the source, also re-alert when verified protection is lost.
         if(alert_ && !tripped_) DestroyWindow(alert_);
         if(alert_) SetWindowTextW(alertText_,(w(state_.value("thermalStatus",std::string{}))+L"\r\n\r\nCheck the cooler. Closing this alert does NOT reset the failsafe.").c_str());
     }
@@ -791,7 +798,7 @@ private:
         if(gpu.is_null()) return;
         gpuTelemetry_=gpu;
         for(auto [id,key]:{std::pair(tgpId,"tgp"),std::pair(dbId,"dynamicBoostWatts")}) {auto& v=gpu.at(key);value(id,v["value"],v["min"],v["max"]);}
-        checked(dbOnId,gpu.value("dynamicBoost",false));checked(unlockId,gpu.value("unlocked",false));checked(dlppcId,state_.value("dlppcDisabled",false));enable(unlockId,gpu.value("unlockAvailable",false));enable(dlppcId,gpu.contains("dlppc") && !gpu["dlppc"].is_null());
+        checked(dbOnId,gpu.value("dynamicBoost",false));checked(unlockId,gpu.value("unlocked",false));checked(dlppcId,state_.value("dlppcDisabled",false));enable(unlockId,gpu.value("unlockAvailable",false));enable(dlppcId,gpu.value("dlppcAvailable",false) && !(gpu.contains("dlppc") && gpu["dlppc"].is_null())); // Clicking connects NVIDIA on demand.
         if(gpu.contains("unlockMin") && gpu.contains("unlockMax")) set(unlockId,L"Unlock GPU power / current limits (TGP "+std::to_wstring(gpu["unlockMin"].get<int>())+L"-"+std::to_wstring(gpu["unlockMax"].get<int>())+L" W)");
         for(auto [id,key]:{std::pair(nvId,"nvvdd"),std::pair(msId,"msvdd"),std::pair(inputId,"boardInput")}) {
             auto& rail=gpu.at(key);bool previouslyEnabled=IsWindowEnabled(get(id))!=FALSE;enable(id,!rail.is_null());
@@ -803,13 +810,15 @@ private:
             }
             set(id+1000,display(id,number(id)));
         }
-        if(TabCtrl_GetCurSel(tabs_)==5) updateInfo();
     }
     void updateInfo() {
         std::wstring sensors;if(lastSensors_) {auto& s=*lastSensors_;auto v=[](auto x){return x?std::to_wstring(*x):L"--";};
             sensors=L"CPU: "+v(s.cpu_temp)+L" °C; GPU: "+v(s.gpu_temp)+L" °C; CPU limit: "+v(s.cpu_limit)+L" °C\r\n";
             sensors+=L"System: "+v(s.system_watts)+L" W; Adapter: "+(s.adapter_amps?decimal(*s.adapter_amps):L"--")+L" A; TGP: "+v(s.tgp_live)+L" W; Dynamic Boost: "+v(s.db_live)+L" W\r\n";}
-        set(infoId,L"System and model detection:\r\n"+describe(identity_)+L"\r\nLive sensors:\r\n"+sensors+L"\r\nGPU limits:\r\n"+(gpuError_.empty()?L"":L"STALE — "+gpuError_+L"\r\n")+describe(gpuTelemetry_)+L"\r\nDisabled features:\r\n"+(state_.contains("disabled")?describe(state_["disabled"]):L""));
+        std::wstring budget;const Json& b=gpuBudget_;
+        if(b.is_object()) budget=L"\r\nNVIDIA driver:\r\n"+(b.contains("reason")?L"GPU budget F7: -- ("+w(b["reason"].get<std::string>())+L")\r\n"
+            :L"GPU budget F7: "+std::to_wstring(b["laptopWatts"].get<int>())+L" W; CPU+GPU budget TPP: "+std::to_wstring(b["platformWatts"].get<int>())+L" W\r\n");
+        set(infoId,L"System and model detection:\r\n"+describe(identity_)+L"\r\nLive sensors:\r\n"+sensors+budget+L"\r\nDisabled features:\r\n"+(state_.contains("disabled")?describe(state_["disabled"]):L""));
     }
     void peripherals(const Json& j) {
         if(j.contains("battery")) peripheralState_.erase("batteryError");if(j.contains("lightingIntent")) for(auto key:{"logoError","dimmingError"}) peripheralState_.erase(key);
@@ -874,6 +883,7 @@ private:
     void results() {
         for(auto& result:delivery_->take()) {
             if(result.kind==ResultKind::selection) {selectModel(result.selection);continue;}
+            if(result.kind==ResultKind::warning) {setStatus(L"EC initialization had errors; see mechcontrol.log.");MessageBoxW(window_,result.text.c_str(),L"EC Init Warning",MB_OK|MB_ICONWARNING);continue;}
             if(result.kind==ResultKind::failure) {MessageBoxW(window_,(result.text+L"\nMake sure UWACPIDriver is installed and run as Administrator. See mechcontrol.log.").c_str(),L"MechControl — Controller Error",MB_OK|MB_ICONERROR);DestroyWindow(window_);PostQuitMessage(1);return;}
             bool own=result.sequence && result.sequence==busySequence_;
             if(own) busy(false);
@@ -889,7 +899,7 @@ private:
                     if(!catalog) outcome_[operationPage_]=L"\r\nLast action: "+result.text+(r.partial?L" [partial; review readback]":r.applied?L" [applied]":L"");
                     if(operation_ && (std::holds_alternative<SlotSave>(*operation_) || std::holds_alternative<SlotLoad>(*operation_))) {if(r.code || r.partial) configurationWarning_=r.text;else configurationWarning_.clear();}
                     if(!r.code && operation_ && std::holds_alternative<ProtectionApply>(*operation_)) eraseEdits(protectionId,showWindowId);
-                    if(!r.code && operation_ && (std::holds_alternative<ThermalReset>(*operation_) || std::holds_alternative<SlotLoad>(*operation_) || std::holds_alternative<DefaultsApply>(*operation_))) {eraseEdits(pl1Id,showWindowId);boundPages_[1]=false;boundCharts_.clear();}
+                    if(!r.code && operation_ && (std::holds_alternative<ThermalReset>(*operation_) || std::holds_alternative<SlotLoad>(*operation_) || std::holds_alternative<DefaultsApply>(*operation_))) {edited_.clear();boundPages_[1]=false;boundCharts_.clear();}
                     setStatus(result.text+(r.slot_committed?L" [slot committed]":L"")+(r.partial?L" [partial]":L"")+(r.applied?L" [applied]":L"")+(r.saved?L" [saved]":L""));
                     if(r.code) {pendingCpu_.reset();MessageBoxW(window_,result.text.c_str(),L"MechControl — Not completed",MB_OK|MB_ICONERROR);}
                     hints();
@@ -999,9 +1009,9 @@ private:
     std::array<std::wstring,6> monitor_{L"CPU Fan: --",L"GPU Fan: --",L"CPU Temp Limit: --",L"Battery: --",L"Fan Boost: --",L"Fan Curve: --"};HFONT font_=nullptr,bold_=nullptr,title_=nullptr;UINT dpi_=96,taskbarMessage_=0;
     std::vector<std::pair<RECT,const wchar_t*>> powerFrames_;std::vector<PowerText> powerText_;POINT liveOrigin_{0,-1};std::map<int,int> detectedMa_;
     std::wstring cpuNote_,gpuNote_,powerHint_,liveReason_,powerKey_,dlppcTip_;std::array<Page,7> pages_;std::map<int,HWND> controls_;std::set<int> edited_;
-    std::array<HICON,5> slotIcons_{};std::vector<HICON> animation_;size_t animationFrame_=0;int trayState_=-3;bool closing_=false,trayAdded_=false,updating_=false,busy_=false,ready_=false,tripped_=false,coolerConnected_=false,coolerAvailable_=false,fanEditQueued_=false,powerRead_=false;
+    std::array<HICON,5> slotIcons_{};std::vector<HICON> animation_;size_t animationFrame_=0;int trayState_=-3,lostAlerts_=0;bool closing_=false,trayAdded_=false,updating_=false,busy_=false,ready_=false,tripped_=false,coolerConnected_=false,coolerAvailable_=false,fanEditQueued_=false,powerRead_=false;
     int target_=0;std::uint64_t sequence_=0,busySequence_=0;ULONGLONG lastError_=0;
-    Json state_=Json::object(),peripheralState_=Json::object(),identity_,gpuTelemetry_,boundHistory_,devices_=Json::array();std::map<int,std::pair<Json,ChartOptions>> boundCharts_;std::array<bool,7> boundPages_{};std::array<std::wstring,7> outcome_;
+    Json state_=Json::object(),peripheralState_=Json::object(),identity_,gpuTelemetry_,live_,gpuBudget_,boundHistory_,devices_=Json::array();std::map<int,std::pair<Json,ChartOptions>> boundCharts_;std::array<bool,7> boundPages_{};std::array<std::wstring,7> outcome_;
     std::string warning_,configurationWarning_;std::wstring gpuError_;std::optional<CpuSettings> pendingCpu_;std::optional<Sensors> lastSensors_;std::optional<ControlCommand> operation_;int operationPage_=0;
     Log log_;std::shared_ptr<Delivery> delivery_;WorkerOptions workerOptions_;std::unique_ptr<ControlWorker> worker_;
 #ifdef MECHCONTROL_WITH_CLI
