@@ -99,8 +99,10 @@ failures and 100/150/200% DPI captures. Run it on an interactive desktop and ins
 the captures; it does not establish physical hardware qualification.
 Final candidate identities/checks and open qualification are recorded in
 `docs/phase-9-result.md`; prior measurements remain in `docs/phase-8-result.md`.
-`mechcontrol.log` retains the first session and five recent
-sessions beside the executable.
+`mechcontrol.log` sits beside the executable and keeps the first session, the five
+previous sessions and the current one. Startup writes the same identity, ECSpec,
+register, EC init and fan table sections as the C# app, so a log from an untested
+model is enough to start a profile for it.
 
 ## Configuration library
 

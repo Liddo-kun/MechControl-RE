@@ -2,6 +2,7 @@
 #include <windows.h>
 #include <icu.h>
 #include <cstdint>
+#include <cstdio>
 #include <system_error>
 
 namespace mech::config {
@@ -44,4 +45,5 @@ bool letter_or_digit(wchar_t c) {
     // Like char.IsLetterOrDigit, classify a UTF-16 code unit, not a whole Rune.
     return u_isalnum(c)!=0;
 }
+std::string hex_text(unsigned value,int digits) {char s[16];snprintf(s,sizeof s,"0x%0*X",digits,value);return s;}
 }

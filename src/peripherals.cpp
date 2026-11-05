@@ -52,7 +52,7 @@ bool Lighting::open_device() {
     GUID guid;HidD_GetHidGuid(&guid);auto devices=SetupDiGetClassDevsW(&guid,nullptr,nullptr,DIGCF_PRESENT|DIGCF_DEVICEINTERFACE);
     if(devices==INVALID_HANDLE_VALUE) return false;
     struct List {HDEVINFO h;~List(){SetupDiDestroyDeviceInfoList(h);}} cleanup{devices};
-    std::vector<std::pair<std::wstring,USHORT>> paths;
+    std::vector<std::pair<std::wstring,USHORT>> paths;std::string probes;int found=0;
     SP_DEVICE_INTERFACE_DATA iface{sizeof(iface)};
     for(DWORD i=0;SetupDiEnumDeviceInterfaces(devices,nullptr,&guid,i,&iface);++i) {
         DWORD bytes=0;SetupDiGetDeviceInterfaceDetailW(devices,&iface,nullptr,0,&bytes,nullptr);std::vector<uint8_t> storage(bytes);
@@ -60,14 +60,20 @@ bool Lighting::open_device() {
         auto detail=reinterpret_cast<SP_DEVICE_INTERFACE_DETAIL_DATA_W*>(storage.data());detail->cbSize=sizeof(*detail);
         if(!SetupDiGetDeviceInterfaceDetailW(devices,&iface,detail,bytes,nullptr,nullptr)) continue;
         std::wstring path=detail->DevicePath;if(lower_invariant(path).find(L"vid_048d")==std::wstring::npos) continue;
+        ++found;probes+="\n  "+winrt::to_string(path)+": ";
         Handle probe;
         for(DWORD access:{DWORD(0),DWORD(GENERIC_READ|GENERIC_WRITE),DWORD(GENERIC_WRITE)}) {probe=Handle(CreateFileW(path.c_str(),access,FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,OPEN_EXISTING,0,nullptr));if(probe) break;}
         PHIDP_PREPARSED_DATA data=nullptr;HIDP_CAPS caps{};
-        if(probe && HidD_GetPreparsedData(probe.get(),&data)) {
+        if(!probe) probes+="cannot open (error "+std::to_string(GetLastError())+")";
+        else if(!HidD_GetPreparsedData(probe.get(),&data)) probes+="GetPreparsedData failed";
+        else {
             auto status=HidP_GetCaps(data,&caps);HidD_FreePreparsedData(data);
-            if(status==HIDP_STATUS_SUCCESS && caps.FeatureReportByteLength==9) paths.emplace_back(path,caps.Usage);
+            probes+="caps status="+hex_text(unsigned(status),8)+" feature="+std::to_string(caps.FeatureReportByteLength)+" input="+std::to_string(caps.InputReportByteLength)
+                +" output="+std::to_string(caps.OutputReportByteLength)+" usage="+hex_text(caps.Usage,4)+" usagePage="+hex_text(caps.UsagePage,4);
+            if(status==HIDP_STATUS_SUCCESS && caps.FeatureReportByteLength==9) {paths.emplace_back(path,caps.Usage);probes+=" -> lighting controller";}
         }
     }
+    log_("[HID] Found "+std::to_string(found)+" ITE (VID 048D) HID device paths"+probes);
     std::sort(paths.begin(),paths.end(),[](const auto& a,const auto& b){return CompareStringOrdinal(a.first.c_str(),-1,b.first.c_str(),-1,TRUE)==CSTR_LESS_THAN;});
     auto write=[&](int z,const std::wstring& path) {handles_[z]=Handle(CreateFileW(path.c_str(),GENERIC_WRITE,3,nullptr,OPEN_EXISTING,0,nullptr));if(!handles_[z]) handles_[z]=Handle(CreateFileW(path.c_str(),GENERIC_READ|GENERIC_WRITE,3,nullptr,OPEN_EXISTING,0,nullptr));};
     auto kb=std::find_if(paths.begin(),paths.end(),[](auto& p){return p.second==1;});auto bar=std::find_if(paths.begin(),paths.end(),[](auto& p){return p.second==2;});

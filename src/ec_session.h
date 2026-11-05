@@ -13,6 +13,7 @@ struct FanSnapshot {
     bool custom_mode(uint8_t latch_mask) const { return (enable&128)!=0 && (mode&latch_mask)==4; }
 };
 FanSnapshot read_fans(EcTransport&,const config::FanTable&);
+std::string describe(const FanSnapshot&,const std::string& title); // Hex dump for the diagnostic log.
 struct Sensors {
     int cpu_rpm=0,gpu_rpm=0;
     std::optional<int> cpu_percent,gpu_percent,cpu_limit,battery_soc,battery_mode,battery_raw,cpu_temp,gpu_temp,
@@ -33,6 +34,7 @@ private:
     std::unique_ptr<EcTransport> ec_;
     std::map<int,uint8_t> startup_reads_;
     bool read_only_;
+    void describe(const std::function<void(const std::string&)>&,const config::Enrichment&,bool profile_modes);
 public:
     EcSession(ChannelFactory,const std::function<void(const std::string&)>& diagnostic,bool read_only,
         std::function<void(unsigned)> wait={},const std::filesystem::path& directory=config::profiles_directory(),

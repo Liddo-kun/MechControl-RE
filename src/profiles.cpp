@@ -103,15 +103,20 @@ std::vector<std::filesystem::path> manual_profiles(const std::filesystem::path& 
     std::sort(r.begin(),r.end()); return r;
 }
 Selection select_profile(const std::filesystem::path& dir,const Identity& id,
-    const std::function<std::optional<std::filesystem::path>(const std::vector<std::filesystem::path>&)>& manual) {
+    const std::function<std::optional<std::filesystem::path>(const std::vector<std::filesystem::path>&)>& manual,
+    const std::function<void(const std::string&)>& log) {
     struct Candidate { std::filesystem::path path; Json json; };
     std::vector<Candidate> candidates;
+    auto note=[&](const std::string& s){if(log) log("[Profile] "+s);};
+    auto names=[](const std::vector<std::filesystem::path>& v){std::string s;for(const auto& p:v) s+=(s.empty()?"":", ")+p.filename().string();return s;};
     auto files=manual_profiles(dir);
     for(const auto& f:files) try {
         auto j=read_json(f); object(j);
-        if(id.cpu_vendor && j.contains("cpuVendor") && j["cpuVendor"].is_string() && !equal_ignore_case(j["cpuVendor"].get<std::string>(),*id.cpu_vendor)) continue;
+        if(id.cpu_vendor && j.contains("cpuVendor") && j["cpuVendor"].is_string() && !equal_ignore_case(j["cpuVendor"].get<std::string>(),*id.cpu_vendor)) {
+            note("Skipping "+f.filename().string()+": declares cpuVendor '"+j["cpuVendor"].get<std::string>()+"', CPU is "+*id.cpu_vendor);continue;
+        }
         candidates.push_back({f,std::move(j)});
-    } catch(const std::exception&) { /* malformed candidates do not stop matching */ }
+    } catch(const std::exception& ex) { note("Skipping malformed "+f.filename().string()+": "+ex.what()); } // Matching continues.
     auto board=lower_invariant(wide(id.baseboard)); Selection best; size_t length=0;
     for(const auto& c:candidates) try {
         if(!c.json.contains("baseboardPatterns") || !c.json["baseboardPatterns"].is_array()) continue;
@@ -121,22 +126,31 @@ Selection select_profile(const std::filesystem::path& dir,const Identity& id,
         }
     } catch(const std::exception&) {}
     if(!best.path.empty()) return best;
-    if(id.project_id) for(int shift=0;shift<=1;++shift) for(const auto& c:candidates) try {
-        if(!c.json.contains("projectIdValue")) continue;
-        int n=0; decode(c.json["projectIdValue"],n);
-        if(n==(*id.project_id>>shift)) return {c.path,shift?"EC shifted":"EC direct"};
-    } catch(const std::exception&) {}
-    length=0; std::wstring best_token;
+    if(id.project_id) for(int shift=0;shift<=1;++shift) {
+        std::vector<std::filesystem::path> matches;int value=*id.project_id>>shift;
+        for(const auto& c:candidates) try {
+            if(!c.json.contains("projectIdValue")) continue;
+            int n=0; decode(c.json["projectIdValue"],n);
+            if(n==value) matches.push_back(c.path);
+        } catch(const std::exception&) {}
+        if(matches.empty()) continue;
+        if(matches.size()>1) note("Project ID "+std::to_string(value)+" matched multiple profiles: "+names(matches)+" -> chose "+matches[0].filename().string());
+        return {matches[0],shift?"EC shifted":"EC direct"};
+    }
+    length=0; std::wstring best_token; std::vector<std::filesystem::path> matches;
     for(const auto& c:candidates) {
         auto token=lower_invariant(c.path.stem().wstring()); size_t pos=0;
         while(!token.empty() && (pos=board.find(token,pos))!=std::string::npos) {
             auto end=pos+token.size();
             if((pos==0 || !letter_or_digit(board[pos-1])) && (end==board.size() || !letter_or_digit(board[end]))) {
+                matches.push_back(c.path);
                 if(token.size()>length || (token.size()==length && token<best_token)) { best={c.path,"baseboard filename"}; length=token.size(); best_token=token; } break;
             } ++pos;
         }
     }
+    if(matches.size()>1) note("Baseboard matched multiple profile names: "+names(matches)+" -> chose "+best.path.filename().string()+" (longest match)");
     if(!best.path.empty()) return best;
+    note("No automatic match; asking for manual selection");
     if(manual) if(auto path=manual(files)) return {*path,"manual selection"};
     return {{},"manual selection canceled"};
 }

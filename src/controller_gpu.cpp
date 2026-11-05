@@ -99,10 +99,14 @@ void Controller::apply_gpu(GpuSettings g) {
 }
 void Controller::check_gpu() {
     if(!nvidia_ || nvidia_busy_ || gpu_driver_uncertain_ || !nvidia_->awake()) return; // All delayed reads are sleep-gated too.
-    if(dlppc_disabled_) try {nvidia_work([&]{auto d=nvidia_->dlppc();if(d && d->active) nvidia_->set_dlppc(false);});} catch(const std::exception& ex){diagnostic_(ex.what());}
+    if(dlppc_disabled_) try {nvidia_work([&]{auto d=nvidia_->dlppc();if(d && d->active) {diagnostic_("NVIDIA DLPPC was re-enabled (GPU restart); disabling it again");nvidia_->set_dlppc(false);}});} catch(const std::exception& ex){diagnostic_(std::string("NVIDIA DLPPC check failed: ")+ex.what());}
     bool applied=true;if(last_gpu_ && driver_watts_ && nvidia_->enabled) nvidia_work([&]{applied=nvidia_->applied(*driver_watts_);});
-    if(!applied) {apply_gpu(*last_gpu_);return;}
-    if(on_ac_) {auto g=gpu();nv::Budget budget;nvidia_work([&]{budget=nvidia_->budget();});if(budget.f7/1000<uint32_t(g.tgp+(g.dynamic_boost_enabled?g.dynamic_boost_watts:0))) diagnostic_("NVIDIA laptop budget below EC request on AC; Dynamic Boost may be stuck. Restart NVIDIA Platform Controllers and Framework to restore it.");}
+    if(!applied) {diagnostic_("NVIDIA driver request or laptop budget below "+std::to_string(*driver_watts_)+" W; reapplying");apply_gpu(*last_gpu_);return;}
+    if(on_ac_) {
+        auto g=gpu();nv::Budget budget;nvidia_work([&]{budget=nvidia_->budget();});auto expected=g.tgp+(g.dynamic_boost_enabled?g.dynamic_boost_watts:0);
+        if(budget.f7/1000<uint32_t(expected)) diagnostic_("NVIDIA laptop budget "+std::to_string(budget.f7/1000)+" W is below the EC request "+std::to_string(expected)
+            +" W on AC; Dynamic Boost may be stuck. Restart NVIDIA Platform Controllers and Framework to restore it.");
+    }
 }
 void Controller::unlock_gpu(bool enabled_value) {
     thermal_->check_before_apply();if(thermal_->tripped()) throw std::runtime_error("Reset thermal failsafe before changing NVIDIA BIOS limits");
@@ -122,7 +126,10 @@ void Controller::open_dlppc() {
 }
 // Call inside nvidia_work after open_dlppc.
 std::optional<nv::Dlppc> Controller::read_dlppc() {return nvidia_?nvidia_->dlppc():dlppc_api_->dlppc();}
-void Controller::write_dlppc(bool active) {if(nvidia_) nvidia_->set_dlppc(active);else dlppc_api_->set_dlppc(active);}
+void Controller::write_dlppc(bool active) {
+    if(nvidia_) nvidia_->set_dlppc(active);else dlppc_api_->set_dlppc(active);
+    diagnostic_(std::string("NVIDIA DLPPC (AI-controlled memory clock) ")+(active?"enabled":"disabled"));
+}
 void Controller::dlppc(bool disabled) {
     if(!nvidia_ && nvidia_available_) try {open_nvidia();} catch(const std::exception&) {} // Logged by open_nvidia.
     open_dlppc();bool write=false;

@@ -4,18 +4,22 @@
 #include <algorithm>
 
 namespace mech::nv {
+static std::string amps(uint32_t milliamps) {char s[24];sprintf_s(s,"%.3f",milliamps/1000.0);std::string t=s;t.erase(t.find_last_not_of('0')+1);if(t.back()=='.') t.pop_back();return t+" A";}
 Power::Power(int minimum,std::function<void(const std::string&)> log):log_(std::move(log)) {
     api_=std::make_unique<Api>();auto& id=api_->identity;
     char pci[32];sprintf_s(pci,"PCI 10DE:%04X/%08X",id.device,id.subsystem);auto gpu=id.name+" ("+pci+"), driver "+id.driver+", BIOS "+id.bios;
+    PowerLimits limits{};
     try {
         store_=std::make_unique<Store>(id);auto active=api_->bios();bool staged=false,discarded=false;original_=store_->open(active,staged,discarded);
         if(discarded) log_("NVIDIA owned overrides no longer apply (BIOS replaced or driver reinstalled); discarded");
         if(original_.device!=id.device || !config::equal_ignore_case(original_.version(),id.bios)) throw std::runtime_error("NVIDIA BIOS and GPU identity differ");
         if(original_.nv.def>INT_MAX/2 || (original_.ms && original_.ms->def>INT_MAX/2) || (original_.input && original_.input->def>INT_MAX/2)) throw std::runtime_error("NVIDIA current ranges exceed supported slider units");
         verify(active);bool patched=active!=original_.image;if(staged!=patched) throw std::runtime_error("NVIDIA staged/active BIOS limits differ. Restart Windows, then reopen MechControl.");enabled=staged;
-        auto limits=api_->power();if(int64_t(minimum)*1000<limits.min || int64_t(minimum)*1000>original_.power.max) throw std::runtime_error("NVIDIA driver cannot accept this model's minimum TGP");
+        limits=api_->power();if(int64_t(minimum)*1000<limits.min || int64_t(minimum)*1000>original_.power.max) throw std::runtime_error("NVIDIA driver cannot accept this model's minimum TGP");
     } catch(...) {log_("NVIDIA GPU: "+gpu);throw;}
-    log_("NVIDIA connected: "+gpu+"; "+(original_.ada?"RTX 40":"RTX 50")+" BIOS table; stock ceiling "+std::to_string(stock_watts())+" W");
+    log_("NVIDIA connected: "+gpu+"; "+(original_.ada?"RTX 40":"RTX 50")+" BIOS table; stock ceiling "+std::to_string(stock_watts())+" W, active "+std::to_string(limits.max/1000)
+        +" W; stock currents NVVDD "+amps(original_.nv.def)+(original_.ms?", MSVDD "+amps(original_.ms->def):"")+"; board input "+(board_verified_ && original_.input?amps(original_.input->def):"unavailable")
+        +"; recovery file "+Store::recovery_path().string());
 }
 void Power::verify(const Bytes& active) {
     auto b=Bios::parse(active);auto p=api_->power();auto c=api_->currents();
@@ -56,7 +60,8 @@ void Power::configure(bool unlock,const config::GpuSettings& g,bool allow_restar
         try {store_->stage(original_,records);modified=store_->modified;} catch(...) {modified=uncertain=store_->modified;throw;}
     }
     if(g.nvvdd_ma || g.msvdd_ma || input) {modified=true;api_->set_currents(g.nvvdd_ma,g.msvdd_ma,input);}
-    log_(std::string("NVIDIA limits configured; unlock ")+(enabled?"on":"off")+"; GPU restart "+(reset?"yes":"no"));
+    auto now=currents();auto rail=[&](const char* name,const std::optional<Rail>& r){return r?std::string("; ")+name+" "+amps(r->current)+" (ceiling "+amps(r->max)+")":"";};
+    log_(std::string("NVIDIA limits configured; unlock ")+(enabled?"on":"off")+rail("NVVDD",now.nv)+rail("MSVDD",now.ms)+rail("board input",now.input)+"; GPU restart "+(reset?"yes":"no"));
 }
 void Power::restart() {
     wchar_t system[MAX_PATH]{};if(!GetSystemDirectoryW(system,MAX_PATH)) throw std::runtime_error("Cannot locate pnputil");
@@ -78,7 +83,7 @@ void Power::apply(int watts) {
     bool raise=enabled && target>original_.power.max;
     if(raise) {auto current=api_->budget();if(!budget_applied_ || budget_applied_->platform!=current.platform) budget_original_=current;
         auto desired=current.raise(target,*budget_original_);if(desired!=current) {budget_applied_=desired;api_->set_budget(desired);}}
-    api_->set_power(target);if(!raise) restore_budget();
+    api_->set_power(target);if(!raise) restore_budget();else log_("NVIDIA requested "+std::to_string(watts)+" W (above stock; laptop budget raised)");
 }
 bool Power::at_most(int watts) {auto p=api_->power();return p.requested && *p.requested<=uint32_t(watts)*1000 && p.enforced<=uint32_t(watts)*1000;}
 bool Power::applied(int watts) {return api_->power().requested==uint32_t(watts)*1000 && (watts<=stock_watts() || api_->budget().f7>=uint32_t(watts)*1000);}
