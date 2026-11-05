@@ -19,7 +19,7 @@ struct Api::Native {
     bool initialized=false,nvml_initialized=false,platform_initialized=false;
     using Dispatch=int(__cdecl*)(uint32_t,void*,uint32_t,uint64_t,uint8_t,uint8_t,uint32_t);
     Dispatch dispatch=nullptr;uint32_t native_size=0;
-    Bytes guarded;
+    Bytes scratch;
     template<class T> T resolve(uint32_t id) {auto p=query(id);require(p!=nullptr,"interface unavailable");return reinterpret_cast<T>(p);}
     template<class T> T symbol(const char* name) {auto p=GetProcAddress(nvml,name);require(p!=nullptr,"NVML symbol");return reinterpret_cast<T>(p);}
     static HMODULE load(const wchar_t* name) {auto m=LoadLibraryExW(name,nullptr,LOAD_LIBRARY_SEARCH_SYSTEM32);if(!m) throw std::runtime_error("NVIDIA system library unavailable");return m;}
@@ -29,8 +29,8 @@ struct Api::Native {
         check(s,"packet call");
     }
     void call(uint32_t id,Bytes& b,bool platform=false) {
-        guarded.assign(b.size()+8192,0xcd);std::copy(b.begin(),b.end(),guarded.begin()+4096);
-        call_guarded(id,guarded,platform);std::copy(guarded.begin()+4096,guarded.end()-4096,b.begin());
+        scratch.assign(b.size()+8192,0xcd);std::copy(b.begin(),b.end(),scratch.begin()+4096);
+        call_guarded(id,scratch,platform);std::copy(scratch.begin()+4096,scratch.end()-4096,b.begin());
     }
     uint32_t enforced() {uint32_t value=0;check(symbol<int(__cdecl*)(void*,uint32_t*)>("nvmlDeviceGetEnforcedPowerLimit")(device,&value),"NVML enforced power");return value;}
     uint32_t clock() {uint32_t v=0;check(symbol<int(__cdecl*)(void*,uint32_t,uint32_t*)>("nvmlDeviceGetClockInfo")(device,0,&v),"NVML graphics clock");return v;}
