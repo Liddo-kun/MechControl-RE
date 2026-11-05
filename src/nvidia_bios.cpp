@@ -52,15 +52,29 @@ Bios Bios::parse(Bytes bytes) {
     require(entries.contains('B') && entries.at('B').version==2 && entries.at('B').size>=5 && entries.contains('P') && entries.at('P').version==2 && entries.at('P').size>=0xf8,"BIT B/P token");
     auto bios=entries.at('B').offset,power=entries.at('P').offset;
     result.version_bytes={b[bios+3],b[bios+2],b[bios+1],b[bios],b[bios+4]};
-    size_t table=map(u(power+0x2c),56+20*102);require(b[table]==0x40 && b[table+1]==0x38 && b[table+2]==0x66 && b[table+3]==20,"power policy layout");
-    auto entry=[&](int i){return table+56+i*102;};
-    auto field=[&](int i,int type,uint32_t flags) {auto e=entry(i);require(b[e]==type && u(e+1)==flags && b[e+5]<32,"policy identity");
-        auto min=u(e+13),def=u(e+17),max=u(e+21);require(min<=def && def<=max && max && max<=INT_MAX,"policy range");return Field{static_cast<int>(e+13),min,def,max};};
-    result.power=field(2,1,2);
-    for(int i:{7,8}) {auto e=entry(i);require(b[e]==0 && u(e+1)==0 && u(e+13)==0 && u(e+17)==0 && u(e+21)==0,"additional board-power policies");}
-    result.nv=field(13,7,1);result.ms=field(14,7,1);
-    if(b[entry(9)]==3 && u(entry(9)+1)==1) result.input=field(9,3,1);
-    require(b[entry(11)]==6 && b[entry(12)]==6 && u(entry(11)+1)==1 && u(entry(12)+1)==1 && b[entry(11)+5]==b[entry(13)+5] && b[entry(12)+5]==b[entry(14)+5] && b[entry(13)+5]!=b[entry(14)+5],"rail monitor identity");
+    size_t table=map(u(power+0x2c),4);
+    // RTX 50 uses 40 38 66 14. RTX 40 uses 30 32 53 14 (layout from mVolt 0.50.8/0.50.9, checked on 4060/4070 ROMs).
+    result.ada=b[table]==0x30 && b[table+1]==0x32 && b[table+2]==0x53 && b[table+3]==20;
+    if(!result.ada && !(b[table]==0x40 && b[table+1]==0x38 && b[table+2]==0x66 && b[table+3]==20)) {
+        char header[16];sprintf_s(header,"%02X %02X %02X %02X",b[table],b[table+1],b[table+2],b[table+3]);throw std::runtime_error(std::string("Unsupported NVIDIA BIOS: power policy layout ")+header);}
+    size_t size=result.ada?0x32:56,stride=result.ada?0x53:102;span(table,size+20*stride);
+    auto entry=[&](int i){return table+size+i*stride;};
+    auto limits=[&](size_t p) {auto min=u(p),def=u(p+4),max=u(p+8);require(min<=def && def<=max && max && max<=INT_MAX,"policy range");return Field{static_cast<int>(p),min,def,max};};
+    if(result.ada) {
+        // Identity byte at +0, channel at +1, limits at +2. Entries 7/8/11/12 differ from RTX 50 and are not checked; index 14 is not MSVDD.
+        auto field=[&](int i,bool identity) {auto e=entry(i);require(identity && b[e+1]<32,"policy identity");return limits(e+2);};
+        auto p=entry(2),n=entry(13);
+        result.power=field(2,b[p]==1 || b[p]==0x21);
+        result.nv=field(13,uint8_t((b[n+0x42]<<4)|(b[n]&15))==0x10 && u(n+0xe)==0xd00);
+        if(b[entry(9)]==0x15) result.input=field(9,true);
+    } else {
+        auto field=[&](int i,int type,uint32_t flags) {auto e=entry(i);require(b[e]==type && u(e+1)==flags && b[e+5]<32,"policy identity");return limits(e+13);};
+        result.power=field(2,1,2);
+        for(int i:{7,8}) {auto e=entry(i);require(b[e]==0 && u(e+1)==0 && u(e+13)==0 && u(e+17)==0 && u(e+21)==0,"additional board-power policies");}
+        result.nv=field(13,7,1);result.ms=field(14,7,1);
+        if(b[entry(9)]==3 && u(entry(9)+1)==1) result.input=field(9,3,1);
+        require(b[entry(11)]==6 && b[entry(12)]==6 && u(entry(11)+1)==1 && u(entry(12)+1)==1 && b[entry(11)+5]==b[entry(13)+5] && b[entry(12)+5]==b[entry(14)+5] && b[entry(13)+5]!=b[entry(14)+5],"rail monitor identity");
+    }
     if(auto ptr=u(power+0xf4)) {
         auto profile=map(ptr,0x58e);const uint8_t header[]{0x10,0x0a,5,4,7,8,1,0x10,9,8};
         require(std::equal(std::begin(header),std::end(header),b.begin()+profile),"BIOS profile header");
@@ -70,14 +84,16 @@ Bios Bios::parse(Bytes bytes) {
     result.device=u16(pcir+6);return result;
 }
 std::vector<int> Bios::offsets() const {
-    std::vector<int> v{power.offset+8,nv.offset+4,nv.offset+8,ms.offset+4,ms.offset+8};if(input) {v.push_back(input->offset+4);v.push_back(input->offset+8);}return v;
+    std::vector<int> v{power.offset+8,nv.offset+4,nv.offset+8};if(ms) {v.push_back(ms->offset+4);v.push_back(ms->offset+8);}
+    if(input) {if(!ada) v.push_back(input->offset+4);v.push_back(input->offset+8);}return v;
 }
 std::vector<Record> Bios::build(const Override& request) const {
     std::map<int,uint32_t> patches;
     auto add=[&](Field f,uint32_t def,uint32_t max) {require(def>=f.min && def && def<=max && max<=INT_MAX,"override range");if(def!=f.def) patches.emplace(f.offset+4,def);if(max!=f.max) patches.emplace(f.offset+8,max);};
     if(request.power) add(power,power.def,*request.power);
-    if(request.nv) add(nv,request.nv->def,request.nv->max);if(request.ms) add(ms,request.ms->def,request.ms->max);
-    if(request.input) {require(input.has_value(),"board input policy");add(*input,request.input->def,request.input->max);}
+    if(request.nv) add(nv,request.nv->def,request.nv->max);
+    if(request.ms) {require(ms.has_value(),"MSVDD policy");add(*ms,request.ms->def,request.ms->max);}
+    if(request.input) {require(input.has_value(),"board input policy");add(*input,ada?input->def:request.input->def,request.input->max);}
     std::vector<Record> records;
     for(auto [offset,value]:patches) {Bytes data(14);std::copy(version_bytes.begin(),version_bytes.end(),data.begin());put(data,5,offset);data[9]=4;put(data,10,value);
         char name[32];sprintf_s(name,"romOverride%02X",static_cast<unsigned>(records.size()));records.push_back({name,std::move(data)});}
@@ -99,8 +115,9 @@ ProfilePlan plan_profile(const config::GpuSettings& source,bool automatic,bool e
     plan.restart=plan.unlock && !unlocked;
     if(!rails) {g.nvvdd_ma=g.msvdd_ma=g.board_input_ma={};return plan;}
     if(g.nvvdd_ma || g.msvdd_ma || g.board_input_ma || (plan.unlock && g.bios_override_enabled!=true)) {
-        if(g.board_input_ma && !rails->input) plan.notice="Profile board input current skipped: this GPU has no matching policy.";
-        if(plan.unlock && g.bios_override_enabled!=true) {if(!g.nvvdd_ma) g.nvvdd_ma=rails->nv.def;if(!g.msvdd_ma) g.msvdd_ma=rails->ms.def;if(!g.board_input_ma && rails->input) g.board_input_ma=rails->input->def;}
+        std::string skipped=g.msvdd_ma && !rails->ms?"MSVDD":"";if(g.board_input_ma && !rails->input) skipped+=skipped.empty()?"board input":" and board input";
+        if(!skipped.empty()) plan.notice="Profile "+skipped+" current skipped: this GPU has no matching policy.";
+        if(plan.unlock && g.bios_override_enabled!=true) {if(!g.nvvdd_ma) g.nvvdd_ma=rails->nv.def;if(!g.msvdd_ma && rails->ms) g.msvdd_ma=rails->ms->def;if(!g.board_input_ma && rails->input) g.board_input_ma=rails->input->def;}
         auto clamp=[](std::optional<int> v,const std::optional<Rail>& rail,bool unlock,bool active)->std::optional<int> {if(!v || !rail) return {};return std::clamp(*v,static_cast<int>(rail->min),active?static_cast<int>(rail->max):rail->allowed(unlock));};
         auto limit=[&](bool active){g.nvvdd_ma=clamp(g.nvvdd_ma,rails->nv,plan.unlock,active);g.msvdd_ma=clamp(g.msvdd_ma,rails->ms,plan.unlock,active);g.board_input_ma=clamp(g.board_input_ma,rails->input,plan.unlock,active);};limit(false);
         if(!plan.restart && restart(plan.unlock,g)) {

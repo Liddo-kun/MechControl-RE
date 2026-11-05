@@ -71,7 +71,7 @@ Json Controller::gpu_telemetry() {
     g["nvidia"]=nullptr;
     try {
         nv::Telemetry t;nvidia_work([&]{t=nvidia_->telemetry();});
-        g["nvvdd"]={{"measuredMa",t.nv},{"liveLimitMa",maybe(t.nv_limit)}};g["msvdd"]={{"measuredMa",t.ms},{"liveLimitMa",maybe(t.ms_limit)}};
+        g["nvvdd"]={{"measuredMa",t.nv},{"liveLimitMa",maybe(t.nv_limit)}};if(t.ms) g["msvdd"]={{"measuredMa",*t.ms},{"liveLimitMa",maybe(t.ms_limit)}};
         if(t.input || t.input_limit) g["boardInput"]={{"measuredMa",maybe(t.input)},{"liveLimitMa",maybe(t.input_limit)}};
         g["enforcedMw"]=maybe(t.enforced_mw);live_fields(g,t);
     } catch(const std::exception& e) {g["telemetryError"]=e.what();}
@@ -102,7 +102,7 @@ Json Controller::gpu_status(bool presentation) {
     Json g={{"tgp",setting(v.tgp,l)},{"dynamicBoost",v.dynamic_boost_enabled},
             {"dynamicBoostWatts",setting(v.dynamic_boost_watts,control_limit(p,"dynamicBoost"))},{"unlocked",gpu_unlocked_},{"unlockAvailable",gpu_extend() && nvidia_available_},
              {"nvidia",nvidia_unavailable()}};
-    if(presentation) {g["stockWatts"]=nvidia_?nvidia_->stock_watts():0;g["unlockMin"]=gpu_unlock_min();g["unlockMax"]=gpu_unlock_max();g["dlppcAvailable"]=nvidia_available_;}
+    if(presentation) {g["stockWatts"]=nvidia_?nvidia_->stock_watts():0;g["unlockMin"]=gpu_unlock_min();g["unlockMax"]=gpu_unlock_max();g["dlppcAvailable"]=dlppc_available_;}
         for(const char* key:{"ceilingWatts","enforcedWatts","requestedWatts","nvvdd","msvdd","boardInput","currentCapMhz","powerCapMhz","maxClockMhz",
             "clockMhz","gpuPowerMw","corePowerMw","boardInputLimiterActivity"}) g[key]=nullptr;
     // This guard precedes EVERY driver read, including below-EC-floor readback.
@@ -133,7 +133,7 @@ Json Controller::gpu_status(bool presentation) {
             if(presentation) j["liveLimitMa"]=maybe(live);return j;
         };
         nv::Telemetry t=telemetry.value_or(nv::Telemetry{});
-        if(currents) {auto c=*currents;g["nvvdd"]=rail(c.nv,telemetry?std::optional(t.nv):std::nullopt,t.nv_prediction,t.nv_limit);g["msvdd"]=rail(c.ms,telemetry?std::optional(t.ms):std::nullopt,t.ms_prediction,t.ms_limit);if(c.input) g["boardInput"]=rail(*c.input,t.input,{},t.input_limit);}
+        if(currents) {auto c=*currents;g["nvvdd"]=rail(c.nv,telemetry?std::optional(t.nv):std::nullopt,t.nv_prediction,t.nv_limit);if(c.ms) g["msvdd"]=rail(*c.ms,t.ms,t.ms_prediction,t.ms_limit);if(c.input) g["boardInput"]=rail(*c.input,t.input,{},t.input_limit);}
         if(presentation) g["enforcedMw"]=maybe(t.enforced_mw);
         live_fields(g,t);
     } catch(const std::exception& ex) {g["nvidia"]=std::string("NVIDIA readback failed: ")+ex.what();}
@@ -320,7 +320,7 @@ std::string Controller::defaults(const std::string& key) {
             else {
                 nv::Currents c;nvidia_work([&]{c=nvidia_->currents();});
                 if(thermal_->holds(Gpu)) throw std::runtime_error("NVIDIA defaults not applied: GPU held by thermal protection");
-                GpuSettings g;g.nvvdd_ma=c.nv.def;g.msvdd_ma=c.ms.def;if(c.input) g.board_input_ma=c.input->def;
+                GpuSettings g;g.nvvdd_ma=c.nv.def;if(c.ms) g.msvdd_ma=c.ms->def;if(c.input) g.board_input_ma=c.input->def;
                 nvidia_work([&]{nvidia_->configure(false,g,false);});
             }
             driver_watts_={};last_gpu_={};

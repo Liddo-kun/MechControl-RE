@@ -32,6 +32,13 @@ struct Fixture {
     int e(int i) const {return table+56+i*102;}
     void policy(int i,uint8_t type,uint32_t flags,uint8_t channel,uint32_t lo,uint32_t def,uint32_t hi) {auto p=e(i);b[p]=type;put(b,p+1,flags);b[p+5]=channel;put(b,p+13,lo);put(b,p+17,def);put(b,p+21,hi);}
     void checksum() {for(auto [p,size]:{std::pair(0,legacy),std::pair(legacy,efi)}) {b[p+size-1]=0;unsigned sum=0;for(int j=p;j<p+size;++j) sum+=b[j];b[p+size-1]=uint8_t(-int(sum));}}
+    // RTX 40 table with the 4060/4070 Laptop ROM values. Entry 7 is populated and 14 looks like an RTX 50 MSVDD record; both must be ignored.
+    void ada() {
+        std::fill_n(b.begin()+table,56+20*102,uint8_t(0));b[table]=0x30;b[table+1]=0x32;b[table+2]=0x53;b[table+3]=20;
+        old(2,0x21,4,5000,115000,140000);old(7,1,6,5000,90000,90000);old(9,0x15,5,1000,12434,12434);old(13,0x10,19,1,135000,135000);b[a(13)+0x42]=1;put(b,a(13)+0xe,0xd00);old(14,7,20,1,60000,60000);
+    }
+    int a(int i) const {return table+0x32+i*0x53;}
+    void old(int i,uint8_t id,uint8_t channel,uint32_t lo,uint32_t def,uint32_t hi) {auto p=a(i);b[p]=id;b[p+1]=channel;put(b,p+2,lo);put(b,p+6,def);put(b,p+10,hi);}
 };
 struct Driver {
     Bytes info=packet(0xa70,0x40a70),monitor=packet(0xca8,0x30ca8),control=packet(0xa4c,0x10a4c),status=packet(0xb00b8,0xb00b8),last_get,last_set;
@@ -52,6 +59,8 @@ struct Driver {
         put(therm_info,4,0x3f);put(therm_info,8,108000);for(int m=0;m<6;++m) {put(therm_info,76+m*72,m==2 || m==5?5:4);put(therm_status,72+m*80,m==2 || m==5?5:4);}
         put(d_info,4,1u<<3);d_info[24]=3;put(d_info,76+3*176+8,7);put(d_info,76+3*176+48,0x52);put(d_control,72+3*168,0);d_control[72+3*168+4]=1;
     }
+    // RTX 40 driver as mVolt expects it: NVVDD is policy type 13 and there is no MSVDD policy.
+    void ada() {put(info,4,u32(info,4)&~(1u<<ms));put(info,0x3c+nv*0x58,13);put(control,0x1c+nv*0x28,13);put(status,entry(nv),13);}
     static int entry(int i) {return 0x11b8+i*0x3768;}
     void policy(int i,uint32_t type,int channel,uint32_t lo,uint32_t def,uint32_t max,uint32_t unit=1) {put(info,4,u32(info,4)|(1u<<i));int p=0x3c+i*0x58;put(info,p,type);put(info,p+4,channel);put(info,p+8,unit);put(info,p+12,lo);put(info,p+16,def);put(info,p+20,max);}
     void value(int i,uint32_t type,uint32_t v) {put(status,entry(i),type);put(status,entry(i)+8,v);}
@@ -74,7 +83,7 @@ void packets() {
         Driver d(alternate);Api api([&](auto id,auto& b){d.call(id,b);});auto before=api.currents();auto after=api.set_currents({}, {},12500);
         auto expected=d.last_get;put(expected,4,1u<<d.input);put(expected,0x20+d.input*0x28,12500);
         check(after.nv==before.nv && after.ms==before.ms && after.input->current==12500 && expected==d.last_set,"current SET preserves complete GET metadata and unselected rails at relocated indices");
-        auto t=api.telemetry();check(t.nv==126883 && t.ms==47772 && t.input==8470u && t.nv_prediction==152544u && t.current_khz==2865000u && t.power_khz==2940000u && t.gpu_mw==173336u && t.core_mw==133102u,"telemetry identifies controllers by validated policy/rail relationships");
+        auto t=api.telemetry();check(t.nv==126883 && t.ms==47772u && t.input==8470u && t.nv_prediction==152544u && t.current_khz==2865000u && t.power_khz==2940000u && t.gpu_mw==173336u && t.core_mw==133102u,"telemetry identifies controllers by validated policy/rail relationships");
         put(d.status,Driver::entry(d.current)+0x968+0x60,1);t=api.telemetry();check(!t.nv_prediction && !t.current_khz && t.power_khz==2940000u,"unknown current-controller layout omits only affected predictions/cap");
         auto old=d.d_control;api.set_dlppc(false);put(old,4,1u<<3);old[72+3*168+4]=0;check(d.d_set==old && api.dlppc()->active==false,"DLPPC SET changes only selected activation byte and retains packet metadata");
     }
@@ -128,27 +137,50 @@ void bios_and_recovery(const std::filesystem::path& root) {
     }
     RegDeleteKeyW(HKEY_CURRENT_USER,key_name.c_str());
     Budget baseline{175000,250000},raised=baseline.raise(220000,baseline);for(int i=0;i<20;++i) {raised.f7=175000;raised=raised.raise(220000,baseline);}check(raised==Budget{220000,295000},"firmware F7-only resets do not accumulate platform headroom");
-    config::GpuSettings g;g.tgp=180;g.bios_override_enabled=true;g.nvvdd_ma=200000;Currents c{{1000,120000,130000,125000,170000},{1000,30000,45000,32000,45000},{}};
+    config::GpuSettings g;g.tgp=180;g.bios_override_enabled=true;g.nvvdd_ma=200000;Currents c{{1000,120000,130000,125000,170000},Rail{1000,30000,45000,32000,45000},{}};
     auto restart=[&](bool,const config::GpuSettings& s){return s.nvvdd_ma && *s.nvvdd_ma>int(c.nv.max);};
     auto p=plan_profile(g,true,true,95,150,57,225,false,true,{},restart);check(p.settings.tgp==150 && !p.settings.nvvdd_ma && !p.restart,"automatic unlock-dependent profile clamps power without opening/restarting driver");
     g.tgp=120;g.bios_override_enabled=false;g.nvvdd_ma={};p=plan_profile(g,true,true,95,150,57,225,true,true,c,restart);check(p.settings.nvvdd_ma==120000 && p.settings.msvdd_ma==30000 && p.unlock,"legacy stock profile restores unspecified stock rails while retaining unlock");
     g.bios_override_enabled=true;g.nvvdd_ma=165000;g.board_input_ma=10000;p=plan_profile(g,true,true,95,150,57,225,true,true,c,restart);check(p.settings.nvvdd_ma==130000 && !p.settings.board_input_ma && !p.restart,"automatic active ceilings clamp currents and skip only unsupported board input");
 }
+void rtx40() {
+    Fixture f;f.ada();auto b=Bios::parse(f.b);
+    check(b.ada && b.power.min==5000 && b.power.def==115000 && b.power.max==140000 && b.nv.min==1 && b.nv.def==135000 && b.nv.max==135000 && !b.ms && b.input && b.input->def==12434,"RTX 40 table maps power, NVVDD and board input; index 14 is never MSVDD");
+    auto patches=b.build({215000,RailOverride{150000,189000},{},RailOverride{13000,19148}});
+    check(patches.size()==4 && std::none_of(patches.begin(),patches.end(),[&](auto& p){return int(u32(p.data,5))==b.input->offset+4;}) && b.offsets().size()==4,"RTX 40 patches power max, NVVDD default/max and only the board-input maximum");
+    auto changed=f.b;for(auto& p:patches) put(changed,u32(p.data,5),u32(p.data,10));auto again=Bios::parse(changed);
+    check(again.power.max==215000 && again.nv.def==150000 && again.nv.max==189000 && again.input->def==12434 && again.input->max==19148,"patched RTX 40 BIOS reparses with exact fields");
+    refuses([&]{b.build({{},{},RailOverride{60000,70000},{}});},"RTX 40 refuses MSVDD overrides");
+    Fixture none;none.ada();none.b[none.a(9)]=0;check(!Bios::parse(none.b).input,"RTX 40 board input is optional");
+    for(int mutation=0;mutation<6;++mutation) {Fixture m;m.ada();switch(mutation) {case 0:m.b[m.a(2)]=2;break;case 1:put(m.b,m.a(13)+0xe,0xd01);break;case 2:m.b[m.a(13)+0x42]=2;break;case 3:m.b[m.a(13)]=0x11;break;case 4:m.b[m.a(13)+1]=32;break;case 5:put(m.b,m.a(9)+6,0);break;}
+        refuses([&]{Bios::parse(m.b);},"RTX 40 identity, channel or range mismatch refuses");}
+    Fixture variant;variant.ada();variant.b[variant.table+1]=0x34;variant.b[variant.table+2]=0x5b;std::string error;try {Bios::parse(variant.b);} catch(const std::exception& ex) {error=ex.what();}
+    check(error.find("power policy layout 30 34 5B 14")!=std::string::npos,"untested table variant refuses and the error names its header bytes");
+    Driver d;d.ada();Api api([&](auto id,auto& b){d.call(id,b);});auto c=api.currents();
+    check(c.nv.current==125000 && c.nv.max==170000 && !c.ms && c.input,"RTX 40 driver: NVVDD policy type 13 without MSVDD");
+    refuses([&]{api.set_currents({},30000,{});},"missing MSVDD refuses SET");check(api.set_currents(126000,{},{}).nv.current==126000,"RTX 40 NVVDD SET/readback");
+    auto t=api.telemetry();check(t.nv==126883 && !t.ms && !t.ms_limit && t.nv_limit==125000u && !t.nv_prediction && !t.current_khz && t.power_khz==2940000u && t.gpu_mw==173336u,"without MSVDD, telemetry omits only current-controller values");
+    Driver typed;put(typed.info,0x3c+typed.ms*0x58,13);Api ignored([&](auto id,auto& b){typed.call(id,b);});check(!ignored.currents().ms,"policy type 13 is accepted for NVVDD only");
+    Driver twice;twice.policy(20,13,2,1000,120000,170000);Api ambiguous([&](auto id,auto& b){twice.call(id,b);});refuses([&]{ambiguous.currents();},"type 13 and type 19 NVVDD policies together are ambiguous");
+    Currents rails{{1000,135000,189000,135000,135000},{},Rail{1000,12434,19148,12434,12434}};config::GpuSettings g;g.tgp=120;g.bios_override_enabled=false;g.msvdd_ma=30000;
+    auto p=plan_profile(g,true,true,95,150,57,225,true,true,rails,[](bool,const config::GpuSettings&){return false;});
+    check(p.settings.nvvdd_ma==135000 && !p.settings.msvdd_ma && p.notice.find("MSVDD")!=std::string::npos,"profile MSVDD value is skipped with a notice on a GPU without MSVDD");
+}
 int live(bool same_values) {
     Handle mutex(CreateMutexW(nullptr,TRUE,L"Global\\MechControl"));if(!mutex || GetLastError()==ERROR_ALREADY_EXISTS) throw std::runtime_error("A controller already owns Global\\MechControl");
     Api api;auto id=api.identity;std::cout<<"GPU "<<id.name<<" PCI "<<std::hex<<id.device<<'/'<<id.subsystem<<std::dec<<" BDF "<<id.domain<<':'<<id.bus<<':'<<id.slot<<'.'<<id.function<<" driver "<<id.driver<<" BIOS "<<id.bios<<'\n';
     Store store(id);std::cout<<"PnP awake "<<store.awake()<<" saved "<<Store::saved()<<'\n';auto b=Bios::parse(api.bios());check(b.device==id.device,"live BIOS matches exact NVAPI/NVML/PCI adapter");
-    auto p=api.power();auto c=api.currents();std::cout<<"Power "<<p.min<<'/'<<p.def<<'/'<<p.max<<" enforced "<<p.enforced<<" requested "<<p.requested.value_or(0)<<" mW\nCurrents "<<c.nv.current<<'/'<<c.ms.current<<'/'<<(c.input?c.input->current:0)<<" mA\n";
+    auto p=api.power();auto c=api.currents();std::cout<<"Power "<<p.min<<'/'<<p.def<<'/'<<p.max<<" enforced "<<p.enforced<<" requested "<<p.requested.value_or(0)<<" mW\nCurrents "<<c.nv.current<<'/'<<(c.ms?c.ms->current:0)<<'/'<<(c.input?c.input->current:0)<<" mA\n";
     try {auto budget=api.budget();std::cout<<"Budget "<<budget.f7<<'/'<<budget.platform<<" mW\n";} catch(const std::exception& ex) {std::cout<<"Budget unsupported: "<<ex.what()<<'\n';}
-    auto d=api.dlppc();std::cout<<"DLPPC "<<(d?d->active:-1)<<'\n';auto t=api.telemetry();std::cout<<"Measured "<<t.nv<<'/'<<t.ms<<" mA clock "<<t.clock_mhz.value_or(0)<<" MHz GPU power "<<t.gpu_mw.value_or(0)<<" mW\n";
+    auto d=api.dlppc();std::cout<<"DLPPC "<<(d?d->active:-1)<<'\n';auto t=api.telemetry();std::cout<<"Measured "<<t.nv<<'/'<<t.ms.value_or(0)<<" mA clock "<<t.clock_mhz.value_or(0)<<" MHz GPU power "<<t.gpu_mw.value_or(0)<<" mW\n";
     auto wrong=id;wrong.bus+=1;refuses([&]{Store foreign(wrong);},"live wrong PCI bus is refused, never first-adapter fallback");wrong=id;wrong.subsystem^=1;refuses([&]{Store foreign(wrong);},"live wrong PCI subsystem is refused");
-    if(same_values) {auto after=api.set_currents(int(c.nv.current),int(c.ms.current),c.input?std::optional(int(c.input->current)):std::nullopt);check(after.nv==c.nv && after.ms==c.ms && after.input==c.input,"live same-value current SET/readback preserves all rails");if(d) {api.set_dlppc(d->active);check(api.dlppc()->active==d->active,"live same-value DLPPC SET/readback");}if(p.requested) {api.set_power(*p.requested);check(api.power().requested==p.requested,"live same-value F8/enforced readback");}}
+    if(same_values) {auto after=api.set_currents(int(c.nv.current),c.ms?std::optional(int(c.ms->current)):std::nullopt,c.input?std::optional(int(c.input->current)):std::nullopt);check(after.nv==c.nv && after.ms==c.ms && after.input==c.input,"live same-value current SET/readback preserves all rails");if(d) {api.set_dlppc(d->active);check(api.dlppc()->active==d->active,"live same-value DLPPC SET/readback");}if(p.requested) {api.set_power(*p.requested);check(api.power().requested==p.requested,"live same-value F8/enforced readback");}}
     api.reinitialize();check(api.identity==id && !api.telemetry().ipc,"reinitialization reacquires exact adapter and invalidates IPC baseline");return 0;
 }
 }
 int main(int argc,char** argv) {
     try {if(argc>1 && std::string(argv[1]).starts_with("--live")) return live(std::string(argv[1])=="--live-same-values");
         auto root=std::filesystem::path(L"C:/Temp/tandem/mechcontrol-native-phase5/check")/std::to_wstring(GetCurrentProcessId());for(int i=0;!std::filesystem::create_directories(root);++i) root=std::filesystem::path(L"C:/Temp/tandem/mechcontrol-native-phase5/check")/(std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(i));
-        packets();bios_and_recovery(root);return 0;
+        packets();bios_and_recovery(root);rtx40();return 0;
     } catch(const std::exception& ex) {std::cerr<<"FAIL "<<ex.what()<<'\n';return 1;}
 }

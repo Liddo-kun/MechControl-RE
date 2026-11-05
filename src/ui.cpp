@@ -460,9 +460,9 @@ private:
             auto stock=[&](const char* key){return compact(g[key]["stockMa"].get<int>()/1000.0);};
             if(nvidia.is_string()) powerHint_=w(nvidia.get<std::string>());
             else if(!failed.empty()) powerHint_=L"NVIDIA readback failed: "+w(failed);
-            else if(g.value("ceilingWatts",Json(nullptr)).is_number() && g.value("nvvdd",Json(nullptr)).is_object() && g.value("msvdd",Json(nullptr)).is_object())
+            else if(g.value("ceilingWatts",Json(nullptr)).is_number() && g.value("nvvdd",Json(nullptr)).is_object())
                 powerHint_=L"Driver ceiling "+std::to_wstring(g["ceilingWatts"].get<int>())+L" W · enforced "+std::to_wstring(g["enforcedWatts"].get<int>())+L" W · stock currents "
-                    +stock("nvvdd")+L" / "+stock("msvdd")+(g.value("boardInput",Json(nullptr)).is_object()?L" / "+stock("boardInput"):L"")+L" A";
+                    +stock("nvvdd")+(g.value("msvdd",Json(nullptr)).is_object()?L" / "+stock("msvdd"):L"")+(g.value("boardInput",Json(nullptr)).is_object()?L" / "+stock("boardInput"):L"")+L" A";
         }
         auto liveNvidia=live_.is_object()?live_.value("nvidia",Json(nullptr)):Json(nullptr);
         liveReason_=!live_.is_object()?L"not read yet":liveNvidia.is_string()?w(liveNvidia.get<std::string>())

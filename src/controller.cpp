@@ -55,8 +55,8 @@ Controller::Controller(EcSession& session,std::filesystem::path directory,std::f
     diagnostic_(std::move(diagnostic)),wait_(std::move(wait)),run_blocking_(std::move(run_blocking)),cooler_delivery_(std::move(cooler_delivery)),lighting_send_(std::move(lighting_send)),peripheral_hardware_(peripheral_hardware) {
     if(!wait_) wait_=[](unsigned ms){std::this_thread::sleep_for(std::chrono::milliseconds(ms));};
     if(!run_blocking_) run_blocking_=[](std::function<void()> work){work();};
-    nvidia_available_=nvidia_hardware && enabled("gpuPower") && nv::Store::present();
-    nvidia_=std::move(driver);if(nvidia_) {nvidia_available_=true;gpu_unlocked_=nvidia_->enabled;nvidia_min_watts_=nvidia_->minimum_watts();}
+    nvidia_available_=dlppc_available_=nvidia_hardware && enabled("gpuPower") && nv::Store::present();
+    nvidia_=std::move(driver);if(nvidia_) {nvidia_available_=dlppc_available_=true;gpu_unlocked_=nvidia_->enabled;nvidia_min_watts_=nvidia_->minimum_watts();}
     SYSTEM_POWER_STATUS power{};on_ac_=GetSystemPowerStatus(&power) && power.ACLineStatus==1;
     const auto& p=session_.profile;
     // A profile fanCurveLatch bitfield qualifies shared mode bits at 0x7C6.
@@ -215,8 +215,9 @@ std::vector<std::string> Controller::start() {
         if(session_.hardware.liquid_cooling()) cooler_=std::make_unique<Cooler>(store_,diagnostic_,Cooler::Resolver{},cooler_delivery_);
     }
     if(nvidia_available_ && (nv::Store::saved() || store_.settings().disable_dlppc)) {
-        try {open_nvidia();if(store_.settings().disable_dlppc) {nvidia_work([&]{nvidia_->set_dlppc(false);});dlppc_disabled_=true;}}
-        catch(const std::exception& ex) {diagnostic_(std::string("Saved NVIDIA state not applied: ")+ex.what());}
+        try {open_nvidia();} catch(const std::exception& ex) {diagnostic_(std::string("Saved NVIDIA state not applied: ")+ex.what());}
+        if(store_.settings().disable_dlppc) try {open_dlppc();nvidia_work([&]{write_dlppc(false);});dlppc_disabled_=true;}
+        catch(const std::exception& ex) {diagnostic_(std::string("Saved DLPPC setting not applied: ")+ex.what());}
     }
     int slot=store_.settings().last_slot;std::optional<UserProfile> startup;nv::ProfilePlan gpu_plan_value;
     if(slot) try {startup=store_.load(slot);if(startup) gpu_plan_value=plan(*startup,true);}
@@ -356,8 +357,8 @@ UserProfile Controller::capture(int slot) {
     if(enabled("gpuPower")) profile.gpu=gpu(true);else {profile.gpu->tgp=115;profile.gpu->dynamic_boost_enabled=false;}
     if(enabled("gpuPower") && nvidia_ && !nvidia_busy_) {
         if(gpu_driver_uncertain_) throw std::runtime_error(nvidia_error_);
-        nv::Currents c;nvidia_work([&]{c=nvidia_->currents();});auto& g=*profile.gpu;g.nvvdd_ma=c.nv.current;g.msvdd_ma=c.ms.current;if(c.input) g.board_input_ma=c.input->current;
-        auto l=control_limit(session_.profile,"TGP");g.bios_override_enabled=gpu_unlocked_ && (g.tgp<l.min || g.tgp>l.max || g.tgp+(g.dynamic_boost_enabled?g.dynamic_boost_watts:0)>nvidia_->stock_watts() || c.nv.current>c.nv.stock_max || c.ms.current>c.ms.stock_max || (c.input && c.input->current>c.input->stock_max));
+        nv::Currents c;nvidia_work([&]{c=nvidia_->currents();});auto& g=*profile.gpu;g.nvvdd_ma=c.nv.current;if(c.ms) g.msvdd_ma=c.ms->current;if(c.input) g.board_input_ma=c.input->current;
+        auto l=control_limit(session_.profile,"TGP");g.bios_override_enabled=gpu_unlocked_ && (g.tgp<l.min || g.tgp>l.max || g.tgp+(g.dynamic_boost_enabled?g.dynamic_boost_watts:0)>nvidia_->stock_watts() || c.nv.current>c.nv.stock_max || (c.ms && c.ms->current>c.ms->stock_max) || (c.input && c.input->current>c.input->stock_max));
     }
     profile.protection=thermal_->settings();profile.fan=enabled("fanControl")?fan_intent_:FanSettings{};
     if(enabled("fanControl")) {

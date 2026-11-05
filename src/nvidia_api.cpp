@@ -133,23 +133,24 @@ Api::Rails Api::rails() {
     for(int i=0;i<32;++i) {
         if(!(mask&(1u<<i))) continue;
         size_t p=0x3c+i*0x58;auto type=u32(b,p),channel=u32(b,p+4);
-        if((type!=19 && type!=4) || u32(b,p+8)!=1 || channel>=32 || !(channels&(1u<<channel))) continue;
+        if((type!=19 && type!=13 && type!=4) || u32(b,p+8)!=1 || channel>=32 || !(channels&(1u<<channel))) continue;
         size_t q=0x28+channel*0x3c;Policy rail{i,type,u32(b,p+12),u32(b,p+16),u32(b,p+20)};
         if(type==4) {if(u32(m,q+12)!=8 || u32(m,q+16)==UINT32_MAX) continue;input=rail;++inputs;continue;}
-        if(u32(m,q+12)!=6) continue;auto id=u32(m,q+16)&255;if(id!=1 && id!=16) continue;require(range(rail.min,rail.def,rail.max),"current range");
+        // RTX 40 drivers report NVVDD (only) as policy type 13, as mVolt binds it; Power still matches its range to the BIOS.
+        if(u32(m,q+12)!=6) continue;auto id=u32(m,q+16)&255;if((id!=1 && id!=16) || (type==13 && id!=1)) continue;require(range(rail.min,rail.def,rail.max),"current range");
         if(id==1) {require(!nv,"ambiguous NVVDD policies");nv=rail;}else {require(!ms,"ambiguous MSVDD policies");ms=rail;}
     }
-    require(nv && ms,"NVVDD/MSVDD sensor policies");if(inputs>1 || (input && !range(input->min,input->def,input->max))) input={};
-    return {*nv,*ms,input,(1u<<nv->index)|(1u<<ms->index)|(input?1u<<input->index:0),std::move(b)};
+    require(nv.has_value(),"NVVDD sensor policy");if(inputs>1 || (input && !range(input->min,input->def,input->max))) input={};
+    return {*nv,ms,input,(1u<<nv->index)|(ms?1u<<ms->index:0)|(input?1u<<input->index:0),std::move(b)};
 }
 Bytes Api::control(uint32_t mask) {auto b=packet(0xa4c,0x10a4c);put(b,4,mask);call_(0x8b3e7343,b);version(b,0x10a4c);require(u32(b,4)==mask,"current selection mask");return b;}
 Rail Api::rail(const Policy& r,const Bytes& b) {size_t p=0x1c+r.index*0x28;auto v=u32(b,p+4);require(u32(b,p)==r.type && v>=r.min && v<=r.max,"current-policy identity/range");return {r.min,r.def,r.max,v,r.max};}
-Currents Api::currents() {auto r=rails();auto b=control(r.mask);return {rail(r.nv,b),rail(r.ms,b),r.input?std::optional(rail(*r.input,b)):std::nullopt};}
+Currents Api::currents() {auto r=rails();auto b=control(r.mask);return {rail(r.nv,b),r.ms?std::optional(rail(*r.ms,b)):std::nullopt,r.input?std::optional(rail(*r.input,b)):std::nullopt};}
 Currents Api::set_currents(std::optional<int> nv,std::optional<int> ms,std::optional<int> input) {
-    auto r=rails();auto b=control(r.mask);Currents before{rail(r.nv,b),rail(r.ms,b),r.input?std::optional(rail(*r.input,b)):std::nullopt};uint32_t selected=0;
-    auto change=[&](std::optional<Policy> p,std::optional<int> value) {if(!value) return;require(p.has_value(),"board input policy");require(*value>=0 && uint32_t(*value)>=p->min && uint32_t(*value)<=p->max,"current request range");put(b,0x20+p->index*0x28,*value);selected|=1u<<p->index;};
+    auto r=rails();auto b=control(r.mask);Currents before{rail(r.nv,b),r.ms?std::optional(rail(*r.ms,b)):std::nullopt,r.input?std::optional(rail(*r.input,b)):std::nullopt};uint32_t selected=0;
+    auto change=[&](std::optional<Policy> p,std::optional<int> value) {if(!value) return;require(p.has_value(),"current policy");require(*value>=0 && uint32_t(*value)>=p->min && uint32_t(*value)<=p->max,"current request range");put(b,0x20+p->index*0x28,*value);selected|=1u<<p->index;};
     change(r.nv,nv);change(r.ms,ms);change(r.input,input);if(!selected) return currents();put(b,4,selected);call_(0xaffc2279,b);auto result=currents();
-    require((!nv || result.nv.current==uint32_t(*nv)) && (!ms || result.ms.current==uint32_t(*ms)) && (!input || (result.input && result.input->current==uint32_t(*input))),"current readback");
+    require((!nv || result.nv.current==uint32_t(*nv)) && (!ms || (result.ms && result.ms->current==uint32_t(*ms))) && (!input || (result.input && result.input->current==uint32_t(*input))),"current readback");
     require((nv || result.nv==before.nv) && (ms || result.ms==before.ms) && (input || result.input==before.input),"unselected current changed");return result;
 }
 Budget Api::budget() {require(native_!=nullptr,"native budget transport unavailable");return {native_->f7(board().index),u32(native_->platform(),0x2c)};}
@@ -188,16 +189,17 @@ Telemetry Api::telemetry() {
     version(b,0xb00b8);
     auto entry=[](int i){return size_t(0x11b8+i*0x3768);};auto at=[&](int i,int o){return u32(b,entry(i)+0x968+o);};
     auto measured=[&](Policy p){require(u32(b,entry(p.index))==p.type,"current status identity");return u32(b,entry(p.index)+8);};
-    Telemetry t;t.nv=measured(r.nv);t.ms=measured(r.ms);if(r.input && u32(b,entry(r.input->index))==r.input->type) t.input=u32(b,entry(r.input->index)+8);
+    Telemetry t;t.nv=measured(r.nv);if(r.ms) t.ms=measured(*r.ms);if(r.input && u32(b,entry(r.input->index))==r.input->type) t.input=u32(b,entry(r.input->index)+8);
     auto controller=[&](int i) {return u32(b,entry(i))==0x15 && at(i,4) && at(i,4)<=at(i,0x24) && uint64_t(at(i,0x60))==uint64_t(at(i,0x134))+at(i,0xb84) && uint64_t(at(i,0x15d0))==uint64_t(at(i,0x1690))+at(i,0x1e70);};
-    auto current=unique(mask,[&](int i){return controller(i) && at(i,0x134)==t.nv && at(i,0xb84)==t.ms;});
+    // Without an MSVDD rail (RTX 40) the current controller's layout is unconfirmed; its cap and predictions stay empty.
+    auto current=unique(mask,[&](int i){return t.ms && controller(i) && at(i,0x134)==t.nv && at(i,0xb84)==*t.ms;});
     auto board_power=unique(mask,[&](int i){auto p=0x3c+i*0x58;return u32(r.info,p)==0 && u32(r.info,p+8)==0 && u32(r.info,p+20)!=0 && u32(b,entry(i))==0;});
     std::optional<int> power;
     if(board_power) power=unique(mask,[&](int i){if(!controller(i)) return false;auto a=entry(i)+0xe0;int count=b[a+1];if(count>8) return false;for(int k=0;k<count;++k) if(b[a+0x48+k*8]==*board_power) return true;return false;});
     auto value=[&](std::optional<int> i,int o)->std::optional<uint32_t>{return i?std::optional(at(*i,o)):std::nullopt;};
     auto limit=[&](Policy p)->std::optional<uint32_t> {auto v=u32(b,entry(p.index)+4);return u32(b,entry(p.index))==p.type && v>=p.min && v<=p.max?std::optional(v):std::nullopt;};
     t.nv_prediction=value(current,0x1690);t.ms_prediction=value(current,0x1e70);t.current_khz=value(current,4);t.power_khz=value(power,4);t.ceiling_khz=value(current,0x24);if(!t.ceiling_khz) t.ceiling_khz=value(power,0x24);
-    t.nv_limit=limit(r.nv);t.ms_limit=limit(r.ms);if(r.input) t.input_limit=limit(*r.input);if(board_power && u32(b,entry(*board_power)+8)) t.gpu_mw=u32(b,entry(*board_power)+8);t.core_mw=value(power,0x60);
+    t.nv_limit=limit(r.nv);if(r.ms) t.ms_limit=limit(*r.ms);if(r.input) t.input_limit=limit(*r.input);if(board_power && u32(b,entry(*board_power)+8)) t.gpu_mw=u32(b,entry(*board_power)+8);t.core_mw=value(power,0x60);
     if(native_) {try {t.clock_mhz=native_->clock();} catch(...) {}try {t.enforced_mw=native_->enforced();} catch(...) {}}
     t.ipc=inline_activity();return t;
 }
