@@ -2,3 +2,8 @@
 /out/
 /.vs/
 *.user
+
+# Local-only reverse-engineering material. Decompiled OEM code must never be published.
+/re/decompilation/
+/re/**/*.log
+/re/**/*.exe
