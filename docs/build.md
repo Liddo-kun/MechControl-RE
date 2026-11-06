@@ -15,8 +15,7 @@ hardware, elevation and the OEM UWACPIDriver, not a bundled driver or .NET/VC ru
 ./tools/package-native.ps1 -WithCli -BuildDirectory C:/Temp/tandem/native-cli -OutputDirectory C:/Temp/tandem/new-cli-package
 ```
 
-Keep build/output directories outside the read-only reference repository. Package
-outputs must be fresh. `artifacts.json` identifies runtime and separate PDB archives
+Keep build/output directories outside the source tree. Package outputs must be fresh. `artifacts.json` identifies runtime and separate PDB archives
 and every payload hash. Runtime is allowlisted by CMake install rules; checks,
 libraries, sources and symbols do not ship. Default packages omit client/server;
 `-WithCli` adds both. Verify a fresh extraction with `tools/handoff.ps1 -Action Stage`.

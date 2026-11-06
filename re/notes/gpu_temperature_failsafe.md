@@ -241,7 +241,7 @@ The packaged test invokes the real alert method using the shipped runtime and DL
 without constructing MainForm or opening the EC. It checks both foreground choices,
 the independent nonmodal alert, native sound path and message-loop progress.
 
-See `thermal_failsafe_validation.md` for results, screenshots and remaining checks.
+See `notes/thermal_failsafe_validation.md` on the `legacy-csharp` branch for the C# app's results, screenshots and remaining checks.
 This expanded implementation has **not been deployed or deliberately triggered on
 live hardware**. Hardware power/fan response, sleep/resume and physical enforcement
 require Jon's approval and supervised validation with workloads stopped first.

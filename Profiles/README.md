@@ -1,13 +1,12 @@
 # Runtime machine profiles
 
-`MECHREVO/*.json` is the single runtime set (46 files), copied byte-for-byte from
-`MechControl/Profiles/MECHREVO` in the read-only C# reference repository at commit
-`6fa66cda2218fb3b6fda0b8b415544dd9f1b0596`. The upstream project is
-https://github.com/Liddo-kun/MechControl-RE.
-The root-level OEM archive was not imported. These files are configuration, not
-proof that each model was physically tested. `verified` retains its source value.
+`MECHREVO/*.json` is the runtime profile set, one compact file per model. The files
+started as copies of the C# app's `MechControl/Profiles/MECHREVO` at commit `6fa66cd`.
+They are configuration, not proof that each model was physically tested. `verified`
+retains its source value.
 
-The native loader uses these files directly; there is no second generated or
-normalized runtime copy in the source tree. Packaging must place this directory
-next to the executable. The hardware-neutral foundation UI does not select or
-apply a machine profile yet.
+The full OEM-extracted profiles that these were mapped from are in
+`re/Profiles/MECHREVO`. The app does not load those.
+
+The loader uses these files directly; there is no generated or normalized copy.
+Packaging must place this directory next to the executable.

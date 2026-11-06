@@ -4,23 +4,17 @@ A Windows x64 C++20 replacement for the C# MechControl app, built without .NET o
 WinForms. It controls MECHREVO laptops through the OEM EC driver (fans, power limits,
 thermal failsafe, battery, lighting, NVIDIA overrides and the BLE liquid cooler).
 
-## Reference repository
+## Reverse-engineering material and the C# app
 
-The C# repository at `C:/Users/Jon/code/Mechcontrol` is a read-only behavioral and
-reverse-engineering reference. Do not create or modify any file there, including
-build outputs, notes or Git metadata. Useful material there:
+`re/` holds the hardware knowledge and evidence; `re/README.md` lists it. Read
+`re/register_reference.md` first for EC work. It is the single source of truth for EC
+registers, encodings, write sequences and the HID protocol. `re/decompilation/` is
+local only: never commit decompiled OEM code, because the repository is public.
 
-- `register_reference.md`: **read first for EC work.** The single source of truth for
-  EC registers, encodings, write sequences and the HID protocol.
-- `report.md`: OEM architecture, project IDs and safety background.
-- `notes/other_machines.md` and `notes/ec_firmware_X6FR5_findings.md`: multi-model state.
-- `Profiles/MECHREVO/` (repository root): full OEM-extracted profiles. These are not
-  loaded by any app but are the source when onboarding a new model.
-- `UserFanTables-OEM/`: OEM factory fan tables and PL defaults for 24 models.
-- `captures/`, `acpi/`, `decompilation/`: Frida/EC traces, ACPI tables and decompiled
-  OEM code. Decompiled OEM code must never be committed to a public repository.
-
-Historical notes can be stale. Verify claims against the current source.
+The C# app this replaced is on the `legacy-csharp` branch, and tag `v1.6.0` marks its
+last release. "The reference" in code comments means that app. Read its source with
+`git show v1.6.0:<path>`, for example `MechControl/Features/FanControl.cs` or its
+`architecture.md`. Historical notes can be stale. Verify claims against current source.
 
 ## Goals
 

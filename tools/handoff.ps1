@@ -11,12 +11,7 @@ param(
 $ErrorActionPreference = 'Stop'
 function FullPath([string]$Path) {
     if (-not $Path) { throw 'A required path is missing.' }
-    $full = [IO.Path]::GetFullPath($Path).TrimEnd('\', '/')
-    $reference = 'C:\Users\Jon\code\Mechcontrol'
-    if ($full -ieq $reference -or $full.StartsWith($reference + '\', [StringComparison]::OrdinalIgnoreCase)) {
-        throw 'The original source repository is read-only; use the installed release or scratch.'
-    }
-    return $full
+    return [IO.Path]::GetFullPath($Path).TrimEnd('\', '/')
 }
 function Disjoint([string]$Left, [string]$Right) {
     if ($Left -ieq $Right -or $Left.StartsWith($Right + '\', [StringComparison]::OrdinalIgnoreCase) -or

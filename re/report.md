@@ -3,7 +3,7 @@
 **Last updated:** 2026-04-01
 **Status:** EC protocol fully decoded. USB HID protocol fully decoded (keyboard, logo, light bar). Service init sequence decoded and implemented -- standalone operation without OEM service verified working. Local dimming implemented.
 
-All register addresses, encodings, and write sequences are in `register_reference.md`. App architecture is in `architecture.md`.
+All register addresses, encodings, and write sequences are in `register_reference.md`. The native app's architecture is in `../docs/architecture.md`.
 
 ---
 
@@ -139,7 +139,7 @@ Extracted from `Define.ProjectID` enum in GCUService.exe:
 
 ### Profile JSON Files
 
-44 RE data profiles at `Profiles/MECHREVO/`, one per project ID. Generated from GCUService.exe via reflection (`generate_profiles.cs`). These are raw reference data -- the app uses simplified profiles at `MechControl/Profiles/MECHREVO/`.
+44 RE data profiles at `re/Profiles/MECHREVO/`, one per project ID. Generated from GCUService.exe via reflection (`generate_profiles.cs`). These are raw reference data -- the app uses simplified profiles at `Profiles/MECHREVO/` in the repository root.
 
 **Identical across all 44 profiles:** IOCTL codes, EC register addresses, fan table addresses, system registers, mode constants, battery enums.
 
@@ -197,8 +197,8 @@ Full MQTT capture: `mqtt_capture_output.txt`
 ```
 report.md                      -- This file (RE background and methodology)
 register_reference.md          -- Register addresses, encodings, write sequences, HID protocol
-architecture.md                -- MechControl app architecture and build
-CLAUDE.md                      -- Session instructions (also lists evidence archive files)
+../docs/architecture.md        -- Native app architecture
+../AGENTS.md                   -- Agent instructions
 ```
 
 ### OEM App
