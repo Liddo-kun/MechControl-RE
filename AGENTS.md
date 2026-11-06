@@ -1,78 +1,101 @@
-# Native MechControl implementation
+# MechControl Native
 
-This is a fresh, independent repository for the native rewrite. The existing C#
-repository at `C:/Users/Jon/code/Mechcontrol` is a read-only behavioral reference.
-Do not create or modify any file there, including build outputs, test outputs,
-notes, or Git metadata. Put temporary work in `C:/Temp/tandem`.
+A Windows x64 C++20 replacement for the C# MechControl app, built without .NET or
+WinForms. It controls MECHREVO laptops through the OEM EC driver (fans, power limits,
+thermal failsafe, battery, lighting, NVIDIA overrides and the BLE liquid cooler).
+
+## Reference repository
+
+The C# repository at `C:/Users/Jon/code/Mechcontrol` is a read-only behavioral and
+reverse-engineering reference. Do not create or modify any file there, including
+build outputs, notes or Git metadata. Useful material there:
+
+- `register_reference.md`: **read first for EC work.** The single source of truth for
+  EC registers, encodings, write sequences and the HID protocol.
+- `report.md`: OEM architecture, project IDs and safety background.
+- `notes/other_machines.md` and `notes/ec_firmware_X6FR5_findings.md`: multi-model state.
+- `Profiles/MECHREVO/` (repository root): full OEM-extracted profiles. These are not
+  loaded by any app but are the source when onboarding a new model.
+- `UserFanTables-OEM/`: OEM factory fan tables and PL defaults for 24 models.
+- `captures/`, `acpi/`, `decompilation/`: Frida/EC traces, ACPI tables and decompiled
+  OEM code. Decompiled OEM code must never be committed to a public repository.
+
+Historical notes can be stale. Verify claims against the current source.
 
 ## Goals
 
-- Build a Windows x64 C++20 replacement without .NET or WinForms.
-- Prioritize lighter packaging, lower memory use, low idle overhead, and simple,
-  maintainable code. Measure results instead of assuming native means faster.
-- Preserve existing supported features and configuration semantics. Do not add
-  features without asking the user. Add logic only when necessary for existing
-  behavior, correctness, or the implementation's ownership/lifetime requirements.
-- Use native Windows controls, the Windows SDK, C++/WinRT for BLE, and a small
-  pinned JSON dependency. Use consistent static C/C++ runtime linking.
-- Do not add generic frameworks, speculative abstractions, redundant guards, or
-  compatibility machinery without a concrete need.
-- Tests should cover consequential regressions or hard-to-observe behavior.
-  Prefer existing behavioral fixtures and real workflow smoke checks to routine
-  low-level test proliferation.
+- Keep packaging light, memory use low and idle overhead minimal. Measure results
+  instead of assuming native means faster.
+- Preserve existing features and configuration semantics. Do not add features
+  without asking Jon.
+- Write simple, maintainable code. Do not add generic frameworks, speculative
+  abstractions, redundant guards or compatibility machinery without a concrete need.
+- Use native Windows controls, the Windows SDK, C++/WinRT for BLE and the pinned
+  nlohmann/json dependency. Keep static runtime linking (`/MT`) consistent.
+- Tests should cover consequential regressions or hard-to-observe behavior. Prefer
+  the existing behavioral fixtures and real workflow checks over many small unit tests.
 
-## Execution
+## Model compatibility
 
-The coordinator assigns one phase to each fresh agent. Start with these shared
-instructions and only that phase's plan under `plans/`. Then read the source
-interfaces and implementations directly involved in the assigned work. Do not
-load prior phase reports, the behavioral contract, or the parity checklist in
-full. When a concrete question requires historical evidence, search for the
-specific symbol or topic and read only the relevant section. Prior phase reports
-are an audit archive, not required onboarding. Future phase plans must carry the
-short integration facts their implementer actually needs, rather than directing
-the implementer to read the entire history. Do not read other phases' plans
-unless the coordinator subsequently asks you to revise named future phases.
-Implement work directly rather than spawning additional agents.
+Always consider other models when changing code. Do not write code that only fits
+Jon's test machine (Intel IDY_7Y, baseboard `YAOSHI Series-X6AR55xY`).
 
-Use the existing application's source, registers reference, architecture, and
-evidence as needed. Historical notes can be stale; verify claims against current
-source. Runtime profiles are in `MechControl/Profiles/MECHREVO` within the old
-repository. Root-level `Profiles/MECHREVO` there is an OEM evidence archive.
+- **Detection** (`src/profiles.cpp`): WMI baseboard against profile `baseboardPatterns`
+  (longest match wins), then EC 0x740 direct `projectIdValue` match, then shifted
+  match (`raw >> 1`), then baseboard against profile filename, then manual selection.
+  Every automatic step skips profiles whose `cpuVendor` contradicts CPUID.
+- Baseboard patterns go first because Intel and AMD project IDs collide (X6FR5xxY AMD
+  and IDY_7Y both report shifted ID 13). `X6FR5xxY.json` resolves this.
+- Per-model features, registers, encodings and limits come from the profile JSON in
+  `Profiles/MECHREVO` or from runtime detection (ECSpec, support bytes, CPU vendor).
+  Never hardcode values that belong in one of those places.
 
-Hardware checks, including EC reads, are allowed. Use the available environment
-to validate work rather than imposing an offline-only policy. EC writes must use
-verified ground truth and the central WriteGuard. Preserve read-modify-write for
-bitfields and model-derived encodings/limits. Never run two hardware-controlling
-instances concurrently. Do not infer new register semantics.
+## Safety
 
-Model detection must preserve baseboard-pattern precedence, CPU-vendor filters,
-direct then shifted project-ID fallback, filename matching, and manual selection.
-Intel and AMD project IDs collide. Features and limits belong to model profiles
-or runtime detection, not hardcoded assumptions about Jon's test machine.
+- EC writes can brick the machine. Never write a register without verified ground truth,
+  and do not infer new register semantics.
+- All writes go through the central WriteGuard in `src/ec_session.*` (allowlist,
+  clamping and verification).
+- Use read-modify-write for bitfield registers and keep model-derived encodings and limits.
+- EC reads and other hardware checks are allowed. Never run two hardware-controlling
+  instances at once. `MechControl.exe --diagnose <file.json>` is read-only and may run
+  beside the installed app.
 
-Keep phase implementation results and check evidence in `docs/phase-N-result.md`.
-Report what was actually built and checked and any concrete blockers. Do not
-claim physical hardware coverage from simulated tests. Preserve unrelated work.
-Use patch for file-oriented changes. Keep instructions to other people in full
-sentences and plain language.
+## Build and test
 
-## Deployment
+Put temporary work and build directories in `C:/Temp/tandem`. See `docs/build.md`.
 
-When the user asks to deploy, run the checks relevant to the change, then run
-`./tools/deploy.ps1` from an elevated shell. It builds the CLI Release, closes the
-running app, copies the runtime files over the installed copy and starts it again
-through the `MechControl` logon task. Settings, profiles and logs stay in place.
-Do not add backups, status snapshots or deployment notes. `docs/handoff.md` is only
-for switching between the original C# app and the native app.
+```powershell
+./tools/build-native.ps1 -Configuration Release -WithCli -Check
+```
 
-## Documentation size
+`-Check` runs the CTest fixtures, which use synthetic hardware. Do not claim physical
+hardware coverage from them. `ui-pages-check.exe --ui-check <fresh directory>`
+exercises the real pages with fake hardware on an interactive desktop.
+`docs/architecture.md` describes component ownership and threading.
 
-Keep result documents short, normally about 40–80 lines. Include delivered
-decisions, material deviations and their reasons/disposition, final check results,
-remaining work, and evidence locations. Put raw logs, command transcripts, hashes
-and intermediate measurements in scratch evidence files, not repeated prose.
-When a defect is fixed, update its status and retain a short deviation record;
-do not append another complete account beside an obsolete one. Future plans need
-only actionable integration facts, not every prior phase's history. Do not make
-later agents read entire reports. See `docs/documentation.md` for archive location.
+## Deployed app
+
+- The `MechControl` scheduled task (logon trigger, highest privileges) starts the
+  installed copy. Its action names the install directory. If the task is ever recreated,
+  set its execution time limit to `PT0S`, because the 72-hour default stops the app.
+- When Jon asks to deploy, run the checks relevant to the change, then run
+  `./tools/deploy.ps1` from an elevated shell. It builds the CLI Release, closes the app,
+  copies the runtime files over the installed copy and restarts it through the task.
+  Settings, slots, peripheral state and logs stay in place. Do not add backups, status
+  snapshots or deployment notes.
+- After deploying, check `mechcontrol.log` beside the executable for `[OK]` EC init
+  steps, the applied slot and a sane fan table. For problems after sleep, search for
+  `EC activation lost` and `Re-applying slot`. `Get-Counter '\MechControl\CPU Fan RPM'`
+  shows that the hidden monitor is running.
+- `mcctl.exe` in the install directory controls the running app from an elevated shell:
+  `mcctl status --json`, `mcctl gpu --nvvdd 240`, `mcctl help`. Its changes are not saved.
+- `docs/handoff.md` covers only switching between the C# app and the native app.
+- The OEM `UWACPIDriver` is the only OEM component required. A backup is at
+  `D:\BU\UWACPIDriver-backup\` (`pnputil /add-driver UWACPIDriver.inf /install`).
+
+## Documentation
+
+Keep `docs/architecture.md` and `docs/build.md` accurate when a change affects them.
+Keep documents short and current: replace stale statements instead of appending history.
+Raw logs, transcripts and measurements belong in `C:/Temp/tandem`, not the repository.
