@@ -22,7 +22,7 @@ Json Controller::presentation(bool read,bool gpu_live,int page) {
     }
     if(read && page==-2) {
         j["model"]=p.project_id;j["enabled"]=session_.validation.enabled;j["disabled"]=session_.validation.disabled;
-        j["curvesSupported"]=curves_supported();j["hasGpuFan"]=p.fan_table.has_gpu;
+        j["curvesSupported"]=curves_supported();j["fanFormat"]=p.fan_table.format;j["hasGpuFan"]=p.fan_table.has_gpu;
         j["linkAvailable"]=curves_supported() && p.fan_table.has_gpu && p.fan_table.entries>=10;
         j["thermalActions"]=thermal_->supported_actions();
         j["actionLimits"]={{"gpu",enabled("gpuPower")?control_limit(p,"TGP").min:0},
@@ -39,6 +39,7 @@ Json Controller::presentation(bool read,bool gpu_live,int page) {
     if(page==1 && linked_ && (read || written_revision_!=presented_written_)) {
         j["writtenCpu"]=nullable(written_cpu_);j["writtenGpu"]=nullable(written_gpu_);presented_written_=written_revision_;
     }
+    if(page==1 && linked_) j["linkedStatus"]=linked_status_;
     // Independent groups never erase a successful sibling read or manufacture zero intent.
     if(read && page==0) {
         try {j["cpu"]=cpu_status();}catch(const std::exception& e){j["cpuError"]=e.what();}

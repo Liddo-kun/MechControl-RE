@@ -1,7 +1,8 @@
 # Architecture and ownership
 
 `src/ui.cpp` is the production Win32 application. The UI owns controls, tray state and
-presentation. `ControlWorker` (`worker.*`) owns a serialized command queue,
+presentation. `fan_chart.*` draws the fan curves and Link Fans status with GDI+, which is
+delay-loaded on the first draw. `ControlWorker` (`worker.*`) owns a serialized command queue,
 controller and monitor on one `std::jthread`. `Delivery` posts owned results to
 the UI; it is detached before destruction. Shutdown stops producers and joins
 the worker. Synchronous driver, WMI, NVIDIA and HID calls must return before

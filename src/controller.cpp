@@ -377,8 +377,10 @@ void Controller::fans(const FanSettings& f) {
 }
 void Controller::link(std::optional<int> c,std::optional<int> g) {
     if(!c || !g || *c<=0 || *g<=0 || *c>=128 || *g>=128) throw std::runtime_error("Linked temperatures unavailable; retaining EC safety ramps");
-    int duty=std::max(curve_duty(*fan_intent_.cpu_curve,*c),curve_duty(*fan_intent_.gpu_curve,*g));
+    int cpu_duty=curve_duty(*fan_intent_.cpu_curve,*c),gpu_duty=curve_duty(*fan_intent_.gpu_curve,*g),duty=std::max(cpu_duty,gpu_duty);
     int cr=ramp_start(*c),gr=ramp_start(*g);
+    auto ramp=[](int start){return start<10?fixed_temps[start]:0;};
+    linked_status_={{"duty",duty},{"cpuTemp",*c},{"cpuDuty",cpu_duty},{"cpuRamp",ramp(cr)},{"gpuTemp",*g},{"gpuDuty",gpu_duty},{"gpuRamp",ramp(gr)}};
     if(last_duty_>=0 && cr<=last_cpu_ramp_ && gr<=last_gpu_ramp_ && (std::abs(duty-last_duty_)<2 || (duty<=7 && last_duty_<=7))) return;
     last_duty_=-1;
     auto cpu=linked_curve(duty,cr),gpu=linked_curve(duty,gr);
