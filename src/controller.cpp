@@ -470,7 +470,7 @@ std::optional<Sensors> Controller::tick(ULONGLONG now) {
         catch(const std::exception& ex) {if(linked_error_.empty()) diagnostic_(ex.what());linked_error_=ex.what();}
     }
     try {
-        auto detail=!visible_?Detail::rpm:ui_page_==5?Detail::full:ui_page_==1?Detail::temperatures:Detail::monitor;
+        auto detail=!visible_?Detail::rpm:ui_page_==6?Detail::full:ui_page_==1?Detail::temperatures:Detail::monitor;
         auto s=read_sensors(session_.transport(),session_.profile,detail,shared);telemetry_failures_=0;monitor_stopped_=false;return s;
     } catch(const std::exception& ex) {
         ++telemetry_failures_;
@@ -493,7 +493,7 @@ ControlResult Controller::execute(const ControlCommand& command) {
         auto r=state();Json data=Json::object();
         if(c->page==4) data=*execute(PeripheralRead{}).peripherals;
         if(c->page==3 && enabled("battery")) try {data["battery"]=battery_telemetry(session_.transport());}catch(const std::exception& e){data["batteryError"]=e.what();}
-        if(c->page==6) {data["coolerAvailable"]=bool(cooler_);if(cooler_) {data["cooler"]=cooler_->snapshot();if(data["cooler"]["bluetoothAvailable"].is_null()) cooler_->request({CoolerAction::availability});}}
+        if(c->page==5) {data["coolerAvailable"]=bool(cooler_);if(cooler_) {data["cooler"]=cooler_->snapshot();if(data["cooler"]["bluetoothAvailable"].is_null()) cooler_->request({CoolerAction::availability});}}
         data["ui"]=presentation(true,false,c->page);r.peripherals=std::move(data);return r;
     }
     if(auto c=std::get_if<AcEvent>(&command)) {if(on_ac_!=c->on_ac) {on_ac_=c->on_ac;gpu_check_at_=GetTickCount64()+5000;}return state();}

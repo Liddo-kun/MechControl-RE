@@ -48,6 +48,19 @@ void Application::checkPages(const std::filesystem::path& directory,const std::s
     request(ThermalTest{state_["protection"].get<ProtectionSettings>()});wait([&]{return !busy_ && alert_;});capture(L"thermal-held");
     check(thermalText_[2].starts_with(L"TRIPPED") && thermalText_[3].find(L"Manual failsafe test")!=std::wstring::npos && IsWindowEnabled(get(resetId)),"a trip shows its held state, the trip record and Reset");
     request(ThermalReset{});wait([&]{return !busy_ && !tripped_ && !alert_;});check(!alert_,"cleared trip closes the independent production alert");
+    int keyboard=zoneBaseId;page(4);wait([&]{return peripheralState_.contains("zones") && IsWindowEnabled(get(keyboard+5));});
+    SendMessageW(get(keyboard+2),UDM_SETPOS32,0,200);SendMessageW(get(keyboard+4),TBM_SETPOS,TRUE,40);SendMessageW(window_,WM_HSCROLL,TB_THUMBPOSITION,reinterpret_cast<LPARAM>(get(keyboard+4)));
+    SendMessageW(get(keyboard),BM_SETCHECK,BST_CHECKED,0);command(keyboard+5,BN_CLICKED);
+    wait([&]{auto& k=peripheralState_.at("lightingIntent").at("keyboard");return !busy_ && k.at("g")==200 && k.at("brightness")==40 && k.at("enabled")==true;});
+    check(text(get(keyboard+1004))==L"40 %" && edited_.empty(),"keyboard color box and brightness slider apply to the zone");capture(L"lighting");
+    // The fixture model has no cooler; a connected cooler's snapshot is delivered as the BLE owner would.
+    page(5);wait([&]{return state_.value("readPage",-3)==5;});check(!IsWindowEnabled(get(scanId)) && !IsWindowEnabled(get(coolerFanApplyId)) && coolerStatus_.starts_with(L"This model"),"a model without cooler support disables the Liquid Cooler tab");
+    CoolerSettings intent;intent.fan_on=intent.pump_on=intent.rgb_on=true;intent.voltage=PumpVoltage::V12;intent.g=128;
+    peripherals({{"coolerAvailable",true},{"cooler",{{"connected",true},{"status","Connected to cooler"},{"firmware","1.2"},{"devices",Json::array({{{"address",0xC0FFEE123456ull},{"name","LCT22002"}}})},{"state",{{"autoConnect",true},{"savedAddress",0xC0FFEE123456ull}}},{"intent",intent}}}});
+    check(IsWindowEnabled(get(coolerFanApplyId)) && text(get(coolerPumpId+1000))==L"60 %" && SendMessageW(get(voltageId),CB_GETCURSEL,0,0)==3 && color(coolerRgbOnId)==RGB(0,128,0) && checked(autoConnectId),"a connected cooler enables its settings and shows the requested ones");capture(L"liquid-cooler");
+    fixture->asleep=true;int budgets=fixture->budgets;page(6);wait([&]{return infoText_[0]==L"40°C" && infoText_[6]==L"-- (GPU asleep, not read)";});
+    check(fixture->budgets==budgets,"System Info reads the EC sensors but not the NVIDIA budget while the GPU sleeps");
+    fixture->asleep=false;read();wait([&]{return !busy_ && infoText_[6]==L"250 W" && infoText_[7]==L"350 W";});capture(L"system-info");
     for(UINT dpi:{96u,144u,192u}) {RECT r{80,40,80+MulDiv(940,dpi,96),40+MulDiv(760,dpi,96)};SendMessageW(window_,WM_DPICHANGED,MAKELONG(dpi,dpi),reinterpret_cast<LPARAM>(&r));for(int p=0;p<7;++p) {page(p);wait([&]{return !busy_;});capture(L"page-"+std::to_wstring(p)+L"-"+std::to_wstring(dpi));}}
     report<<"Injected DPI/failures and synthetic hardware, not physical qualification. Production widgets/controllers were used.\n";DestroyWindow(window_);
 }

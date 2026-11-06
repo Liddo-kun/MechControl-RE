@@ -26,7 +26,7 @@ struct PeripheralRead { bool battery=false; };
 struct BatteryPage { bool active; }; // Bind the existing visible-page two-second telemetry subscription.
 struct UiRead {int page=-2;}; // -2: initial metadata; -1: changed catalog; 0..6: explicit page read.
 struct UiPreflight { std::optional<config::GpuSettings> gpu; int slot=0; std::optional<config::CpuSettings> cpu; };
-struct UiPage { int page; }; // Power=0, System Info=5 need visible 500 ms GPU telemetry.
+struct UiPage { int page; }; // The visible tab: Power=0 polls GPU telemetry, System Info=6 every EC sensor.
 struct SwitchApply { bool enabled; int milliseconds; };
 struct ProtectionApply { config::ProtectionSettings settings; };
 struct SlotLoad { int slot; bool deliberate=true; };

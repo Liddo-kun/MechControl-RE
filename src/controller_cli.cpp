@@ -21,7 +21,7 @@ Json Controller::presentation(bool read,bool gpu_live,int page) {
         j["slots"]=Json::array();for(int i=1;i<=5;++i) j["slots"].push_back(store_.exists(i));
     }
     if(read && page==-2) {
-        j["model"]=p.project_id;j["enabled"]=session_.validation.enabled;j["disabled"]=session_.validation.disabled;
+        j["model"]=p.project_id;j["enabled"]=session_.validation.enabled;
         j["curvesSupported"]=curves_supported();j["fanFormat"]=p.fan_table.format;j["hasGpuFan"]=p.fan_table.has_gpu;
         j["linkAvailable"]=curves_supported() && p.fan_table.has_gpu && p.fan_table.entries>=10;
         j["thermalActions"]=thermal_->supported_actions();
@@ -29,10 +29,9 @@ Json Controller::presentation(bool read,bool gpu_live,int page) {
             {"pl1",cpu_minimum_?control_limit(p,"PL1").min:0},{"pl2",cpu_minimum_?control_limit(p,"PL2").min:0},{"pl4",cpu_minimum_?control_limit(p,"PL4").min:0}};
         j["dutyBaseCpu"]=hex(p.fan_table.cpu_duty);j["dutyBaseGpu"]=hex(p.fan_table.gpu_duty);
         if(enabled("battery")) j["batteryRegister"]=p.reg("batteryMode");
+        for(std::string key:{"cpuTemp","gpuTemp"}) if(p.registers.contains(key)) j[key+"Register"]=p.reg(key);
         j["modes"]=Json::array();if(p.modes) for(auto& [key,value]:*p.modes) {(void)value;j["modes"].push_back(key);}
-        j["identity"]={{"baseboard",session_.identity.baseboard},{"cpu",session_.identity.cpu_name},{"selection",session_.selection.method},
-            {"path",session_.selection.path.string()},{"verified",p.verified},{"fanSnapshotCpu",session_.fans.cpu},{"fanSnapshotGpu",session_.fans.gpu},
-            {"fanProbe",session_.fans.probe},{"fanEnable",session_.fans.enable},{"fanMode",session_.fans.mode}};
+        j["identity"]={{"baseboard",session_.identity.baseboard},{"cpu",session_.identity.cpu_name}};
     }
     if((read && (page==1 || page==-2)) || fan_revision_!=presented_fan_) {j["fan"]=fan_intent_;presented_fan_=fan_revision_;}
     if(read && (page==2 || page==-2)) j["thermal"]=thermal_->state();
@@ -51,7 +50,7 @@ Json Controller::presentation(bool read,bool gpu_live,int page) {
         }catch(const std::exception& e){j["fanError"]=e.what();}
     if(read && page==3 && enabled("battery")) try {j["batteryMode"]=encoding::decode_battery(this->read("batteryMode"));}catch(const std::exception& e){j["batteryError"]=e.what();}
     if(gpu_live && page==0) j["gpuLive"]=gpu_telemetry();
-    if(page==5 && visible_ && (read || GetTickCount64()>=budget_at_)) {budget_at_=GetTickCount64()+5000;j["gpuBudget"]=gpu_budget();}
+    if(page==6 && visible_ && (read || GetTickCount64()>=budget_at_)) {budget_at_=GetTickCount64()+5000;j["gpuBudget"]=gpu_budget();}
     return j;
 }
 static Json maybe(std::optional<uint32_t> value) {return value?Json(*value):Json(nullptr);}

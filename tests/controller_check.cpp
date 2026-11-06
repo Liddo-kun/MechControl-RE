@@ -173,7 +173,7 @@ void gpu_integration(const std::filesystem::path& root) {
     auto plain=c.execute(CliCommand{{"status"}});check(plain.code==0 && plain.text.find("NVVDD limit 125.001 A")!=std::string::npos && plain.text.find("Clock caps: current controller")!=std::string::npos && plain.text.find("board input limiter (IPC)")!=std::string::npos,"plain GPU status retains source current/telemetry fields and units");
     c.execute(Visibility{true});r.state->reads.clear();before=driver->reads;auto live=c.presentation(false,true,0);
     check(r.state->reads.empty() && driver->reads==before+1 && live["gpuLive"]["nvvdd"]["measuredMa"]==123456,"Power tab live refresh reads only driver telemetry, no EC bytes");
-    c.execute(UiPage{5});before=driver->reads;auto info=c.presentation(false,false,5);auto again=c.presentation(false,false,5);
+    c.execute(UiPage{6});before=driver->reads;auto info=c.presentation(false,false,6);auto again=c.presentation(false,false,6);
     check(info["gpuBudget"]["laptopWatts"]==250 && !again.contains("gpuBudget") && driver->reads==before+1,"System Info reads driver budgets at most every five seconds");c.execute(UiPage{0});c.execute(Visibility{false});
     before=driver->sets;check(c.execute(CliCommand{{"gpu","--nvvdd","125.0001A"}}).code==2 && driver->sets==before,"fractional milliamp request fails without writes");
     check(c.execute(CliCommand{{"gpu","--nvvdd","200A"}}).code==1 && driver->sets==before,"CLI above active ceiling refuses without restart or current writes");
@@ -446,7 +446,7 @@ void monitor(const std::filesystem::path& root) {
     check(s->reads[0x44F]==1 && s->reads[0x43E]==1 && s->reads[0x464]==1 && s->reads.size()==6,"hidden tick shares each required temperature once plus four RPM bytes");
     c.execute(Visibility{true});s->reads.clear();c.tick();int count=0;for(auto [a,n]:s->reads)count+=n;
     check(count==13 && s->reads[0x44F]==1 && s->reads[0x43E]==1 && !s->reads.contains(0x60C),"visible Power tab tick reads the monitor bar, not System Info sensors");
-    c.execute(UiPage{5});s->reads.clear();c.tick();count=0;for(auto [a,n]:s->reads)count+=n;
+    c.execute(UiPage{6});s->reads.clear();c.tick();count=0;for(auto [a,n]:s->reads)count+=n;
     check(count==18 && s->reads[0x44F]==1 && s->reads[0x43E]==1,"System Info tick reuses shared samples for eighteen EC bytes");c.execute(UiPage{0});
     s->fail_read=0x464;s->bytes[0x44F]=110;for(int i=0;i<5;++i)c.tick();
     check(c.thermal().tripped(),"unrelated RPM/telemetry failures cannot suppress safety dispatch");
