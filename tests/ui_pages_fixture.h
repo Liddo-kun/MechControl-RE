@@ -6,7 +6,7 @@
 // serialized controller are unchanged; EC/NVIDIA failures are explicitly injected.
 struct UiPageState {
     std::map<int,uint8_t> bytes;
-    std::atomic<bool> fail_gpu=false,asleep=false;
+    std::atomic<bool> fail_gpu=false,asleep=false;std::atomic<int> budgets=0;
     UiPageState() {
         for(auto [a,v]:std::initializer_list<std::pair<int,int>>{{0x740,26},{0x741,1},{0x727,128},{0x7D2,1},{0x783,100},{0x784,150},{0x785,100},{0x463,10},{0x743,7},{0x744,45},{0x746,15},{0x745,255},{0x7A6,32},{0x751,144},{0x7C5,224},{0x7C6,4},{0x43E,40},{0x44F,40},{0x464,4},{0x465,42},{0x46B,20},{0x46C,4}}) bytes[a]=uint8_t(v);
         for(int i=0;i<16;++i) for(int base:{0xF00,0xF30}) {bytes[base+i]=uint8_t(i<10?19+i*8:255);bytes[base+16+i]=uint8_t(i?i<10?11+i*8:255:0);bytes[base+32+i]=uint8_t(i<10?i*20:180);}
@@ -36,7 +36,7 @@ public:
         mech::nv::Telemetry t;t.nv=110400;t.ms=21300;t.input=8150;t.nv_limit=120000;t.ms_limit=30000;t.input_limit=11053;
         t.current_khz=2730000;t.power_khz=2655000;t.ceiling_khz=3090000;t.clock_mhz=2655;t.enforced_mw=uint32_t(requested_*1000);t.gpu_mw=uint32_t(requested_*960);t.core_mw=t.gpu_mw.value()*7/10;t.ipc=0.61;return t;
     }
-    mech::nv::Budget budget() override {return {250000,350000};}
+    mech::nv::Budget budget() override {++state_->budgets;return {250000,350000};}
     std::optional<mech::nv::Dlppc> dlppc() override {return mech::nv::Dlppc{true,7,2048};}
     bool needs_restart(bool,const mech::config::GpuSettings&) override {return false;}
     void configure(bool unlock,const mech::config::GpuSettings&,bool) override {enabled=unlock;}
@@ -47,5 +47,5 @@ inline mech::WorkerOptions ui_page_options(const std::filesystem::path& root,std
     mech::WorkerOptions options;options.identity=mech::config::Identity{"X6AR55xY","UI fixture","intel",uint8_t{26}};
     options.state_directory=root;options.nvidia_hardware=false;options.peripheral_hardware=false;options.wait=[](unsigned){};
     options.channel_factory=[state](const std::wstring&,HANDLE){return std::make_unique<UiPageEc>(state);};
-    options.nvidia_factory=[state]{return std::make_unique<UiPageGpu>(state);};return options;
+    options.nvidia_factory=[state]{return std::make_unique<UiPageGpu>(state);};options.lighting_send=[](int,const mech::HidReport&){};return options;
 }
