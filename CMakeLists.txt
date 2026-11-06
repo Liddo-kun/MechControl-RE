@@ -46,8 +46,9 @@ target_include_directories(foundation PUBLIC src PRIVATE "${CMAKE_CURRENT_BINARY
 target_link_libraries(foundation PUBLIC advapi32 windowsapp ec)
 add_executable(MechControl WIN32 src/ui.cpp src/fan_chart.cpp resources/app.rc
   "${CMAKE_CURRENT_BINARY_DIR}/counters.rc")
-target_link_libraries(MechControl PRIVATE foundation comctl32 shell32 gdi32 comdlg32)
-target_link_options(MechControl PRIVATE /MANIFEST:EMBED
+# GDI+ draws the fan curves. Delay-loading keeps it out of the hidden tray app until a curve is shown.
+target_link_libraries(MechControl PRIVATE foundation comctl32 shell32 gdi32 comdlg32 gdiplus delayimp)
+target_link_options(MechControl PRIVATE /DELAYLOAD:gdiplus.dll /MANIFEST:EMBED
   "/MANIFESTUAC:level='requireAdministrator' uiAccess='false'"
   /MANIFESTINPUT:${CMAKE_CURRENT_SOURCE_DIR}/resources/app.manifest)
 add_custom_command(TARGET MechControl POST_BUILD
@@ -77,8 +78,8 @@ if(BUILD_TESTING)
   add_test(NAME ec COMMAND ec-check)
   add_executable(ui-pages-check WIN32 src/ui.cpp src/fan_chart.cpp resources/app.rc "${CMAKE_CURRENT_BINARY_DIR}/counters.rc")
   target_compile_definitions(ui-pages-check PRIVATE MECHCONTROL_PAGE_CHECK)
-  target_link_libraries(ui-pages-check PRIVATE foundation comctl32 shell32 gdi32 comdlg32 dwmapi)
-  target_link_options(ui-pages-check PRIVATE /MANIFEST:EMBED "/MANIFESTUAC:level='requireAdministrator' uiAccess='false'" /MANIFESTINPUT:${CMAKE_CURRENT_SOURCE_DIR}/resources/app.manifest)
+  target_link_libraries(ui-pages-check PRIVATE foundation comctl32 shell32 gdi32 comdlg32 gdiplus delayimp dwmapi)
+  target_link_options(ui-pages-check PRIVATE /DELAYLOAD:gdiplus.dll /MANIFEST:EMBED "/MANIFESTUAC:level='requireAdministrator' uiAccess='false'" /MANIFESTINPUT:${CMAKE_CURRENT_SOURCE_DIR}/resources/app.manifest)
   add_dependencies(ui-pages-check MechControl)
   add_executable(configuration-check tests/configuration_check.cpp)
   target_link_libraries(configuration-check PRIVATE configuration)

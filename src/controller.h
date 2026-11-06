@@ -167,5 +167,6 @@ private:
     ULONGLONG watchdog_=0,resume_at_=0,restart_at_=0;
     uint8_t latch_mask_=255;
     std::string linked_error_;
+    config::Json linked_status_; // The latest linked duty, temperatures and safety ramps, for the Fan Control tab.
 };
 }

@@ -33,8 +33,8 @@ enum Id {
     tabsId=100,saveId=110,defaultsId,renameId,clearId,showId,exitId,readId,
     slotId=120,defaultId=140,
     pl1Id=200,pl2Id,pl4Id,tempId,tgpId,dbId,nvId,msId,inputId,dbOnId,unlockId,dlppcId,powerApplyId,powerReadId,
-    boostId=300,switchId,switchMsId,switchApplyId,curveId,linkId,cpuChartId,gpuChartId,fanApplyId,fanTextId,debugId,debugCpuId,debugGpuId,boostApplyId,
-    protectionId=400,thresholdId,reduceId,fanBoostId,showWindowId,protectionApplyId,resetId,testId,thermalTextId,historyId,previewId,thermalHintId,detailsId,detailsTextId,
+    boostId=300,switchId,switchMsId,switchApplyId,curveId,linkId,cpuChartId,gpuChartId,fanApplyId,fanReadId,debugCpuId,debugGpuId,boostApplyId,
+    protectionId=400,thresholdId,reduceId,fanBoostId,showWindowId,protectionApplyId,resetId,testId,detailsId,
     batteryModeId=500,batteryApplyId,batteryTextId,
     zoneBaseId=600,idleId=660,dimmingId,lightingReadId,
     infoId=700,
@@ -74,6 +74,21 @@ constexpr const wchar_t* liveTips[]{
     L"GPU power outside the core rails: memory, PCIe and the rest of the board. The core gets the power limit minus this, so raising TGP raises core power by less than the full amount.",
     railTip,railTip,
     L"Board input has no controller or cap: the GPU's inline power controller (IPC) slows the clock below every cap. IPC active: the share of time it acted since the last reading. It also clips power peaks, so it can act without board input."};
+constexpr const wchar_t* thermalDescription=L"For machines that depend on an external / liquid cooler to run their high-power profile. Set the trigger above the EC GPU temperature normally reached with the cooler working. If the average of the last 5 one-second readings reaches the trigger, the failsafe trips, requests this model's minimum GPU power and alerts you; single noisy readings are averaged out. Optional actions also reduce CPU power and turn on fan boost. To recover, press Reset (restores the active profile) or load the profile that matches your cooling, e.g. an air-cooling profile.";
+constexpr const wchar_t* thermalDetails=L"EC temperature checks run about once per second, including in the tray. A trip needs at least three readings and averages up to five, adding about two seconds of delay. Five invalid/unavailable readings trip protection; a sleeping GPU can cause a conservative trip.\r\n\r\nWhile the failsafe is enabled, Reset requires a fresh valid read and an average below the trigger. Loading a profile clears the trip before applying its settings. Minimum EC/driver requests are not proof of physical power enforcement or cooling. Fan boost is the laptop firmware mode, not the external pump or fans.\r\n\r\nThere is no protection while the application/OS cannot run or hardware cannot accept writes. This is not real-time protection; a plausible frozen sensor cannot be detected from this register alone. No Bluetooth cooler connection is required. Alerts and sound are best effort; closing the alert does not reset protection.";
+// Trip times are ISO 8601 with a UTC offset (none means local). Shown in local time, as in the reference.
+std::wstring localTime(const std::string& iso) {
+    SYSTEMTIME t{};unsigned hours=0,minutes=0;
+    if(sscanf_s(iso.c_str(),"%hu-%hu-%huT%hu:%hu",&t.wYear,&t.wMonth,&t.wDay,&t.wHour,&t.wMinute)!=5) return w(iso);
+    if(auto zone=iso.find_first_of("Z+-",16);zone!=std::string::npos) {
+        if(iso[zone]!='Z') sscanf_s(iso.c_str()+zone+1,"%u:%u",&hours,&minutes);
+        FILETIME f{};ULARGE_INTEGER u{};SYSTEMTIME utc{};SystemTimeToFileTime(&t,&f);u.LowPart=f.dwLowDateTime;u.HighPart=f.dwHighDateTime;
+        u.QuadPart+=ULONGLONG((iso[zone]=='-'?1:-1)*(hours*60LL+minutes)*600000000LL);f={u.LowPart,u.HighPart};
+        if(!FileTimeToSystemTime(&f,&utc) || !SystemTimeToTzSpecificLocalTime(nullptr,&utc,&t)) return w(iso);
+    }
+    wchar_t date[80]{},clock[80]{};GetDateFormatEx(LOCALE_NAME_USER_DEFAULT,DATE_SHORTDATE,&t,nullptr,date,80,nullptr);GetTimeFormatEx(LOCALE_NAME_USER_DEFAULT,TIME_NOSECONDS,&t,nullptr,clock,80);
+    return std::wstring(date)+L" "+clock;
+}
 std::wstring dlppcTip(const Json& detected) {
     std::wstring tip=L"DLPPC (likely Deep Learning Power/Performance Controller) is an NVIDIA firmware controller that uses a neural-network power model to pick the GPU memory clock under load. When the GPU is power-limited it caps memory a step down (P2) to give the core more of the power limit. Disabling it keeps memory at full speed (P0) in games; idle downclocking is unaffected. Applies now and at every startup, and is reapplied after a GPU restart.";
     if(!detected.is_object()) return tip;
@@ -96,9 +111,9 @@ std::wstring describe(const Json& value,const std::wstring& prefix=L"") {
     return out;
 }
 struct Row {HWND label=nullptr,control=nullptr,number=nullptr;int id=0,y=0,height=36;bool slider=false,shown=true;};
-struct Page {HWND window=nullptr;std::vector<Row> rows;int height=0,scroll=0;};
-struct PowerText {RECT rect;std::wstring text;COLORREF color;};
-struct BarText {RECT rect;std::wstring text;bool bold;COLORREF color;};
+struct Text {RECT rect;std::wstring text;COLORREF color;bool bold=false;};
+// The Power and Fan Control pages paint titled section frames and notes; the other pages stack rows.
+struct Page {HWND window=nullptr;std::vector<Row> rows;int height=0,scroll=0;std::vector<std::pair<RECT,const wchar_t*>> frames;std::vector<Text> texts;};
 
 // Small native edit dialog, shared only by the existing slot rename workflow.
 struct RenameDialog {std::wstring value;HFONT font=nullptr;HWND edit=nullptr;};
@@ -175,15 +190,15 @@ public:
 private:
     static LRESULT CALLBACK pageProcedure(HWND window,UINT message,WPARAM wp,LPARAM lp,UINT_PTR,DWORD_PTR data) {
         auto app=reinterpret_cast<Application*>(data);
-        if(message==WM_COMMAND || message==WM_HSCROLL) return SendMessageW(app->window_,message,wp,lp);
+        if(message==WM_COMMAND || message==WM_HSCROLL || message==WM_NOTIFY) return SendMessageW(app->window_,message,wp,lp);
         if(message==WM_VSCROLL || message==WM_MOUSEWHEEL) {app->scroll(window,message,wp);return 0;}
         if(message==WM_SETFOCUS) {auto next=GetNextDlgTabItem(window,nullptr,FALSE);if(next) SetFocus(next);return 0;}
         if(message==WM_PARENTNOTIFY && LOWORD(wp)==WM_CREATE) return 0;
-        if(window==app->pages_[0].window) {
+        if(int page=window==app->pages_[0].window?0:window==app->pages_[1].window?1:window==app->pages_[2].window?2:-1;page>=0) {
             if(message==WM_ERASEBKGND) return 1;
-            if(message==WM_PAINT) {PAINTSTRUCT ps{};auto dc=BeginPaint(window,&ps);app->paintPower(dc,ps.rcPaint);EndPaint(window,&ps);return 0;}
+            if(message==WM_PAINT) {PAINTSTRUCT ps{};auto dc=BeginPaint(window,&ps);app->paintPage(page,dc,ps.rcPaint);EndPaint(window,&ps);return 0;}
             // A static is transparent to the mouse; the live table's tooltips need it.
-            if(message==WM_NCHITTEST) {auto hit=DefSubclassProc(window,message,wp,lp);return hit==HTTRANSPARENT?HTCLIENT:hit;}
+            if(message==WM_NCHITTEST && page==0) {auto hit=DefSubclassProc(window,message,wp,lp);return hit==HTTRANSPARENT?HTCLIENT:hit;}
         }
         return DefSubclassProc(window,message,wp,lp);
     }
@@ -199,6 +214,8 @@ private:
         auto app=reinterpret_cast<Application*>(data);
         if(message==WM_COMMAND) {app->show();TabCtrl_SetCurSel(app->tabs_,2);app->selectPage();DestroyWindow(window);return 0;}
         if(message==WM_CLOSE) {DestroyWindow(window);return 0;}
+        // The alert is a STATIC, which would draw its title over the message.
+        if(message==WM_PAINT) {PAINTSTRUCT ps{};auto dc=BeginPaint(window,&ps);FillRect(dc,&ps.rcPaint,GetSysColorBrush(COLOR_BTNFACE));EndPaint(window,&ps);return 0;}
         if(message==WM_NCDESTROY) app->alert_=nullptr;
         return DefSubclassProc(window,message,wp,lp);
     }
@@ -228,14 +245,14 @@ private:
         for(auto choice:choices) SendMessageW(r.control,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(choice));
         SendMessageW(r.control,CB_SETCURSEL,0,0);
     }
-    void slider(int page,int id,const wchar_t* title,int minimum,int maximum,int value) {
-        // Power sliders have ticks and a formatted value label instead of an edit box.
-        bool power=page==0;
-        auto& r=row(page,id,title,TRACKBAR_CLASSW,WS_TABSTOP|(power?TBS_AUTOTICKS:TBS_NOTICKS),44);r.slider=true;
+    void slider(int page,int id,const wchar_t* title,int minimum,int maximum,int initial) {
+        // Positional sliders have ticks and a formatted value label instead of an edit box.
+        bool ticks=positional(id);
+        auto& r=row(page,id,title,TRACKBAR_CLASSW,WS_TABSTOP|(ticks?TBS_AUTOTICKS:TBS_NOTICKS),44);r.slider=true;
         r.label=control(pages_[page].window,L"STATIC",title,SS_NOPREFIX,0);
-        if(power) r.number=control(pages_[page].window,L"STATIC",L"",SS_NOPREFIX,id+1000);
-        else {r.number=control(pages_[page].window,L"EDIT",std::to_wstring(value),WS_TABSTOP|WS_BORDER|ES_NUMBER|ES_AUTOHSCROLL,id+1000);SendMessageW(r.number,EM_SETLIMITTEXT,9,0);}
-        SendMessageW(r.control,TBM_SETRANGEMIN,FALSE,minimum);SendMessageW(r.control,TBM_SETRANGEMAX,TRUE,maximum);SendMessageW(r.control,TBM_SETPOS,TRUE,value);
+        if(ticks) r.number=control(pages_[page].window,L"STATIC",L"",SS_NOPREFIX,id+1000);
+        else {r.number=control(pages_[page].window,L"EDIT",L"",WS_TABSTOP|WS_BORDER|ES_NUMBER|ES_AUTOHSCROLL,id+1000);SendMessageW(r.number,EM_SETLIMITTEXT,9,0);}
+        value(id,initial,minimum,maximum);
     }
     void tip(UINT_PTR id,const std::wstring& text,UINT flags=0,UINT message=TTM_ADDTOOLW) {
         TOOLINFOW tool{sizeof tool};tool.uFlags=flags|TTF_SUBCLASS;tool.hwnd=pages_[0].window;tool.uId=id;tool.lpszText=const_cast<wchar_t*>(text.c_str());
@@ -244,7 +261,7 @@ private:
     void initialize() {
         dpi_=GetDpiForWindow(window_);updating_=true;
         tabs_=control(window_,WC_TABCONTROLW,L"",WS_TABSTOP|WS_CLIPSIBLINGS,tabsId);
-        const wchar_t* names[]{L"Power",L"Fans",L"Thermal Failsafe",L"Battery",L"Lighting",L"System Info",L"Cooler"};
+        const wchar_t* names[]{L"Power",L"Fan Control",L"Thermal Failsafe",L"Battery",L"Lighting",L"System Info",L"Cooler"};
         for(int i=0;i<7;++i) {
             TCITEMW item{};item.mask=TCIF_TEXT;item.pszText=const_cast<wchar_t*>(names[i]);TabCtrl_InsertItem(tabs_,i,&item);
             pages_[i].window=CreateWindowExW(WS_EX_CONTROLPARENT,L"STATIC",L"",WS_CHILD|WS_VSCROLL|WS_CLIPCHILDREN|WS_CLIPSIBLINGS,0,0,0,0,window_,nullptr,instance_,nullptr);
@@ -264,18 +281,17 @@ private:
         for(UINT_PTR i=0;i<std::size(liveTips);++i) tip(i+1,liveTips[i]); // Rectangles follow the painted table.
         tip(reinterpret_cast<UINT_PTR>(get(dlppcId)),dlppcTip_=dlppcTip(nullptr),TTF_IDISHWND);
         for(int id:{nvId,msId,inputId}) tip(reinterpret_cast<UINT_PTR>(get(id)),(L"Applies live within the active ceiling. The unlock allows up to "+std::wstring(id==inputId?L"154":L"140")+L"% of the stock current; raising an older ceiling restarts the GPU."),TTF_IDISHWND);
-        check(1,boostId,L"Enable Fan Boost");button(1,boostApplyId,L"Apply Boost");check(1,switchId,L"Enable Fan Switch Speed");slider(1,switchMsId,L"Fan switching interval (ms)",100,12700,300);button(1,switchApplyId,L"Apply fan switch speed");
+        check(1,boostId,L"Enable Fan Boost");button(1,boostApplyId,L"Apply");check(1,switchId,L"Enable Fan Switch Speed");slider(1,switchMsId,L"Switch Speed",1,127,3);button(1,switchApplyId,L"Apply");
         check(1,curveId,L"Custom Fan Curve");check(1,linkId,L"Link Fans");
-        row(1,cpuChartId,L"CPU fan curve",chartClass,WS_TABSTOP,250);row(1,gpuChartId,L"GPU fan curve",chartClass,WS_TABSTOP,250);
-        button(1,fanApplyId,L"Apply reviewed fan curves / link settings");label(1,fanTextId,L"Fan editor state",100);
-        row(1,debugCpuId,L"CPU last complete table write — read-only, not hardware readback",chartClass,0,250);row(1,debugGpuId,L"GPU last complete table write — read-only, not hardware readback",chartClass,0,250);
-        EnableWindow(get(debugCpuId),FALSE);EnableWindow(get(debugGpuId),FALSE);
-        for(int id:{debugCpuId,debugGpuId}) {ChartOptions options{true,true};SendMessageW(get(id),chartOptionsMessage,0,reinterpret_cast<LPARAM>(&options));}
-        check(2,protectionId,L"Enable GPU temperature detection");slider(2,thresholdId,L"GPU trip threshold (°C)",50,95,50);check(2,reduceId,L"Also reduce CPU power");check(2,fanBoostId,L"Also enable Fan Boost");check(2,showWindowId,L"Show main window when protection trips");
-        label(2,previewId,L"On trip: waiting for model",90);label(2,thermalHintId,L"No saved profile loaded",48);
-        button(2,protectionApplyId,L"Apply thermal protection settings");button(2,resetId,L"Reset failsafe and reapply active profile");button(2,testId,L"Test failsafe");label(2,thermalTextId,L"Current protection state",120);label(2,historyId,L"Historical trip (not current verification)",220);
-        button(2,detailsId,L"Safety details and limitations");label(2,detailsTextId,L"EC temperature checks run about once per second, including in the tray. A trip needs at least three readings and averages up to five, adding about two seconds of delay. Five invalid/unavailable readings trip protection; a sleeping GPU can cause a conservative trip.\r\n\r\nWhile detection is enabled, Reset requires a fresh valid read and a mean below the trigger. Loading a profile clears the trip before applying its settings. Minimum EC/driver requests are not proof of physical power enforcement or cooling. Fan boost is the laptop firmware mode, not the external pump or fans.\r\n\r\nThere is no protection while the application/OS cannot run or hardware cannot accept writes. This is not real-time protection; a plausible frozen sensor cannot be detected from this register alone. BLE connection is not required. Alerts and sound are best effort; closing the alert does not reset protection.",260);
-        showRow(2,detailsTextId,false);
+        row(1,cpuChartId,L"CPU Fan Curve",chartClass,WS_BORDER);row(1,gpuChartId,L"GPU Fan Curve",chartClass,WS_BORDER);
+        button(1,fanApplyId,L"Apply");button(1,fanReadId,L"Read from EC");
+        row(1,debugCpuId,L"CPU (Sent to EC)",chartClass,WS_BORDER);row(1,debugGpuId,L"GPU (Sent to EC)",chartClass,WS_BORDER);
+        check(2,protectionId,L"Enable thermal failsafe");slider(2,thresholdId,L"GPU trigger temperature",50,95,70);
+        SendMessageW(get(thresholdId),TBM_SETPAGESIZE,0,1); // As in the reference, a click on the track moves the trigger one degree.
+        check(2,reduceId,L"Also drop CPU power limits (PL1 / PL2 / PL4) to minimum");check(2,fanBoostId,L"Turn on fan boost when tripped");
+        check(2,showWindowId,L"Bring up the MechControl window when tripped (safety alert, tray alert and sound remain enabled)");
+        button(2,protectionApplyId,L"Apply");button(2,resetId,L"Reset");button(2,testId,L"Test Failsafe");
+        row(2,detailsId,L"<a>Safety details and limitations</a>",WC_LINK,WS_TABSTOP|LWS_TRANSPARENT);
         combo(3,batteryModeId,L"Battery charge mode",{L"High Capacity (Performance)",L"Balanced",L"Stationary (Health)"});button(3,batteryApplyId,L"Apply battery mode");label(3,batteryTextId,L"Battery telemetry is read every two seconds only while this page is visible.",400);
         const wchar_t* zones[]{L"Keyboard",L"Light bar",L"Logo (rear cover)"};
         for(int zone=0;zone<3;++zone) {int id=zoneBaseId+zone*16;
@@ -302,8 +318,9 @@ private:
         auto make=[&](int points,int weight){return CreateFontW(-MulDiv(points,dpi_,72),0,0,0,weight,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,DEFAULT_PITCH,L"Segoe UI");};
         auto font=make(9,FW_NORMAL),bold=make(9,FW_BOLD),title=make(10,FW_BOLD);
         for(auto [id,window]:controls_) {(void)id;SendMessageW(window,WM_SETFONT,reinterpret_cast<WPARAM>(font),TRUE);}
-        for(auto& p:pages_) for(auto& r:p.rows) if(r.label) SendMessageW(r.label,WM_SETFONT,reinterpret_cast<WPARAM>(&p==&pages_[0]?bold:font),TRUE);
-        SendMessageW(get(dbOnId),WM_SETFONT,reinterpret_cast<WPARAM>(bold),TRUE);SendMessageW(tooltip_,TTM_SETMAXTIPWIDTH,0,ref(600));
+        for(auto& p:pages_) for(auto& r:p.rows) if(r.label) SendMessageW(r.label,WM_SETFONT,reinterpret_cast<WPARAM>(&p<&pages_[3]?bold:font),TRUE);
+        for(int id:{dbOnId,boostId,switchId,curveId,linkId,protectionId}) SendMessageW(get(id),WM_SETFONT,reinterpret_cast<WPARAM>(bold),TRUE);
+        SendMessageW(tooltip_,TTM_SETMAXTIPWIDTH,0,ref(600));
         if(alert_) EnumChildWindows(alert_,[](HWND child,LPARAM value)->BOOL {SendMessageW(child,WM_SETFONT,WPARAM(value),TRUE);return TRUE;},reinterpret_cast<LPARAM>(font));
         for(auto old:{font_,bold_,title_}) if(old) DeleteObject(old);font_=font;bold_=bold;title_=title;
         for(int id:{cpuChartId,gpuChartId,debugCpuId,debugGpuId}) SendMessageW(get(id),chartDpiMessage,dpi_,0);
@@ -311,11 +328,12 @@ private:
     }
     void layoutPage(Page& p) {
         RECT rc{};GetClientRect(p.window,&rc);int m=scale(10),width=rc.right-2*m;
-        if(&p==&pages_[0]) {
-            int content=layoutPower(rc.right,0,false);p.scroll=std::clamp(p.scroll,0,std::max(0,content-int(rc.bottom)));
+        if(&p<&pages_[3]) {
+            auto sections=[&](int scroll,bool apply){return &p==&pages_[0]?layoutPower(rc.right,scroll,apply):&p==&pages_[1]?layoutFans(rc.right,scroll,apply):layoutThermal(rc.right,scroll,apply);};
+            int content=sections(0,false);p.scroll=std::clamp(p.scroll,0,std::max(0,content-int(rc.bottom)));
             SCROLLINFO si{sizeof si,SIF_RANGE|SIF_PAGE|SIF_POS,0,std::max(0,content-1),UINT(rc.bottom),p.scroll,0};SetScrollInfo(p.window,SB_VERT,&si,TRUE);
             RECT shown{};GetClientRect(p.window,&shown);if(shown.right!=rc.right) {layoutPage(p);return;} // The scroll bar changed the width.
-            layoutPower(rc.right,p.scroll,true);RedrawWindow(p.window,nullptr,nullptr,RDW_INVALIDATE|RDW_ALLCHILDREN);return;
+            sections(p.scroll,true);RedrawWindow(p.window,nullptr,nullptr,RDW_INVALIDATE|RDW_ALLCHILDREN);return;
         }
         p.height=0;for(auto& r:p.rows) {r.y=p.height;if(r.shown) p.height+=r.height+6;ShowWindow(r.control,r.shown?SW_SHOW:SW_HIDE);if(r.label) ShowWindow(r.label,r.shown?SW_SHOW:SW_HIDE);if(r.number) ShowWindow(r.number,r.shown?SW_SHOW:SW_HIDE);}
         int content=scale(p.height);p.scroll=std::clamp(p.scroll,0,std::max(0,content-int(rc.bottom)));
@@ -330,7 +348,7 @@ private:
         }
         RedrawWindow(p.window,nullptr,nullptr,RDW_INVALIDATE|RDW_ERASE|RDW_ALLCHILDREN);
     }
-    Row& find(int id) {for(auto& r:pages_[0].rows) if(r.id==id) return r;throw std::logic_error("Missing Power control");}
+    Row& find(int id) {for(auto& p:pages_) for(auto& r:p.rows) if(r.id==id) return r;throw std::logic_error("Missing control");}
     // CPU Power, GPU Power, Apply/Read and GPU Limits (live), as in the reference PowerTab. Returns the content height.
     int layoutPower(int width,int scroll,bool apply) {
         auto window=pages_[0].window;auto dc=GetDC(window);auto previous=SelectObject(dc,title_);
@@ -340,7 +358,7 @@ private:
         int x=ref(16),right=width-ref(16),left=x+ref(15),end=right-ref(15),y=ref(6)-scroll,slider=std::max(ref(30),ref(8)+line),box=line+ref(4),pad=ref(6);
         int noteLeft=left+ref(3)+pad,wrap=std::max(ref(60),std::min(ref(600)-2*pad,end-noteLeft-pad));
         bool cpu=!(state_.contains("cpu") && state_["cpu"].is_null()),gpu=!(state_.contains("gpu") && state_["gpu"].is_null());
-        std::vector<std::pair<RECT,const wchar_t*>> frames;std::vector<PowerText> texts;
+        std::vector<std::pair<RECT,const wchar_t*>> frames;std::vector<Text> texts;
         auto put=[&](HWND child,bool shown,int cx,int cy,int w,int h){if(!apply) return;ShowWindow(child,shown?SW_SHOW:SW_HIDE);if(shown) place(child,cx,cy,w,h);};
         auto open=[&](const wchar_t* title){frames.push_back({{x,y,right,0},title});y+=titleHeight+ref(11);};
         auto close=[&]{y+=ref(13);frames.back().first.bottom=y;y+=ref(12);};
@@ -375,27 +393,128 @@ private:
         }
         SelectObject(dc,previous);ReleaseDC(window,dc);
         if(apply) {
-            powerFrames_=std::move(frames);powerText_=std::move(texts);liveOrigin_={left,liveTop};
+            pages_[0].frames=std::move(frames);pages_[0].texts=std::move(texts);liveTable_={left,liveTop,width,liveTop+8*(ref(6)+line)};
             if(liveTop<0) for(UINT_PTR i=1;i<=std::size(liveTips);++i) {TOOLINFOW tool{sizeof tool};tool.hwnd=window;tool.uId=i;SendMessageW(tooltip_,TTM_NEWTOOLRECTW,0,reinterpret_cast<LPARAM>(&tool));}
         }
         return y+scroll+ref(6);
     }
-    void paintPower(HDC target,const RECT& area) {
-        RECT rc{};GetClientRect(pages_[0].window,&rc);if(rc.right<=0 || rc.bottom<=0) return;
-        auto dc=CreateCompatibleDC(target);auto bitmap=CreateCompatibleBitmap(target,rc.right,rc.bottom);auto oldBitmap=SelectObject(dc,bitmap);
-        FillRect(dc,&rc,GetSysColorBrush(COLOR_BTNFACE));SetBkMode(dc,TRANSPARENT);
+    // Fan Boost, Fan Switch Speed, Custom Fan Curve and, while Link Fans runs, the curves it writes, as in the
+    // reference FanTab. Returns the content height.
+    int layoutFans(int width,int scroll,bool apply) {
+        auto window=pages_[1].window;auto dc=GetDC(window);auto previous=SelectObject(dc,title_);
+        TEXTMETRICW metrics{};GetTextMetricsW(dc,&metrics);int titleHeight=metrics.tmHeight;SelectObject(dc,font_);GetTextMetricsW(dc,&metrics);int line=metrics.tmHeight;
+        auto extent=[&](HFONT font,const std::wstring& s){SelectObject(dc,font);SIZE size{};GetTextExtentPoint32W(dc,s.c_str(),int(s.size()),&size);return int(size.cx);};
+        int x=ref(16),right=width-ref(16),left=x+ref(15),end=right-ref(15),y=ref(6)-scroll,slider=std::max(ref(30),ref(8)+line),box=ref(28),button=ref(32),chart=ref(320),pad=ref(6);
+        bool fans=state_.value("enabled",std::set<std::string>{}).contains("fanControl"),supported=state_.value("curvesSupported",false),hasGpu=state_.value("hasGpuFan",false);
+        bool linkable=state_.value("linkAvailable",false),linked=supported && linkable && state_.value("linked",false);
+        std::vector<std::pair<RECT,const wchar_t*>> frames;std::vector<Text> texts;RECT bar{};
+        auto put=[&](HWND child,bool shown,int cx,int cy,int w,int h){if(!apply) return;ShowWindow(child,shown?SW_SHOW:SW_HIDE);if(shown) place(child,cx,cy,w,h);};
+        auto open=[&](const wchar_t* title){frames.push_back({{x,y,right,0},title});y+=titleHeight+ref(11);};
+        auto close=[&]{y+=ref(13);frames.back().first.bottom=y;y+=ref(12);};
+        auto check=[&](int id){return extent(bold_,text(get(id)))+ref(38);}; // The reference sizes check boxes to their bold text.
+        // The CPU and GPU curves share the width, with a small gap between them.
+        auto charts=[&](int cpu,int gpu,int from,int to,bool shown) {
+            int half=(to-from)/2;put(get(cpu),shown,from,y,(hasGpu?half:to-from)-ref(4),chart);put(get(gpu),shown && hasGpu,from+half+ref(4),y,to-from-half-ref(4),chart);
+        };
+        open(L"Fan Boost");int boost=check(boostId);
+        put(get(boostId),true,left,y+ref(6),boost,box);put(get(boostApplyId),true,left+boost+ref(16),y,ref(110),button);y+=ref(34);
+        close();frames.back().first.right=left+boost+ref(141); // This section fits its contents, not the page.
+        open(L"Fan Switch Speed");put(get(switchId),true,left,y+ref(4),check(switchId),box);y+=ref(35);
+        auto& speed=find(switchMsId);int from=left+ref(3),to=end-ref(3),label=extent(bold_,text(speed.label))+2*pad,value=extent(font_,L"12700 ms")+2*pad,track=from+label+ref(8);
+        put(speed.label,true,from+pad,y+ref(8),label-pad,line);put(speed.control,true,track,y,to-value-ref(8)-track,slider);put(speed.number,true,to-value+pad,y+ref(8),value-pad,line);
+        y+=slider+ref(9);put(get(switchApplyId),true,left,y,ref(110),button);y+=button;close();
+        open(L"Custom Fan Curve");int curve=check(curveId),link=check(linkId);
+        put(get(curveId),true,left,y+ref(4),curve,box);put(get(linkId),linkable,left+curve+ref(24),y+ref(4),link,box);
+        if(linked) bar={left+curve+link+ref(48),y+ref(2),end,y+ref(31)};
+        y+=ref(39);charts(cpuChartId,gpuChartId,left,end,supported);
+        if(supported) y+=chart+ref(6);
+        else {
+            auto warning=fans?L"Fan curve editing is not available (format: "+w(state_.value("fanFormat",std::string{}))+L"). Only fan boost and curve enable are supported."
+                :std::wstring(L"Fan controls disabled — register validation failed. See log for details.");
+            RECT r{left+pad,y+ref(6),end-pad,y+ref(6)};SelectObject(dc,bold_);DrawTextW(dc,warning.c_str(),-1,&r,DT_CALCRECT|DT_WORDBREAK|DT_NOPREFIX);r.right=end-pad;
+            texts.push_back({r,warning,fans?warnColor:errorColor,true});y+=ref(94);
+        }
+        y+=ref(3);put(get(fanApplyId),true,left+ref(3),y+ref(6),ref(110),button);put(get(fanReadId),true,left+ref(123),y+ref(6),ref(140),button);
+        int footer=ref(6)+button;
+        if(supported) {
+            RECT r{left+ref(273)+pad,y+ref(14),end,y+ref(14)};SelectObject(dc,font_);DrawTextW(dc,fanValidation_.c_str(),-1,&r,DT_CALCRECT|DT_NOPREFIX);
+            texts.push_back({r,fanValidation_,fanValidation_==L"Valid"?okColor:errorColor});footer=std::max(footer,int(r.bottom)-y+ref(1));
+        }
+        y+=footer+ref(3);close();
+        if(linked) {open(L"Fan Curves Written to EC (Live)");y+=ref(3);charts(debugCpuId,debugGpuId,left-ref(3),end+ref(3),true);y+=chart+ref(3);close();}
+        else charts(debugCpuId,debugGpuId,0,0,false);
+        SelectObject(dc,previous);ReleaseDC(window,dc);
+        if(apply) {pages_[1].frames=std::move(frames);pages_[1].texts=std::move(texts);linkedBar_=bar;}
+        return y+scroll+ref(6);
+    }
+    // GPU Thermal Failsafe and its Status, as in the reference FailsafeTab. Returns the content height.
+    int layoutThermal(int width,int scroll,bool apply) {
+        auto window=pages_[2].window;auto dc=GetDC(window);auto previous=SelectObject(dc,title_);
+        TEXTMETRICW metrics{};GetTextMetricsW(dc,&metrics);int titleHeight=metrics.tmHeight;SelectObject(dc,font_);GetTextMetricsW(dc,&metrics);int line=metrics.tmHeight;
+        auto extent=[&](HFONT font,const std::wstring& s){SelectObject(dc,font);SIZE size{};GetTextExtentPoint32W(dc,s.c_str(),int(s.size()),&size);return int(size.cx);};
+        int x=ref(16),right=width-ref(16),left=x+ref(15),end=right-ref(15),y=ref(6)-scroll,slider=std::max(ref(30),ref(8)+line),box=line+ref(4),button=ref(32),pad=ref(6);
+        COLORREF gray=GetSysColor(COLOR_GRAYTEXT),black=GetSysColor(COLOR_BTNTEXT);
+        std::vector<std::pair<RECT,const wchar_t*>> frames;std::vector<Text> texts;RECT live{};
+        auto put=[&](HWND child,int cx,int cy,int w,int h){if(apply) place(child,cx,cy,w,h);};
+        auto open=[&](const wchar_t* title){frames.push_back({{x,y,right,0},title});y+=titleHeight+ref(11);};
+        auto close=[&]{y+=ref(13);frames.back().first.bottom=y;y+=ref(12);};
+        // Text wrapped from 'from' to the section's edge. Returns its bottom.
+        auto paragraph=[&](const std::wstring& s,int from,int top,COLORREF color,bool bold) {
+            RECT r{from,top,end-pad,top};SelectObject(dc,bold?bold_:font_);DrawTextW(dc,s.c_str(),-1,&r,DT_CALCRECT|DT_WORDBREAK|DT_NOPREFIX);r.right=end-pad;
+            texts.push_back({r,s,color,bold});return int(r.bottom);
+        };
+        auto note=[&](const std::wstring& s){y=paragraph(s,left+pad,y+ref(3),gray,false)+ref(3);};
+        auto check=[&](int id,HFONT font){y+=ref(6);put(get(id),left,y,std::min(extent(font,text(get(id)))+ref(40),end-left),box);y+=box;};
+        open(L"GPU Thermal Failsafe");note(thermalDescription);check(protectionId,bold_);
+        auto& trigger=find(thresholdId);int label=extent(bold_,text(trigger.label))+2*pad,value=extent(font_,L"00 °C")+2*pad,track=left+label+ref(8);y+=ref(6);
+        put(trigger.label,left+pad,y+ref(8),label-pad,line);put(trigger.control,track,y,end-value-ref(8)-track,slider);put(trigger.number,end-value+pad,y+ref(8),value-pad,line);y+=slider;
+        for(int id:{reduceId,fanBoostId,showWindowId}) check(id,font_);
+        y+=ref(3);note(thermalText_[0]);
+        y+=ref(6);put(get(protectionApplyId),left,y,ref(110),button);
+        paragraph(thermalText_[1],left+ref(120)+pad,y+(button-line)/2,thermalText_[1]==L"Settings match saved profile"?gray:warnColor,false);y+=button+ref(3);
+        note(L"Applies to the current profile. Apply takes effect now; use the profile bar's Save button to keep these settings.");
+        put(get(detailsId),left+pad,y+ref(3),extent(font_,L"Safety details and limitations")+ref(4),line);y+=line+ref(6);
+        if(thermalDetails_) note(thermalDetails);
+        close();
+        open(L"Status");
+        const wchar_t* captions[]{L"State:",L"GPU temperature (EC):",L"Peak since armed:",L"Last trip:",L"Configuration:"};
+        int column=0;for(auto c:captions) column=std::max(column,extent(bold_,c));column+=left+pad+ref(16);
+        auto row=[&](int i,const std::wstring& s,COLORREF color,bool bold) {
+            int top=y+ref(3);texts.push_back({{left+pad,top,column,top+line},captions[i],black,true});
+            y=(s.empty()?top+line:std::max(top+line,paragraph(s,column,top,color,bold)))+ref(3);
+        };
+        bool enabled=state_.value("protection",Json::object()).value("enabled",false);
+        row(0,thermalText_[2],tripped_?errorColor:!enabled?gray:state_.value("temperature",Json(nullptr)).is_null()?warnColor:okColor,tripped_);
+        live={column,y,end-pad,0};row(1,L"",black,false);row(2,L"",black,false);live.bottom=y; // Readings are painted as they arrive.
+        row(3,thermalText_[3],black,false);
+        if(!thermalText_[4].empty()) row(4,thermalText_[4],warnColor,false);
+        y+=ref(6);put(get(resetId),left,y,ref(110),button);put(get(testId),left+ref(120),y,ref(140),button);y+=button;close();
+        SelectObject(dc,previous);ReleaseDC(window,dc);
+        if(apply) {pages_[2].frames=std::move(frames);pages_[2].texts=std::move(texts);thermalLive_=live;}
+        return y+scroll+ref(6);
+    }
+    void paintPage(int index,HDC target,const RECT& area) {
+        auto& p=pages_[index];int width=area.right-area.left,height=area.bottom-area.top;if(width<=0 || height<=0) return;
+        // Readings repaint small areas often, so the buffer covers only the area being painted.
+        auto dc=CreateCompatibleDC(target);auto bitmap=CreateCompatibleBitmap(target,width,height);auto oldBitmap=SelectObject(dc,bitmap);SetViewportOrgEx(dc,-area.left,-area.top,nullptr);
+        FillRect(dc,&area,GetSysColorBrush(COLOR_BTNFACE));SetBkMode(dc,TRANSPARENT);
         auto pen=CreatePen(PS_SOLID,1,frameColor);auto oldPen=SelectObject(dc,pen);auto oldFont=SelectObject(dc,title_);SetTextColor(dc,GetSysColor(COLOR_BTNTEXT));
-        for(auto& [r,title]:powerFrames_) {
+        for(auto& [r,title]:p.frames) {
             // A thin frame whose top edge stops either side of the bold title.
             int n=int(wcslen(title));SIZE size{};GetTextExtentPoint32W(dc,title,n,&size);int titleX=r.left+ref(10),middle=r.top+ref(2)+size.cy/2;
             // The reference measured the title with GDI's default padding, hence the wider gap after it.
             POINT edge[]{{titleX-ref(2),middle},{r.left,middle},{r.left,r.bottom-1},{r.right-1,r.bottom-1},{r.right-1,middle},{titleX+size.cx+ref(15),middle}};
             Polyline(dc,edge,6);TextOutW(dc,titleX,r.top+ref(2),title,n);
         }
-        SelectObject(dc,font_);
-        for(auto& t:powerText_) {SetTextColor(dc,t.color);RECT r=t.rect;DrawTextW(dc,t.text.c_str(),-1,&r,DT_WORDBREAK|DT_NOPREFIX);}
-        if(liveOrigin_.y>=0) paintLive(dc);
-        BitBlt(target,area.left,area.top,area.right-area.left,area.bottom-area.top,dc,area.left,area.top,SRCCOPY);
+        for(auto& t:p.texts) {SelectObject(dc,t.bold?bold_:font_);SetTextColor(dc,t.color);RECT r=t.rect;DrawTextW(dc,t.text.c_str(),-1,&r,DT_WORDBREAK|DT_NOPREFIX);}
+        if(index==0 && liveTable_.top>=0) paintLive(dc);
+        if(index==1 && linkedBar_.right>linkedBar_.left) paintLinkedStatus(dc,linkedBar_,state_.value("linkedStatus",Json::object()),dpi_);
+        // The failsafe's GPU temperature and peak repaint on their own as readings arrive.
+        if(index==2) {
+            SelectObject(dc,font_);SetTextColor(dc,GetSysColor(COLOR_BTNTEXT));int pitch=(thermalLive_.bottom-thermalLive_.top)/2;
+            for(int i:{0,1}) TextOutW(dc,thermalLive_.left,thermalLive_.top+ref(3)+i*pitch,thermalText_[5+i].c_str(),int(thermalText_[5+i].size()));
+        }
+        BitBlt(target,area.left,area.top,width,height,dc,area.left,area.top,SRCCOPY);
         SelectObject(dc,oldFont);SelectObject(dc,oldPen);DeleteObject(pen);SelectObject(dc,oldBitmap);DeleteObject(bitmap);DeleteDC(dc);
     }
     // Each limit next to the clock: its setting, reading, share of the setting and the clock cap of the driver
@@ -440,11 +559,11 @@ private:
         auto part=[](int r){return r==3 || r==4;};
         auto font=[&](int r,int i){return i==0 && !part(r)?bold_:font_;};
         auto extent=[&](int r,int i){SelectObject(dc,font(r,i));SIZE size{};GetTextExtentPoint32W(dc,cells[r][i].text.c_str(),int(cells[r][i].text.size()),&size);return int(size.cx);};
-        std::array<int,5> column{};int next=liveOrigin_.x;
+        std::array<int,5> column{};int next=liveTable_.left;
         for(int i=0;i<5;++i) {int widest=0;for(int r=0;r<8;++r) widest=std::max(widest,extent(r,i)+(i==0 && part(r)?gap:0));column[i]=next+(i?gap:0)+pad;next=column[i]+widest+pad;}
         for(int r=0;r<8;++r) for(int i=0;i<5;++i) {
             auto& cell=cells[r][i];if(cell.text.empty()) continue;
-            int cx=column[i]+(i==0 && part(r)?gap:0),cy=liveOrigin_.y+r*height+ref(6);if(r==5 && i==4) cy+=(2*height-ref(6)-line)/2;
+            int cx=column[i]+(i==0 && part(r)?gap:0),cy=liveTable_.top+r*height+ref(6);if(r==5 && i==4) cy+=(2*height-ref(6)-line)/2;
             SelectObject(dc,font(r,i));SetTextColor(dc,cell.color);TextOutW(dc,cx,cy,cell.text.c_str(),int(cell.text.size()));
             if(r==0 || i==0) {TOOLINFOW tool{sizeof tool};tool.hwnd=pages_[0].window;tool.uId=r==0?i:r+4;tool.rect={cx,cy,cx+extent(r,i),cy+line};SendMessageW(tooltip_,TTM_NEWTOOLRECTW,0,reinterpret_cast<LPARAM>(&tool));}
         }
@@ -469,9 +588,9 @@ private:
             :live_.contains("telemetryError")?L"NVIDIA readback failed: "+w(live_["telemetryError"].get<std::string>()):L"";
         auto dlppc=dlppcTip(g.is_object()?g.value("dlppc",Json(nullptr)):Json(nullptr));
         if(dlppc!=dlppcTip_) {dlppcTip_=std::move(dlppc);tip(reinterpret_cast<UINT_PTR>(get(dlppcId)),dlppcTip_,TTF_IDISHWND,TTM_UPDATETIPTEXTW);}
-        // Text that changes the layout relays out the page; live readings only repaint it.
+        // Text that changes the layout relays out the page; live readings only repaint the table.
         auto key=cpuNote_+L'\n'+gpuNote_+L'\n'+powerHint_+L'\n'+liveReason_+L'\n'+text(get(unlockId));
-        if(key!=powerKey_) {powerKey_=std::move(key);layoutPage(pages_[0]);} else InvalidateRect(pages_[0].window,nullptr,FALSE);
+        if(key!=powerKey_) {powerKey_=std::move(key);layoutPage(pages_[0]);} else InvalidateRect(pages_[0].window,&liveTable_,FALSE);
     }
     void showRow(int page,int id,bool shown) {for(auto& r:pages_[page].rows) if(r.id==id && r.shown!=shown) {r.shown=shown;layoutPage(pages_[page]);break;}}
     // The reference MainForm: the profile bar, the tabs and the monitor bar fill the window edge to edge.
@@ -490,7 +609,7 @@ private:
     int layoutBar(int width,int bottom) {
         auto dc=GetDC(window_);auto previous=SelectObject(dc,bold_);TEXTMETRICW metrics{};GetTextMetricsW(dc,&metrics);
         int line=metrics.tmHeight,pitch=line+ref(2),pad=line/6,left=1+ref(4),right=width-1-ref(4),x=left,y=1+ref(6),lowest=y+pitch+line;
-        std::vector<BarText> texts;auto gray=GetSysColor(COLOR_GRAYTEXT);
+        std::vector<Text> texts;auto gray=GetSysColor(COLOR_GRAYTEXT);
         auto put=[&](const std::wstring& s,bool bold,COLORREF color,int margin) {
             // The reference measured its labels slightly wider than GDI does, hence the extra space after each.
             SelectObject(dc,bold?bold_:font_);SIZE size{};GetTextExtentPoint32W(dc,s.c_str(),int(s.size()),&size);int space=2*(margin+pad)+ref(3);
@@ -498,7 +617,7 @@ private:
             RECT r{x+margin+pad,y,right,y+line};
             // Only a long status can be wider than the bar; it wraps on its own lines.
             if(x+size.cx+space>right) {r.right-=margin+pad;DrawTextW(dc,s.c_str(),-1,&r,DT_CALCRECT|DT_WORDBREAK|DT_NOPREFIX);}
-            texts.push_back({r,s,bold,color});x+=size.cx+space;lowest=std::max(lowest,int(r.bottom));
+            texts.push_back({r,s,color,bold});x+=size.cx+space;lowest=std::max(lowest,int(r.bottom));
         };
         for(size_t i=0;i<monitor_.size();++i) {put(monitor_[i],true,GetSysColor(COLOR_BTNTEXT),ref(2));if(i+1<monitor_.size() || !status_.empty()) put(L"|",true,gray,0);}
         if(!status_.empty()) put(status_,false,gray,ref(2));
@@ -538,10 +657,10 @@ private:
         }
     }
     void reveal(HWND child) {
-        if(auto& power=pages_[0];GetParent(child)==power.window) {
-            RECT rc{},r{};GetClientRect(power.window,&rc);GetWindowRect(child,&r);MapWindowPoints(nullptr,power.window,reinterpret_cast<POINT*>(&r),2);
-            if(r.top<0) power.scroll+=r.top;else if(r.bottom>rc.bottom) power.scroll+=r.bottom-rc.bottom;else return;
-            layoutPage(power);return;
+        for(auto* sections:{&pages_[0],&pages_[1],&pages_[2]}) if(GetParent(child)==sections->window) {
+            RECT rc{},r{};GetClientRect(sections->window,&rc);GetWindowRect(child,&r);MapWindowPoints(nullptr,sections->window,reinterpret_cast<POINT*>(&r),2);
+            if(r.top<0) sections->scroll+=r.top;else if(r.bottom>rc.bottom) sections->scroll+=r.bottom-rc.bottom;else return;
+            layoutPage(*sections);return;
         }
         for(auto& p:pages_) for(auto& r:p.rows) if(r.control==child || r.number==child) {
             RECT rc{};GetClientRect(p.window,&rc);int top=scale(r.y+10),bottom=top+scale(r.height);
@@ -557,8 +676,10 @@ private:
     }
     bool checked(int id) const {return SendMessageW(get(id),BM_GETCHECK,0,0)==BST_CHECKED;}
     void checked(int id,bool value) {if(!edited_.contains(id)) SendMessageW(get(id),BM_SETCHECK,value?BST_CHECKED:BST_UNCHECKED,0);}
+    // Power, fan switch and failsafe trigger values are slider positions; the other sliders have an edit box.
+    static bool positional(int id) {return (id>=pl1Id && id<=inputId) || id==switchMsId || id==thresholdId;}
     int number(int id) {
-        if(id>=pl1Id && id<=inputId) return int(SendMessageW(get(id),TBM_GETPOS,0,0)); // Power values are slider positions.
+        if(positional(id)) return int(SendMessageW(get(id),TBM_GETPOS,0,0));
         auto value=utf8(text(get(id+1000)));int n=0;auto [end,error]=std::from_chars(value.data(),value.data()+value.size(),n);
         if(value.empty() || error!=std::errc{} || end!=value.data()+value.size()) throw std::runtime_error("Enter a whole number");
         int lo=int(SendMessageW(get(id),TBM_GETRANGEMIN,0,0)),hi=int(SendMessageW(get(id),TBM_GETRANGEMAX,0,0));
@@ -567,8 +688,8 @@ private:
     void value(int id,int v,int lo,int hi) {
         auto slider=get(id);
         if(SendMessageW(slider,TBM_GETRANGEMIN,0,0)!=lo || SendMessageW(slider,TBM_GETRANGEMAX,0,0)!=hi) {
-            bool power=id>=pl1Id && id<=inputId;SendMessageW(slider,TBM_SETRANGEMIN,FALSE,lo);SendMessageW(slider,TBM_SETRANGEMAX,!power,hi);
-            if(power) {int tick=std::max(1,(hi-lo)/10);SendMessageW(slider,TBM_SETTICFREQ,tick,0);SendMessageW(slider,TBM_SETPAGESIZE,0,tick);InvalidateRect(slider,nullptr,TRUE);}
+            bool ticks=positional(id);SendMessageW(slider,TBM_SETRANGEMIN,FALSE,lo);SendMessageW(slider,TBM_SETRANGEMAX,!ticks,hi);
+            if(ticks) {int tick=std::max(1,(hi-lo)/10);SendMessageW(slider,TBM_SETTICFREQ,tick,0);SendMessageW(slider,TBM_SETPAGESIZE,0,tick);InvalidateRect(slider,nullptr,TRUE);}
         }
         if(!edited_.contains(id)) {SendMessageW(slider,TBM_SETPOS,TRUE,v);set(id+1000,display(id,v));}
     }
@@ -576,9 +697,10 @@ private:
     // limit, which some BIOSes define in fractional amps.
     int milliamps(int id,int position) const {int step=id==inputId?1:1000;auto i=detectedMa_.find(id);return i!=detectedMa_.end() && position==i->second/step?i->second:position*step;}
     std::wstring display(int id,int v) const {
-        if(id==tempId) return std::to_wstring(v)+L" °C";
+        if(id==tempId || id==thresholdId) return std::to_wstring(v)+L" °C";
         if(id>=nvId && id<=inputId) return compact(milliamps(id,v)/1000.0)+L" A";
         if(id>=pl1Id && id<=dbId) return std::to_wstring(v)+L" W";
+        if(id==switchMsId) return std::to_wstring(v*100)+L" ms";
         return std::to_wstring(v);
     }
     void enable(int id,bool on) {EnableWindow(get(id),on);if(get(id+1000)) EnableWindow(get(id+1000),on);}
@@ -586,7 +708,7 @@ private:
     void busy(bool on) {busy_=on;for(auto& p:pages_) EnableWindow(p.window,!on);for(int id:std::array<int,8>{saveId,defaultsId,readId,slotId,slotId+1,slotId+2,slotId+3,slotId+4}) EnableWindow(get(id),!on);ShowWindow(progress_,on?SW_SHOW:SW_HIDE);SendMessageW(progress_,PBM_SETMARQUEE,on,60);}
     void request(ControlCommand command) {
         if(busy_) return;
-        operation_=command;operationPage_=TabCtrl_GetCurSel(tabs_);
+        operation_=command;
         busy(true);busySequence_=++sequence_;setStatus(L"Working… device operations may take a few seconds.");worker_->request(std::move(command),busySequence_);
     }
     void setStatus(const std::wstring& value) {status_=value;updateBar();}
@@ -657,7 +779,7 @@ private:
         if(busy_ || !worker_) return;
         switch(id) {
         case saveId: {SlotSave save{target_?target_:1};save.editor_fan=fanIntent();if(coolerAvailable_ && std::any_of(edited_.begin(),edited_.end(),[](int id){return id>=coolerFanOnId && id<=coolerRgbApplyId;})) save.editor_cooler=coolerIntent();request(std::move(save));break;}
-        case readId:case powerReadId:read();break;case defaultsId:defaults();break;
+        case readId:case powerReadId:case fanReadId:read();break;case defaultsId:defaults();break;
         case powerApplyId:applyPower();break;
         case dbOnId:edited_.insert(id);enable(dbId,checked(id));break;
         case unlockId: {
@@ -668,7 +790,8 @@ private:
         case boostId:edited_.insert(id);hints();break;
         case boostApplyId:edited_.erase(boostId);request(FanBoost{checked(boostId)});break;
         case linkId: {auto s=fanIntent();s.curve=true;updating_=true;SendMessageW(get(curveId),BM_SETCHECK,BST_CHECKED,0);updating_=false;eraseEdits(curveId,gpuChartId);request(FanApply{s});break;}
-        case switchApplyId:eraseEdits(switchMsId,switchMsId);request(SwitchApply{checked(switchId),number(switchMsId)});break;
+        case switchId:edited_.insert(id);EnableWindow(get(switchMsId),checked(id));break; // The speed moves only while enabled, as in the reference.
+        case switchApplyId:eraseEdits(switchId,switchMsId);request(SwitchApply{checked(switchId),number(switchMsId)*100});break;
         case fanApplyId: {
             if(!state_.value("curvesSupported",false)) {request(FanMaster{checked(curveId)});break;}
             auto s=fanIntent();
@@ -677,7 +800,6 @@ private:
         case protectionApplyId:request(ProtectionApply{protectionIntent()});break;
         case resetId:if(confirm(L"Check cooling, then reset the failsafe and reapply the active profile's power and fan settings?",L"Reset Thermal Failsafe")) request(ThermalReset{});break;
         case testId: {auto applied=state_.at("protection").get<ProtectionSettings>();auto description=actions(applied)+L"\n\nThis really applies emergency settings and latches protection. ";if(Json(protectionIntent())!=Json(applied)) description+=L"Unapplied control changes are NOT part of this test. ";description+=L"Continue?";if(confirm(description.c_str(),L"Test Failsafe")) request(ThermalTest{applied});break;}
-        case detailsId:showRow(2,detailsTextId,!IsWindowVisible(get(detailsTextId)));break;
         case batteryApplyId:edited_.erase(batteryModeId);request(BatteryApply{int(SendMessageW(get(batteryModeId),CB_GETCURSEL,0,0))});break;
         case lightingReadId:eraseEdits(zoneBaseId,dimmingId);request(UiRead{4});break;
         case idleId:if(code==CBN_SELCHANGE) {const int seconds[]{0,10,30,60,120,300,600};request(LightingIdle{seconds[SendMessageW(get(id),CB_GETCURSEL,0,0)]});}break;
@@ -701,10 +823,6 @@ private:
         }
         hints();
     }
-    Json fanShape(FanSettings s) {
-        auto normalize=[](std::optional<Curve>& c) {if(c && !c->temp_up.empty()) c=active_curve(*c,int(c->temp_up.size()));};normalize(s.cpu_curve);normalize(s.gpu_curve);
-        return {{"curve",s.curve},{"linked",s.linked},{"cpu",nullable(s.cpu_curve)},{"gpu",state_.value("hasGpuFan",false)?nullable(s.gpu_curve):Json(nullptr)}};
-    }
     std::wstring actions(const ProtectionSettings& p) const {
         auto limits=state_.value("actionLimits",Json::object());int supported=state_.value("thermalActions",0);
         std::wstring s=L"On trip: ";
@@ -717,20 +835,61 @@ private:
     }
     void hints() {
         if(!ready_ || !IsWindowVisible(window_)) return;int page=TabCtrl_GetCurSel(tabs_);
-        try {
-            if(page==1 && state_.contains("fan")) {
-                auto editor=fanShape(fanIntent()),applied=fanShape(state_["fan"].get<FanSettings>());bool dirty=editor!=applied;
-                auto saved=state_.value("saved",Json(nullptr));bool matches=!saved.is_null() && !saved["fan"].is_null() && editor==fanShape(saved["fan"].get<FanSettings>());
-                auto status=dirty?L"Changes not applied":state_.value("fanApplication",0)==1?L"Requested curves applied":state_.value("fanApplication",0)==2?L"Partial application — review before saving":L"Requested curves not applied/verified";
-                set(fanTextId,std::wstring(status)+L"\r\n"+(matches?L"Editor curves match saved profile":L"Editor curves not saved to profile")+L"; linked: "+(state_.value("linked",false)?L"yes":L"no")+(state_.value("fanReview",false)?L"\r\nGeneric seed: review and Apply before saving":L"")+outcome_[1]);
+        if(page==1 && state_.contains("fan")) refreshFans();
+        if(page==2 && state_.contains("protection")) refreshThermal();
+    }
+    // The reference's failsafe texts: the pending actions, the Apply/Save state, the protection state, the last trip,
+    // configuration warnings and the readings. A changed text relays out the page; new readings only repaint theirs.
+    void refreshThermal() {
+        auto applied=state_["protection"],saved=state_.value("saved",Json(nullptr)),history=state_.value("thermal",Json::object());auto pending=protectionIntent();
+        std::wstring hint=Json(pending)!=applied?L"Changes not applied":saved.is_null()?L"No saved profile loaded":saved.value("gpuFailsafe",Json(nullptr))!=applied?L"Applied - not saved to profile":L"Settings match saved profile";
+        auto trip=history.value("LastTrip",Json(nullptr));auto reason=trip.is_object()?w(trip.value("Reason",std::string{})):std::wstring(L"Saved protection state uncertain");
+        auto state=w(state_.value("thermalStatus",std::string{}));
+        if(tripped_) {
+            std::wstring held;int holds=history.value("Held",0);auto protection=applied.get<ProtectionSettings>();
+            for(auto [action,name]:{std::pair(Gpu,L"GPU"),std::pair(Fan,L"fan boost"),std::pair(Cpu,L"CPU")}) if(holds&action) held+=(held.empty()?L"":L", ")+std::wstring(name);
+            state+=L"\nHeld actions: "+held+L". "+reason+w(history.value("RecoveryDetails",std::string{}))+L"\nStop workloads if protection is incomplete. To restore normal settings, Reset"
+                +(protection.enabled?L" (the GPU average must be below the "+std::to_wstring(protection.threshold)+L"°C trigger)":L"")+L" or load a profile that matches your cooling.";
+        }
+        // Unknown optional values are null. Temperatures show one decimal at most.
+        auto degrees=[](const Json& v){return v.is_number()?compact(std::round(v.get<double>()*10)/10)+L"°C":std::wstring(L"--");};
+        std::wstring last=L"--";
+        if(trip.is_object()) {
+            auto field=[&](const char* key){return trip.value(key,Json(nullptr));};
+            last=(field("Time").is_string()?localTime(field("Time").get<std::string>()):L"Time unavailable")+L": "+reason;
+            if(field("TemperatureC").is_number()) last+=L"\nGPU "+degrees(field("TemperatureC"))+L"; threshold "+degrees(field("ThresholdC"))+L".";
+            last+=L"\n"+w(trip.value("ActionDescription",std::string{}));
+            auto outcomes=trip.value("Results",Json::object());std::wstring list;
+            for(auto& [key,outcome]:outcomes.items()) list+=(list.empty()?L"":L"; ")+w(key)+L": "+(outcome.is_string()?w(outcome.get<std::string>()):L"--");
+            if(!list.empty()) last+=L"\n"+list;
+        }
+        auto reading=[&](const char* key){return degrees(state_.value(key,Json(nullptr)));};
+        auto now=reading("temperature"),average=reading("average");if(now!=L"--" && average!=L"--") now+=L" (5 s average "+average+L")";
+        std::array<std::wstring,7> texts{actions(pending),hint,state,last,w(warning_),now,reading("peak")};
+        bool relayout=!std::equal(texts.begin(),texts.begin()+5,thermalText_.begin()),repaint=texts!=thermalText_;thermalText_=std::move(texts);
+        if(relayout) layoutPage(pages_[2]);else if(repaint) InvalidateRect(pages_[2].window,&thermalLive_,FALSE);
+    }
+    // The reference's curve checks under the curves: "Valid", or one line per problem.
+    std::wstring fanValidation() {
+        std::wstring errors;bool curves=false;
+        for(auto [id,name]:{std::pair(cpuChartId,L"CPU: "),std::pair(gpuChartId,L"GPU: ")}) {
+            if(!IsWindowEnabled(get(id))) continue;Curve c;SendMessageW(get(id),chartGetMessage,0,reinterpret_cast<LPARAM>(&c));curves=true;
+            auto add=[&](const std::wstring& s){errors+=(errors.empty()?L"":L"\n")+(name+s);};
+            auto n=[](int v){return std::to_wstring(v);};
+            if(!c.duty.empty() && c.duty[0]/2) add(L"Point 0: duty must be 0% (EC rejects table if duty[0] != 0), got "+n(c.duty[0]/2)+L"%");
+            for(size_t i=0;i+1<c.temp_up.size();++i) {
+                auto point=L"Point "+n(int(i));
+                if(c.temp_up[i]+4>c.temp_up[i+1]) add(point+L": tempUp ("+n(c.temp_up[i])+L") must be at least 4°C below point "+n(int(i+1))+L" tempUp ("+n(c.temp_up[i+1])+L")");
+                if(c.duty[i]/2>c.duty[i+1]/2) add(point+L": duty ("+n(c.duty[i]/2)+L"%) must be <= point "+n(int(i+1))+L" duty ("+n(c.duty[i+1]/2)+L"%)");
             }
-            if(page==2 && state_.contains("protection")) {
-                auto applied=state_["protection"],pending=Json(protectionIntent()),saved=state_.value("saved",Json(nullptr));bool dirty=pending!=applied;
-                std::wstring status=dirty?L"Changes not applied. ":L"";
-                status+=saved.is_null()?L"No saved profile loaded":saved["gpuFailsafe"]==applied?L"Applied settings match saved profile":L"Applied settings not saved to profile";
-                set(thermalHintId,status+outcome_[2]);set(previewId,actions(pending.get<ProtectionSettings>()));
-            }
-        } catch(const std::exception& e) {set(page==1?fanTextId:thermalHintId,L"Pending editor values are invalid: "+w(e.what()));}
+        }
+        return !curves?L"":errors.empty()?L"Valid":errors;
+    }
+    // Sections and validation text change the layout; the linked status only repaints its bar.
+    void refreshFans() {
+        fanValidation_=fanValidation();bool fans=state_.value("enabled",std::set<std::string>{}).contains("fanControl");
+        auto key=fanValidation_+L'\n'+std::to_wstring(state_.value("linked",false)+2*state_.value("curvesSupported",false)+4*state_.value("hasGpuFan",false)+8*state_.value("linkAvailable",false)+16*fans);
+        if(key!=fanKey_) {fanKey_=std::move(key);layoutPage(pages_[1]);} else InvalidateRect(pages_[1].window,&linkedBar_,FALSE);
     }
     void chart(int id,const Json& value,bool readOnly,bool linear,int dutyBase) {
         ChartOptions options{readOnly,linear,dutyBase};auto bound=boundCharts_.find(id);
@@ -750,21 +909,20 @@ private:
             enable(dbId,gpu && checked(dbOnId));powerRead_=false;enable(powerApplyId,cpu || gpu);refreshPower();
         }
         if(page==1 && state_.contains("fan")) {
-            auto f=state_["fan"].get<FanSettings>();bool supported=state_.value("curvesSupported",false),hasGpu=state_.value("hasGpuFan",false);
+            auto f=state_["fan"].get<FanSettings>();bool fans=features.contains("fanControl"),supported=state_.value("curvesSupported",false),hasGpu=state_.value("hasGpuFan",false);
             checked(curveId,f.curve);checked(linkId,linked);enable(cpuChartId,supported && f.cpu_curve && !f.cpu_curve->temp_up.empty());enable(gpuChartId,supported && hasGpu && f.gpu_curve && !f.gpu_curve->temp_up.empty());
-            enable(linkId,state_.value("linkAvailable",false));for(int id:{curveId,fanApplyId}) enable(id,features.contains("fanControl") && !linked);
-            for(int id:{boostId,boostApplyId,switchId,switchMsId,switchApplyId}) enable(id,features.contains("fanControl"));
+            // Link Fans owns the table writes, so the reference locks the curve switch, Apply and Read while it runs.
+            enable(linkId,state_.value("linkAvailable",false));for(int id:{curveId,fanApplyId,fanReadId}) enable(id,fans && !linked);
+            for(int id:{boostId,boostApplyId,switchId,switchApplyId}) enable(id,fans);
             if(!edited_.contains(cpuChartId)) chart(cpuChartId,supported?nullable(f.cpu_curve):Json(nullptr),false,linked,state_.value("dutyBaseCpu",0));
             if(!edited_.contains(gpuChartId)) chart(gpuChartId,supported && hasGpu?nullable(f.gpu_curve):Json(nullptr),false,linked,state_.value("dutyBaseGpu",0));
-            showRow(1,gpuChartId,hasGpu);showRow(1,debugCpuId,linked);showRow(1,debugGpuId,linked && hasGpu);
-            if(linked) for(auto [id,key,base]:{std::tuple(debugCpuId,"writtenCpu","dutyBaseCpu"),std::tuple(debugGpuId,"writtenGpu","dutyBaseGpu")}) {auto value=state_.value(key,Json(nullptr));EnableWindow(get(id),TRUE);chart(id,value,true,true,state_.value(base,0));}
-            if(state_.contains("boost")) checked(boostId,state_["boost"]);if(state_.contains("switchEnabled")) checked(switchId,state_["switchEnabled"]);if(state_.contains("switchMs")) value(switchMsId,std::max(100,state_["switchMs"].get<int>()),100,12700);
+            if(linked) for(auto [id,key,base]:{std::tuple(debugCpuId,"writtenCpu","dutyBaseCpu"),std::tuple(debugGpuId,"writtenGpu","dutyBaseGpu")}) chart(id,state_.value(key,Json(nullptr)),true,true,state_.value(base,0));
+            if(state_.contains("boost")) checked(boostId,state_["boost"]);if(state_.contains("switchEnabled")) checked(switchId,state_["switchEnabled"]);if(state_.contains("switchMs")) value(switchMsId,std::clamp(state_["switchMs"].get<int>()/100,1,127),1,127);
+            EnableWindow(get(switchMsId),fans && checked(switchId));
         }
         if(page==2 && state_.contains("protection")) {
             auto p=state_["protection"].get<ProtectionSettings>();checked(protectionId,p.enabled);value(thresholdId,p.threshold,50,95);checked(reduceId,p.reduce_cpu);checked(fanBoostId,p.fan_boost);checked(showWindowId,p.show_window);
             int a=state_.value("thermalActions",0);for(int id:{protectionId,thresholdId,protectionApplyId,showWindowId}) enable(id,(a&Gpu)!=0);enable(testId,(a&Gpu)!=0 && !tripped_);enable(resetId,tripped_);enable(reduceId,(a&Cpu)!=0);enable(fanBoostId,(a&Fan)!=0);
-            set(thermalTextId,w(state_.value("thermalStatus",std::string{}))+L"\r\nCurrent GPU temperature: "+describe(state_["temperature"])+L"Mean: "+describe(state_["average"])+L"Peak: "+describe(state_["peak"])+w(warning_));
-            auto history=state_.value("thermal",Json(nullptr));if(history!=boundHistory_) {boundHistory_=history;set(historyId,L"Historical state (not current hardware verification):\r\n"+describe(history));}
         }
         if(page==3) {for(int id:{batteryModeId,batteryApplyId}) enable(id,features.contains("battery"));if(state_.contains("batteryMode") && !edited_.contains(batteryModeId)) SendMessageW(get(batteryModeId),CB_SETCURSEL,state_["batteryMode"].get<int>(),0);}
         if(page==5) updateInfo();
@@ -895,8 +1053,6 @@ private:
                     if(p.contains("plan") && own) {applyPlan(p["plan"]);continue;}
                 }
                 if(own && (!r.peripherals || !r.peripherals->contains("ui"))) {
-                    bool catalog=operation_ && (std::holds_alternative<SlotSave>(*operation_) || std::holds_alternative<SlotRename>(*operation_) || std::holds_alternative<SlotClear>(*operation_));
-                    if(!catalog) outcome_[operationPage_]=L"\r\nLast action: "+result.text+(r.partial?L" [partial; review readback]":r.applied?L" [applied]":L"");
                     if(operation_ && (std::holds_alternative<SlotSave>(*operation_) || std::holds_alternative<SlotLoad>(*operation_))) {if(r.code || r.partial) configurationWarning_=r.text;else configurationWarning_.clear();}
                     if(!r.code && operation_ && std::holds_alternative<ProtectionApply>(*operation_)) eraseEdits(protectionId,showWindowId);
                     if(!r.code && operation_ && (std::holds_alternative<ThermalReset>(*operation_) || std::holds_alternative<SlotLoad>(*operation_) || std::holds_alternative<DefaultsApply>(*operation_))) {edited_.clear();boundPages_[1]=false;boundCharts_.clear();}
@@ -986,13 +1142,17 @@ private:
         case WM_DRAWITEM:drawButton(*reinterpret_cast<DRAWITEMSTRUCT*>(lp));return TRUE;
         case WM_GETMINMAXINFO:reinterpret_cast<MINMAXINFO*>(lp)->ptMinTrackSize={scale(760),scale(480)};return 0;
         case WM_DPICHANGED: {dpi_=HIWORD(wp);auto r=reinterpret_cast<RECT*>(lp);SetWindowPos(window_,nullptr,r->left,r->top,r->right-r->left,r->bottom-r->top,SWP_NOZORDER|SWP_NOACTIVATE);applyDpi();return 0;}
-        case WM_NOTIFY:if(reinterpret_cast<NMHDR*>(lp)->idFrom==tabsId && reinterpret_cast<NMHDR*>(lp)->code==TCN_SELCHANGE) selectPage();return 0;
+        case WM_NOTIFY: {
+            auto n=reinterpret_cast<NMHDR*>(lp);if(n->idFrom==tabsId && n->code==TCN_SELCHANGE) selectPage();
+            if(n->idFrom==detailsId && (n->code==NM_CLICK || n->code==NM_RETURN)) {thermalDetails_=!thermalDetails_;layoutPage(pages_[2]);}
+            return 0;
+        }
         case WM_MOUSEWHEEL:scroll(pages_[TabCtrl_GetCurSel(tabs_)].window,message,wp);return 0;
         case WM_HSCROLL:if(!updating_ && lp) {int id=GetDlgCtrlID(reinterpret_cast<HWND>(lp));if(id>=200 && id<1000) {updating_=true;set(id+1000,display(id,int(SendMessageW(reinterpret_cast<HWND>(lp),TBM_GETPOS,0,0))));updating_=false;edited_.insert(id);hints();}}return 0;
         case WM_COMMAND:command(LOWORD(wp),HIWORD(wp));return 0;
         case WM_CONTEXTMENU: {int id=GetDlgCtrlID(reinterpret_cast<HWND>(wp));if(id>=slotId && id<slotId+5) {POINT p{GET_X_LPARAM(lp),GET_Y_LPARAM(lp)};if(p.x==-1) {RECT r{};GetWindowRect(get(id),&r);p={r.left,r.bottom};}slotMenu(id-slotId+1,p);}return 0;}
         case resultMessage:results();return 0;
-        case fanEditMessage:fanEditQueued_=false;if(worker_ && state_.value("linked",false)) {auto intent=fanIntent();worker_->request(FanEdit{intent});state_["fan"]=intent;state_["fanApplication"]=0;hints();}return 0;
+        case fanEditMessage:fanEditQueued_=false;if(worker_ && state_.value("linked",false)) {auto intent=fanIntent();worker_->request(FanEdit{intent});state_["fan"]=intent;hints();}return 0;
         case trayMessage:if(LOWORD(lp)==WM_CONTEXTMENU) menu();else if(LOWORD(lp)==NIN_SELECT || LOWORD(lp)==NIN_KEYSELECT) show();return 0;
         case WM_POWERBROADCAST:
             if(worker_ && wp==PBT_APMPOWERSTATUSCHANGE) {SYSTEM_POWER_STATUS s{};if(GetSystemPowerStatus(&s) && s.ACLineStatus!=255) worker_->request(AcEvent{s.ACLineStatus==1});}
@@ -1005,14 +1165,14 @@ private:
         return DefWindowProcW(window_,message,wp,lp);
     }
     HINSTANCE instance_;HWND window_=nullptr,tabs_=nullptr,progress_=nullptr,alert_=nullptr,alertText_=nullptr;
-    HWND tooltip_=nullptr,hot_=nullptr;RECT bar_{};std::vector<BarText> barText_;std::wstring status_;
+    HWND tooltip_=nullptr,hot_=nullptr;RECT bar_{},linkedBar_{},thermalLive_{};std::vector<Text> barText_;std::wstring status_,fanValidation_,fanKey_;std::array<std::wstring,7> thermalText_;bool thermalDetails_=false;
     std::array<std::wstring,6> monitor_{L"CPU Fan: --",L"GPU Fan: --",L"CPU Temp Limit: --",L"Battery: --",L"Fan Boost: --",L"Fan Curve: --"};HFONT font_=nullptr,bold_=nullptr,title_=nullptr;UINT dpi_=96,taskbarMessage_=0;
-    std::vector<std::pair<RECT,const wchar_t*>> powerFrames_;std::vector<PowerText> powerText_;POINT liveOrigin_{0,-1};std::map<int,int> detectedMa_;
+    RECT liveTable_{0,-1,0,-1};std::map<int,int> detectedMa_;
     std::wstring cpuNote_,gpuNote_,powerHint_,liveReason_,powerKey_,dlppcTip_;std::array<Page,7> pages_;std::map<int,HWND> controls_;std::set<int> edited_;
     std::array<HICON,5> slotIcons_{};std::vector<HICON> animation_;size_t animationFrame_=0;int trayState_=-3,lostAlerts_=0;bool closing_=false,trayAdded_=false,updating_=false,busy_=false,ready_=false,tripped_=false,coolerConnected_=false,coolerAvailable_=false,fanEditQueued_=false,powerRead_=false;
     int target_=0;std::uint64_t sequence_=0,busySequence_=0;ULONGLONG lastError_=0;
-    Json state_=Json::object(),peripheralState_=Json::object(),identity_,gpuTelemetry_,live_,gpuBudget_,boundHistory_,devices_=Json::array();std::map<int,std::pair<Json,ChartOptions>> boundCharts_;std::array<bool,7> boundPages_{};std::array<std::wstring,7> outcome_;
-    std::string warning_,configurationWarning_;std::wstring gpuError_;std::optional<CpuSettings> pendingCpu_;std::optional<Sensors> lastSensors_;std::optional<ControlCommand> operation_;int operationPage_=0;
+    Json state_=Json::object(),peripheralState_=Json::object(),identity_,gpuTelemetry_,live_,gpuBudget_,devices_=Json::array();std::map<int,std::pair<Json,ChartOptions>> boundCharts_;std::array<bool,7> boundPages_{};
+    std::string warning_,configurationWarning_;std::wstring gpuError_;std::optional<CpuSettings> pendingCpu_;std::optional<Sensors> lastSensors_;std::optional<ControlCommand> operation_;
     Log log_;std::shared_ptr<Delivery> delivery_;WorkerOptions workerOptions_;std::unique_ptr<ControlWorker> worker_;
 #ifdef MECHCONTROL_WITH_CLI
     std::unique_ptr<CliServer> cli_;
@@ -1040,7 +1200,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int) {
         Handle singleton(CreateMutexW(nullptr,TRUE,L"Global\\MechControl"));if(!singleton) throw std::runtime_error("Cannot acquire Global\\MechControl");if(GetLastError()==ERROR_ALREADY_EXISTS) return 0;
 #endif
         winrt::init_apartment(winrt::apartment_type::single_threaded);struct Apartment {~Apartment(){winrt::uninit_apartment();}} apartment;
-        INITCOMMONCONTROLSEX cc{sizeof cc,ICC_TAB_CLASSES|ICC_BAR_CLASSES|ICC_PROGRESS_CLASS};if(!InitCommonControlsEx(&cc)) throw std::runtime_error("Cannot initialize native controls");registerFanChart(instance);
+        INITCOMMONCONTROLSEX cc{sizeof cc,ICC_TAB_CLASSES|ICC_BAR_CLASSES|ICC_PROGRESS_CLASS|ICC_LINK_CLASS};if(!InitCommonControlsEx(&cc)) throw std::runtime_error("Cannot initialize native controls");registerFanChart(instance);
         WNDCLASSW type{};type.hInstance=instance;type.lpfnWndProc=Application::procedure;type.lpszClassName=mainClass;type.hCursor=LoadCursorW(nullptr,IDC_ARROW);type.hIcon=LoadIconW(nullptr,IDI_APPLICATION);type.hbrBackground=GetSysColorBrush(COLOR_BTNFACE);if(!RegisterClassW(&type)) throw std::runtime_error("Cannot register main window");
 #ifdef MECHCONTROL_PAGE_CHECK
         Application app(instance,ui_page_options(checks,fixture));
