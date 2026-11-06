@@ -1,0 +1,20 @@
+CPU TempUp  [0xF00]:   15  24  43  54  64  71  78  86  93 101 255 255 255 255 255 255
+CPU TempDn  [0xF10]:    0  18  37  48  58  65  72  80  87  95 255 255 255 255 255 255
+CPU Duty    [0xF20]:    2   2   2   2  24  46  72 108 150 198 180 180 180 180 180 180
+GPU TempUp  [0xF30]:   13  24  33  42  57  65  70  75  80  86 255 255 255 255 255 255
+GPU TempDn  [0xF40]:    0  18  27  36  51  59  64  69  74  80 255 255 255 255 255 255
+GPU Duty    [0xF50]:    2   2   2   2   2 130 146 160 178 200 180 180 180 180 180 180
+
+Handshake1       [0x709]: 0x05 (5)
+Handshake2       [0x708]: 0x01 (1)
+Activation       [0x741]: 0x01 (1)
+FeatureEn        [0x748]: 0x81 (129)
+FanCtrlMode      [0x751]: 0x00 (0)
+FanCurveEn       [0x7C5]: 0xE0 (224)
+FanCurveMode     [0x7C6]: 0x04 (4)
+FanCurveParam    [0x7C7]: 0x0C (12)
+BIOS_CTRL        [0x706]: 0x41 (65)
+CpuDuty          [0x75B]: 0x39 (57)
+GpuDuty          [0x75C]: 0x00 (0)
+PL1              [0x783]: 0xD2 (210)
+PL2              [0x784]: 0xD2 (210)

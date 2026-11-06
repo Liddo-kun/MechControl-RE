@@ -1,0 +1,187 @@
+Enabling SeSystemEnvironmentPrivilege...
+Privilege enabled: True (LastError=0)
+Enumerating UEFI variables...
+Enumerate pass 1: status=0xC0000023, bufLen=5172
+Enumerate pass 2: status=0x00000000
+Found 106 variables
+=== ALL UEFI VARIABLES (106 total) ===
+
+GUID: {bb983ccf-151d-40e1-a07b-4a17be168292}  (1 vars)
+  MemoryOverwriteRequestControlLock  [1 bytes] = 00 
+
+GUID: {e20939be-32d4-41be-a150-897f85d49829}  (1 vars)
+  MemoryOverwriteRequestControl  [1 bytes] = 11 
+
+GUID: {8be4df61-93ca-11d2-aa0d-00e098032b8c}  (29 vars)
+  ConOut
+  ConIn
+  KEK
+  PK
+  HwErrRecSupport
+  ErrOut
+  Boot0000
+  BootOrder
+  Boot0002
+  Boot0003
+  Boot0004
+  PlatformLang
+  Timeout
+  AuditMode
+  DeployedMode
+  SetupMode  [1 bytes] = 00 
+  SecureBoot
+  SignatureSupport
+  VendorKeys
+  dbxDefault
+  dbDefault
+  KEKDefault
+  PKDefault
+  OsIndicationsSupported
+  ConOutDev
+  ConInDev
+  BootOptionSupport
+  PlatformLangCodes
+  BootCurrent
+
+GUID: {0c923ca9-df73-4ac8-b6d2-98ddc30d99fc}  (6 vars)
+  UefiDevOrder
+  FBOSetupGroupMap  [14 bytes] = 1E 00 1D 00 21 00 15 00 1F 00 16 00 22 00 
+  OriUefiDevOrder
+  DefaultUefiDevOrder
+  OldBootOrder
+  FixedBootGroup
+
+GUID: {77fa9abd-0359-4d32-bd60-28f4e78f784b}  (2 vars)
+  CurrentPolicy
+  OfflineMemoryDumpUseCapability  [1 bytes] = 00 
+
+GUID: {97e8965f-c761-4f48-b6e4-9ffa9cb2a2d6}  (1 vars)
+  DeploymentModeNv
+
+GUID: {01368881-c4ad-4b1d-b631-d57a8ec8db6b}  (1 vars)
+  MonotonicCounter
+
+GUID: {ec87d643-eba4-4bb5-a1e5-3f3e36b20da9}  (2 vars)
+  InitSetupVariable  [1 bytes] = 01 
+  TbtSetupVolatileData  [6 bytes] = 00 02 01 01 00 00 
+
+GUID: {9f33f85c-13ca-4fd1-9c4a-96217722c593}  (5 vars)
+  OemMagicDoor  [1 bytes] = 01 
+  OemLightbarPresent  [1 bytes] = 01 
+  OemLightbarReset  [1 bytes] = 00 
+  OemEdpReset  [1 bytes] = 00 
+  OemMagicVariable  [180 bytes] = 05 1D 00 50 00 00 1A 18 00 01 00 00 00 01 0A 1A 00 01 04 00 00 00 00 08 03 01 07 16 08 00 16 1A 00 01 04 00 00 00 00 08 03 01 01 64 08 00 00 01 FF FF FF 00 00 00 00 00 00 00 00 00 00 00 00 00 ...
+
+GUID: {d719b2cb-3d3a-4596-a3bc-dad00e67656f}  (2 vars)
+  db
+  dbx
+
+GUID: {7d3dceee-cbce-4ea7-8709-6e552f1edbde}  (3 vars)
+  TPMPERBIOSFLAGS  [6 bytes] = 01 01 00 00 68 00 
+  SIDSUPPORT
+  TpmServFlags  [8 bytes] = 18 FD D3 61 00 00 00 00 
+
+GUID: {a8a2093b-fefa-43c1-8e62-ce526847265e}  (1 vars)
+  AMITCGPPIVAR
+
+GUID: {92daaf2f-c02b-455b-b2ec-f5a3594f4aea}  (13 vars)
+  SPLC
+  WAND
+  WRDD
+  WRDS
+  EWRD
+  WGDS
+  SADS
+  GPC
+  WPFC
+  WCSC
+  UefiCnvWlanSarGeoOffsetMapping  [339 bytes] = 01 00 00 02 02 00 00 00 00 00 20 02 01 20 12 10 02 22 00 00 01 01 10 01 00 00 00 20 00 00 20 02 10 00 01 10 00 00 00 22 00 00 02 00 00 02 00 01 00 00 00 00 20 00 01 02 01 00 00 00 00 00 02 02 ...
+  UefiCnvWlanMPCC
+  UefiCnvWlanWBEM
+
+GUID: {42780dd5-9a7d-404c-80e4-7f7094360394}  (5 vars)
+  BRDS
+  SADS
+  GPC
+  IntelUefiCnvBtBiQuadFilterBypass
+  IntelUefiCnvBtPpagSupport
+
+GUID: {e65d8884-d4af-4b20-8d03-772ecc3da531}  (2 vars)
+  IntelUefiCnvWwanSkuSupport
+  UefiCnvCommonDSBR
+
+GUID: {1c3483d5-1e7e-4450-9806-dede002c974b}  (1 vars)
+  TpvSetup  [11 bytes] = 00 03 00 00 B0 C9 61 00 00 00 00 
+
+GUID: {89ed4fc1-4234-47bc-9081-7a6510a5e8a9}  (1 vars)
+  RmtRun
+
+GUID: {ea1fcaee-3a77-4bb8-9b98-518e75d29a99}  (1 vars)
+  MotherBoardHealth
+
+GUID: {d3f67d1d-f71f-4cae-812c-b487d03384f5}  (1 vars)
+  IntelVmdOsVariableV2
+
+GUID: {4b3082a3-80c6-4d7e-9cd0-583917265df1}  (5 vars)
+  SmbiosEntryPointTable
+  SmbiosEntryPointTableF000
+  SmbiosV3EntryPointTable
+  SmbiosScratchBuffer
+  MaximumTableSize
+
+GUID: {45cf35f6-0d6e-4d04-856a-0370a5b16f53}  (1 vars)
+  DefaultBootOrder
+
+GUID: {de8ab926-efda-4c23-bbc4-98fd29aa0069}  (1 vars)
+  FixedBoot
+
+GUID: {4db88a62-6721-47a0-9082-280b00323594}  (1 vars)
+  FPLayoutOrder
+
+GUID: {8542c05d-78f1-4229-bf5c-798e44a0bfc9}  (1 vars)
+  TcssTbtRetimer
+
+GUID: {eaec226f-c9a3-477a-a826-ddc716cdc0e3}  (3 vars)
+  UnlockIDCopy
+  OfflineUniqueIDEKPub
+  OfflineUniqueIDEKPubCRC
+
+GUID: {eb41d646-f49f-4655-9165-21d1224e3932}  (1 vars)
+  AmiEmaIndications
+
+GUID: {fe47349a-7f0d-4641-822b-34baa28ecdd0}  (2 vars)
+  UIT_HEADER
+  UIT_DATA
+
+GUID: {b540a530-6978-4da7-91cb-7207d764d262}  (3 vars)
+  FastBootOption
+  LastBootFailed
+  LastBoot
+
+GUID: {a9b5f8d2-cb6d-42c2-bc01-b5ffaae4335e}  (1 vars)
+  PBRDevicePath
+
+GUID: {9d0da369-540b-46f8-85a0-2b5f2c301e15}  (1 vars)
+  EfiTime
+
+GUID: {ba57e015-65b3-4c3c-b274-659192f699e3}  (3 vars)
+  BugCheckProgress
+  BugCheckCode
+  BugCheckParameter1
+
+GUID: {7b59104a-c00d-4158-87ff-f04d6396a915}  (1 vars)
+  AuthVarPreBootPhase
+
+GUID: {5bd6b672-b6ea-4d6a-b590-18a932b78794}  (1 vars)
+  BootMediaInfo
+
+GUID: {b08f97ff-e6e8-4193-a997-5e9e9b0adb32}  (1 vars)
+  CpuSetupVolatileData  [9 bytes] = 60 06 0C 00 02 00 00 00 20 
+
+GUID: {7a09bc55-83e8-4d4d-93b0-89d80eedb720}  (1 vars)
+  PCIEPowerControl  [4 bytes] = 35 00 00 00 
+
+GUID: {1b838190-4625-4ead-abc9-cd5e6af18fe0}  (1 vars)
+  HiiDB
+
+Done.

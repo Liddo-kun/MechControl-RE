@@ -1,0 +1,85 @@
+Enabling SeSystemEnvironmentPrivilege...
+Privilege: OK
+
+OemMagicDoor  [1 bytes]:
+  0000: 01 
+
+OemLightbarPresent  [1 bytes]:
+  0000: 01 
+
+OemLightbarReset  [1 bytes]:
+  0000: 00 
+
+OemEdpReset  [1 bytes]:
+  0000: 00 
+
+OemMagicVariable  [180 bytes]:
+  0000: 05 1D 00 50 00 00 1A 18 00 01 00 00 00 01 0A 1A 
+  0010: 00 01 04 00 00 00 00 08 03 01 07 16 08 00 16 1A 
+  0020: 00 01 04 00 00 00 00 08 03 01 01 64 08 00 00 03 
+  0030: FF FF FF 01 00 00 00 00 00 00 00 00 00 00 00 00 
+  0040: 00 00 00 18 00 00 00 00 00 00 00 00 00 00 00 00 
+  0050: 00 00 00 00 00 00 00 00 00 00 00 00 00 01 00 00 
+  0060: 01 01 04 00 00 00 02 00 74 02 EC 10 FF 01 01 01 
+  0070: FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF 
+  0080: FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF 
+  0090: FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF 
+  00A0: FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF 
+  00B0: FF FF FF 00 
+
+TpvSetup  [11 bytes]:
+  0000: 00 03 00 00 B0 C9 61 00 00 00 00 
+
+=== NVRAM_STRUCT Decode (packed, estimated offsets) ===
+
+  [0x00] OemBoardSsid = 0x50001D05 (1342184709)
+  [0x04] SupportByte = 0x0 (0)
+  [0x06] ProjectID = 0x1A (26)
+  [0x07] KeyboardType = 0x18 (24)
+  [0x08] CustomerList = 0x0 (0)
+  [0x09] RGBLightbarMode = 0x1 (1)
+  [0x0A] RGBLightbarMode_R = 0x0 (0)
+  [0x0B] RGBLightbarMode_G = 0x0 (0)
+  [0x0C] RGBLightbarMode_B = 0x0 (0)
+  [0x0D] ColorCalibrationSupport = 0x1 (1)
+  [0x0E] TDRdata = 0xA (10)
+  [0x0F] RGBKeyboard1A = 1A 00 01 04 00 00 00 00 
+  [0x17] RGBKeyboard08 = 08 03 01 07 16 08 00 16 
+  [0x1F] SmartLightbar1A = 1A 00 01 04 00 00 00 00 
+  [0x27] SmartLightbar08 = 08 03 01 01 64 08 00 00 
+  [0x2F] PowerMode = 0x3 (3)
+  [0x30] BatteryLimitation = 0xFF (255)
+  [0x31] ChargeMaximumLimit = 0xFF (255)
+  [0x32] ChargeMinimumLimit = 0xFF (255)
+  [0x33] MemoryOverClockSwitch = 0x1 (1)
+  [0x34] ICpuCoreVoltageValue = 0x0 (0)
+  [0x36] ICpuCoreVoltageMaximum = 0x0 (0)
+  [0x38] ICpuCoreVoltageMinimum = 0x0 (0)
+  [0x3A] ICpuCoreVoltageOffsetValue = 0x0 (0)
+  [0x3C] ICpuCoreVoltageOffsetMaximum = 0x0 (0)
+  [0x3E] ICpuCoreVoltageOffsetMinimum = 0x0 (0)
+  [0x40] ICpuTauValue = 0x0 (0)
+  [0x42] ACpuOverClockSupport = 0x0 (0)
+  [0x43] APVersionCheck = 0x18 (24)
+  [0x44] ACpuFreqValue = 0x0 (0)
+  [0x48] ACpuFreqValueMaximum = 0x0 (0)
+  [0x4C] ACpuFreqValueMinimum = 0x0 (0)
+  [0x50] ACpuVoltageValue = 0x0 (0)
+  [0x54] ACpuVoltageValueMaximum = 0x0 (0)
+  [0x58] ACpuVoltageValueMinimum = 0x0 (0)
+  [0x5C] OverClockRecoveryFlag = 0x0 (0)
+  [0x5D] *** ApExistFlag *** = 0x1 (1)
+  [0x5E] ACRecoverySupport = 0x0 (0)
+  [0x5F] ACRecoveryStatus = 0x0 (0)
+  [0x60] MemoryOverClockSupport = 0x1 (1)
+  [0x61] *** ApUseFlag *** = 0x1 (1)
+  [0x62] OemDisplayMode = 0x4 (4)
+  [0x63] ICpuCoreVoltageOffsetNegativeValue = 0x0 (0)
+  [0x65] ICpuCoreVoltageOffsetRangeType = 0x0 (0)
+  [0x66] FnKeyStatus = 0x2 (2)
+  [0x67] AudioCodecID = 0xEC027400 (3959583744)
+  [0x6B] PowerPhase = 0x10 (16)
+  [0x6C] ICpuCoreVoltageOffsetSupport = 0xFF (255)
+  [0x6D] CPUPerformanceAndOverClockMenuSupport = 0x1 (1)
+  [0x6E] CPUPerformanceAndOverClockMenuSwitch = 0x1 (1)
+  Remaining bytes from offset 0x6F: 69

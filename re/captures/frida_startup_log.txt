@@ -1,0 +1,573 @@
+[+000.000s] Starting GCUBridge service...
+[+000.002s] Polling for GCUService.exe process...
+[+001.353s] Found GCUService.exe PID=8328 (after 1.353s)
+[+001.353s] Attaching Frida...
+[+001.423s] Frida attached (after 1.423s)
+[+001.425s] Loading hook script...
+[+001.426s] [setup] [OK] CreateFileW
+[+001.426s] [setup] [OK] NtDeviceIoControlFile
+[+001.426s] [setup] [WARN] hid.dll not loaded yet - HID hooks will activate when it loads
+[+001.426s] [setup] [OK] WriteFile (HID filter)
+[+001.426s] [setup] [OK] ReadFile (HID filter)
+[+001.426s] [setup] [INFO] dxva2.dll not loaded - DDC/CI not used by this process
+[+001.426s] [setup] [INFO] Local dimming likely goes through WMI->ACPI, not DDC/CI
+[+001.427s] [setup] [OK] CoCreateInstance (WMI detection)
+[+001.427s] [setup] [INFO] fastprox.dll loaded - WMI provider is in-process
+[+001.427s] [setup] [INFO] wbemprox.dll loaded
+[+001.427s] [setup] [READY] All hooks installed. Monitoring: EC, HID, DDC/CI, WMI.
+[+001.427s] [setup] [NOTE] WMI method calls (local dimming, etc.) go through COM to wmiprvse.exe.
+[+001.427s] [setup] [NOTE] If a feature produces NO hooks here, it uses WMI->ACPI (not in-process).
+[+001.427s] Hooks installed! Capturing all calls...
+[+001.427s] 
+[+001.427s] ============================================================
+[+001.427s] CAPTURING — press Ctrl+C to stop and save
+[+001.427s] ============================================================
+[+001.427s] 
+[+001.585s] [wmi] [12:16:36.847] CoCreateInstance(CLSID_WbemLocator) detected - WMI session
+[+001.624s] [ec_poll] [12:16:36.891] ECREAD addr=0x78E | in(4)=[8E 07 00 00] out(4)=[FC 00 00 00] ret=0
+[+001.637s] [ec] [12:16:36.907] ECREAD addr=0x740(PROJECT_ID) | in(4)=[40 07 00 00] out(4)=[1A 00 00 00] ret=0
+[+001.656s] [wmi] [12:16:36.923] CoCreateInstance(CLSID_WbemLocator) detected - WMI session
+[+001.713s] [wmi] [12:16:36.971] CoCreateInstance(CLSID_WbemLocator) detected - WMI session
+[+001.745s] [ec_poll] [12:16:37.003] ECREAD addr=0x78E | in(4)=[8E 07 00 00] out(4)=[FC 00 00 00] ret=0
+[+001.765s] [ec] [12:16:37.035] ECREAD addr=0x740(PROJECT_ID) | in(4)=[40 07 00 00] out(4)=[1A 00 00 00] ret=0
+[+001.781s] [wmi] [12:16:37.051] CoCreateInstance(CLSID_WbemLocator) detected - WMI session
+[+001.802s] [wmi] [12:16:37.067] CoCreateInstance(CLSID_WbemLocator) detected - WMI session
+[+001.818s] [wmi] [12:16:37.085] CoCreateInstance(CLSID_WbemLocator) detected - WMI session
+[+004.436s] [setup] [MODULE] Loaded: System.Configuration.ni.dll at 0x7ffdabce0000
+[+004.436s] [setup] [MODULE] Loaded: clrcompression.dll at 0x7ffdb89a0000
+[+004.436s] [setup] [MODULE] Loaded: wldp.dll at 0x7ffdd8bd0000
+[+004.436s] [setup] [MODULE] Loaded: System.Runtime.Serialization.ni.dll at 0x7ffda46f0000
+[+007.003s] [ec] [12:16:42.263] ECREAD addr=0x740(PROJECT_ID) | in(4)=[40 07 00 00] out(4)=[1A 00 00 00] ret=0
+[+007.024s] [ec] [12:16:42.294] ECREAD addr=0x7D2 | in(4)=[D2 07 00 00] out(4)=[1B 00 00 00] ret=0
+[+007.042s] [ec] [12:16:42.310] ECWRITE addr=0x709 val=0x5(5) | in(8)=[09 07 00 00 05 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+007.119s] [ec] [12:16:42.389] ECWRITE addr=0x708 val=0x1(1) | in(8)=[08 07 00 00 01 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+007.135s] [ec] [12:16:42.405] ECREAD addr=0x708 | in(4)=[08 07 00 00] out(4)=[01 00 00 00] ret=0
+[+007.437s] [setup] [MODULE] Loaded: Comctl32.dll at 0x7ffdaa850000
+[+007.437s] [setup] [MODULE] Loaded: GPUInfoDLL.dll at 0x7ffd76000000
+[+007.437s] [setup] [MODULE] Loaded: msasn1.dll at 0x7ffdd8b60000
+[+007.437s] [setup] [MODULE] Loaded: cryptnet.dll at 0x7ffdc7820000
+[+007.437s] [setup] [MODULE] Loaded: nvapi64.dll at 0x7ffdba950000
+[+007.438s] [setup] [MODULE] Loaded: drvstore.dll at 0x7ffdc7480000
+[+007.438s] [setup] [MODULE] Loaded: devobj.dll at 0x7ffdd9050000
+[+007.438s] [setup] [MODULE] Loaded: SETUPAPI.dll at 0x7ffdda4d0000
+[+007.438s] [setup] [MODULE] Loaded: wintrust.dll at 0x7ffdd98a0000
+[+007.438s] [setup] [MODULE] Loaded: NvMessageBus.dll at 0x7ffdb9240000
+[+007.470s] [ec] [12:16:42.739] ECREAD addr=0xD48 | in(4)=[48 0D 00 00] out(4)=[FF 00 00 00] ret=0
+[+007.498s] [wmi] [12:16:42.765] CoCreateInstance(CLSID_WbemLocator) detected - WMI session
+[+007.545s] [ec_poll] [12:16:42.803] ECREAD addr=0x7CA | in(4)=[CA 07 00 00] out(4)=[01 00 00 00] ret=0
+[+007.564s] [ec_poll] [12:16:42.834] ECREAD addr=0x74C | in(4)=[4C 07 00 00] out(4)=[C6 00 00 00] ret=0
+[+007.580s] [ec_poll] [12:16:42.850] ECREAD addr=0x7CC | in(4)=[CC 07 00 00] out(4)=[81 00 00 00] ret=0
+[+007.603s] [ec_poll] [12:16:42.866] ECREAD addr=0x7CC | in(4)=[CC 07 00 00] out(4)=[81 00 00 00] ret=0
+[+010.441s] [setup] [MODULE] Loaded: netfxperf.dll at 0x7ffdb97e0000
+[+010.441s] [setup] [MODULE] Loaded: perfcounter.dll at 0x7ffd8cf50000
+[+010.441s] [setup] [MODULE] Loaded: CorperfmonExt.dll at 0x7ffdc6870000
+[+010.441s] [setup] [MODULE] Loaded: bitsperf.dll at 0x7ffdb8950000
+[+012.127s] [wmi] [12:16:47.397] CoCreateInstance(CLSID_WbemLocator) detected - WMI session
+[+012.248s] [wmi] [12:16:47.508] CoCreateInstance(CLSID_WbemLocator) detected - WMI session
+[+013.144s] [wmi] [12:16:48.412] CoCreateInstance(CLSID_WbemLocator) detected - WMI session
+[+013.219s] [wmi] [12:16:48.475] CoCreateInstance(CLSID_WbemLocator) detected - WMI session
+[+013.235s] [wmi] [12:16:48.491] CoCreateInstance(CLSID_WbemLocator) detected - WMI session
+[+013.249s] [ec_poll] [12:16:48.507] ECREAD addr=0x7CA | in(4)=[CA 07 00 00] out(4)=[01 00 00 00] ret=0
+[+013.268s] [ec_poll] [12:16:48.539] ECREAD addr=0x74C | in(4)=[4C 07 00 00] out(4)=[C6 00 00 00] ret=0
+[+013.336s] [ec_poll] [12:16:48.602] ECREAD addr=0x7CC | in(4)=[CC 07 00 00] out(4)=[81 00 00 00] ret=0
+[+013.443s] [setup] [MODULE] Loaded: BitsProxy.dll at 0x7ffd78a10000
+[+013.443s] [setup] [MODULE] Loaded: pdh.dll at 0x7ffda3120000
+[+013.443s] [setup] [MODULE] Loaded: cfgmgr32.dll at 0x7ffdd9080000
+[+013.443s] [setup] [MODULE] Loaded: rasman.dll at 0x7ffd69780000
+[+013.443s] [setup] [MODULE] Loaded: WINSPOOL.DRV at 0x7ffd9cec0000
+[+013.444s] [setup] [MODULE] Loaded: mswsock.dll at 0x7ffdd8830000
+[+013.444s] [setup] [MODULE] Loaded: UWDiskInfo.dll at 0x7ffd6eea0000
+[+013.728s] [ec] [12:16:48.984] ECREAD addr=0x740(PROJECT_ID) | in(4)=[40 07 00 00] out(4)=[1A 00 00 00] ret=0
+[+013.801s] [ec] [12:16:49.064] ECREAD addr=0x7A4 | in(4)=[A4 07 00 00] out(4)=[84 00 00 00] ret=0
+[+013.811s] [wmi] [12:16:49.080] CoCreateInstance(CLSID_WbemLocator) detected - WMI session
+[+013.826s] [ec] [12:16:49.096] ECREAD addr=0x47D | in(4)=[7D 04 00 00] out(4)=[00 00 00 00] ret=0
+[+013.827s] [wmi] [12:16:49.096] CoCreateInstance(CLSID_WbemLocator) detected - WMI session
+[+013.889s] [ec] [12:16:49.144] ECREAD addr=0x741 | in(4)=[41 07 00 00] out(4)=[04 00 00 00] ret=0
+[+013.905s] [ec] [12:16:49.176] ECWRITE addr=0x741 val=0x5(5) | in(8)=[41 07 00 00 05 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+013.922s] [ec] [12:16:49.192] ECREAD addr=0x740(PROJECT_ID) | in(4)=[40 07 00 00] out(4)=[1A 00 00 00] ret=0
+[+013.939s] [ec] [12:16:49.207] IOCTL_0x9C40A4A0 addr=0x0 | in(4)=[00 00 00 00] out(4)=[86 80 1C 7D] ret=0
+[+013.940s] [ec_poll] [12:16:49.207] ECREAD addr=0x7CA | in(4)=[CA 07 00 00] out(4)=[01 00 00 00] ret=0
+[+013.953s] [ec_poll] [12:16:49.223] ECREAD addr=0x74C | in(4)=[4C 07 00 00] out(4)=[C6 00 00 00] ret=0
+[+013.975s] [ec] [12:16:49.239] ECREAD addr=0x740(PROJECT_ID) | in(4)=[40 07 00 00] out(4)=[1A 00 00 00] ret=0
+[+014.021s] [ec_poll] [12:16:49.286] ECREAD addr=0x78E | in(4)=[8E 07 00 00] out(4)=[FC 00 00 00] ret=0
+[+014.032s] [ec] [12:16:49.302] ECREAD addr=0xD00 | in(4)=[00 0D 00 00] out(4)=[6C 00 00 00] ret=0
+[+014.048s] [ec] [12:16:49.318] ECREAD addr=0x78C(OEM2_TURBO) | in(4)=[8C 07 00 00] out(4)=[00 00 00 00] ret=0
+[+014.065s] [ec] [12:16:49.334] ECREAD addr=0xD4E | in(4)=[4E 0D 00 00] out(4)=[F4 00 00 00] ret=0
+[+014.080s] [ec] [12:16:49.350] ECREAD addr=0x7AB(LOGO_ONOFF) | in(4)=[AB 07 00 00] out(4)=[81 00 00 00] ret=0
+[+014.101s] [ec_poll] [12:16:49.367] ECREAD addr=0x7CA | in(4)=[CA 07 00 00] out(4)=[01 00 00 00] ret=0
+[+014.127s] [ec_poll] [12:16:49.397] ECREAD addr=0x74C | in(4)=[4C 07 00 00] out(4)=[C6 00 00 00] ret=0
+[+014.143s] [ec] [12:16:49.413] ECREAD addr=0x740(PROJECT_ID) | in(4)=[40 07 00 00] out(4)=[1A 00 00 00] ret=0
+[+014.159s] [ec_poll] [12:16:49.429] ECREAD addr=0x7CA | in(4)=[CA 07 00 00] out(4)=[01 00 00 00] ret=0
+[+014.174s] [ec_poll] [12:16:49.445] ECREAD addr=0x74C | in(4)=[4C 07 00 00] out(4)=[C6 00 00 00] ret=0
+[+014.190s] [wmi] [12:16:49.460] CoCreateInstance(CLSID_WbemLocator) detected - WMI session
+[+014.217s] [ec] [12:16:49.476] ECREAD addr=0x7A4 | in(4)=[A4 07 00 00] out(4)=[84 00 00 00] ret=0
+[+014.238s] [ec] [12:16:49.508] ECREAD addr=0x7C8 | in(4)=[C8 07 00 00] out(4)=[60 00 00 00] ret=0
+[+014.253s] [ec_poll] [12:16:49.524] ECREAD addr=0x78E | in(4)=[8E 07 00 00] out(4)=[FC 00 00 00] ret=0
+[+014.270s] [ec] [12:16:49.539] ECREAD addr=0x49F | in(4)=[9F 04 00 00] out(4)=[5A 00 00 00] ret=0
+[+014.285s] [ec] [12:16:49.555] ECREAD addr=0xD45 | in(4)=[45 0D 00 00] out(4)=[52 00 00 00] ret=0
+[+014.942s] [wmi] [12:16:50.208] CoCreateInstance(CLSID_WbemLocator) detected - WMI session
+[+015.027s] [wmi] [12:16:50.287] CoCreateInstance(CLSID_WbemLocator) detected - WMI session
+[+015.029s] [wmi] [12:16:50.287] CoCreateInstance(CLSID_WbemLocator) detected - WMI session
+[+015.318s] [ec_poll] [12:16:50.588] ECREAD addr=0x7CC | in(4)=[CC 07 00 00] out(4)=[81 00 00 00] ret=0
+[+015.335s] [ec] [12:16:50.604] IOCTL_0x9C40A4A0 addr=0x0 | in(4)=[00 00 00 00] out(4)=[86 80 1C 7D] ret=0
+[+015.340s] [ec_poll] [12:16:50.604] ECREAD addr=0x7CC | in(4)=[CC 07 00 00] out(4)=[81 00 00 00] ret=0
+[+015.351s] [wmi] [12:16:50.621] CoCreateInstance(CLSID_WbemLocator) detected - WMI session
+[+015.509s] [ec] [12:16:50.764] ECWRITE addr=0x709 val=0x5(5) | in(8)=[09 07 00 00 05 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+015.527s] [ec] [12:16:50.796] ECREAD addr=0x494 | in(4)=[94 04 00 00] out(4)=[00 00 00 00] ret=0
+[+015.542s] [ec] [12:16:50.812] ECREAD addr=0x494 | in(4)=[94 04 00 00] out(4)=[00 00 00 00] ret=0
+[+015.558s] [ec] [12:16:50.828] ECREAD addr=0x740(PROJECT_ID) | in(4)=[40 07 00 00] out(4)=[1A 00 00 00] ret=0
+[+015.574s] [ec] [12:16:50.844] ECREAD addr=0x740(PROJECT_ID) | in(4)=[40 07 00 00] out(4)=[1A 00 00 00] ret=0
+[+015.590s] [ec_poll] [12:16:50.860] ECREAD addr=0x7A6(BATT_MODE) | in(4)=[A6 07 00 00] out(4)=[08 00 00 00] ret=0
+[+015.605s] [ec] [12:16:50.876] ECWRITE addr=0x708 val=0x1(1) | in(8)=[08 07 00 00 01 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+015.622s] [ec] [12:16:50.892] ECREAD addr=0x708 | in(4)=[08 07 00 00] out(4)=[01 00 00 00] ret=0
+[+015.637s] [ec] [12:16:50.907] ECREAD addr=0x748 | in(4)=[48 07 00 00] out(4)=[81 00 00 00] ret=0
+[+015.652s] [ec] [12:16:50.923] ECWRITE addr=0x748 val=0x81(129) | in(8)=[48 07 00 00 81 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+015.669s] [ec] [12:16:50.939] ECWRITE addr=0x7A6(BATT_MODE) val=0x28(40) | in(8)=[A6 07 00 00 28 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+015.685s] [ec] [12:16:50.955] ECREAD addr=0x748 | in(4)=[48 07 00 00] out(4)=[81 00 00 00] ret=0
+[+015.700s] [ec] [12:16:50.971] ECWRITE addr=0x748 val=0x81(129) | in(8)=[48 07 00 00 81 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+015.717s] [ec_poll] [12:16:50.986] ECREAD addr=0x766 | in(4)=[66 07 00 00] out(4)=[93 00 00 00] ret=0
+[+015.732s] [ec] [12:16:51.002] ECWRITE addr=0x766 val=0x93(147) | in(8)=[66 07 00 00 93 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+015.748s] [ec] [12:16:51.018] ECREAD addr=0x748 | in(4)=[48 07 00 00] out(4)=[81 00 00 00] ret=0
+[+015.763s] [ec] [12:16:51.033] ECWRITE addr=0x748 val=0x81(129) | in(8)=[48 07 00 00 81 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+015.780s] [ec] [12:16:51.049] ECWRITE addr=0x749 val=0x0(0) | in(8)=[49 07 00 00 00 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+015.795s] [ec] [12:16:51.065] ECREAD addr=0x767(TRIGGER) | in(4)=[67 07 00 00] out(4)=[00 00 00 00] ret=0
+[+015.811s] [ec] [12:16:51.081] ECWRITE addr=0x767(TRIGGER) val=0x0(0) | in(8)=[67 07 00 00 00 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+015.828s] [ec] [12:16:51.097] ECREAD addr=0x740(PROJECT_ID) | in(4)=[40 07 00 00] out(4)=[1A 00 00 00] ret=0
+[+015.842s] [ec] [12:16:51.112] ECWRITE addr=0x74A val=0x0(0) | in(8)=[4A 07 00 00 00 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+015.858s] [ec] [12:16:51.128] ECWRITE addr=0x74B val=0x0(0) | in(8)=[4B 07 00 00 00 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+015.874s] [ec] [12:16:51.144] ECREAD addr=0x748 | in(4)=[48 07 00 00] out(4)=[81 00 00 00] ret=0
+[+015.890s] [ec] [12:16:51.160] ECWRITE addr=0x748 val=0x81(129) | in(8)=[48 07 00 00 81 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+015.906s] [ec_poll] [12:16:51.176] ECREAD addr=0x768(STATUS) | in(4)=[68 07 00 00] out(4)=[00 00 00 00] ret=0
+[+015.924s] [wmi] [12:16:51.192] CoCreateInstance(CLSID_WbemLocator) detected - WMI session
+[+015.926s] [ec] [12:16:51.192] ECREAD addr=0x73C | in(4)=[3C 07 00 00] out(4)=[18 00 00 00] ret=0
+[+015.948s] [wmi] [12:16:51.207] CoCreateInstance(CLSID_WbemLocator) detected - WMI session
+[+015.951s] [ec_poll] [12:16:51.207] ECREAD addr=0x7CA | in(4)=[CA 07 00 00] out(4)=[01 00 00 00] ret=0
+[+015.969s] [ec_poll] [12:16:51.239] ECREAD addr=0x74C | in(4)=[4C 07 00 00] out(4)=[C6 00 00 00] ret=0
+[+015.985s] [ec] [12:16:51.255] ECREAD addr=0x7D2 | in(4)=[D2 07 00 00] out(4)=[1B 00 00 00] ret=0
+[+016.001s] [wmi] [12:16:51.271] CoCreateInstance(CLSID_WbemLocator) detected - WMI session
+[+016.002s] [ec] [12:16:51.271] ECREAD addr=0x494 | in(4)=[94 04 00 00] out(4)=[00 00 00 00] ret=0
+[+016.017s] [ec_poll] [12:16:51.287] ECREAD addr=0x7A6(BATT_MODE) | in(4)=[A6 07 00 00] out(4)=[28 00 00 00] ret=0
+[+016.033s] [ec] [12:16:51.303] ECWRITE addr=0x7A6(BATT_MODE) val=0x28(40) | in(8)=[A6 07 00 00 28 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+016.048s] [ec] [12:16:51.319] ECREAD addr=0x7C8 | in(4)=[C8 07 00 00] out(4)=[60 00 00 00] ret=0
+[+016.064s] [ec] [12:16:51.334] ECREAD addr=0x740(PROJECT_ID) | in(4)=[40 07 00 00] out(4)=[1A 00 00 00] ret=0
+[+016.080s] [ec_poll] [12:16:51.350] ECREAD addr=0x7A6(BATT_MODE) | in(4)=[A6 07 00 00] out(4)=[28 00 00 00] ret=0
+[+016.095s] [ec_poll] [12:16:51.366] ECREAD addr=0x727(ESHUTTER) | in(4)=[27 07 00 00] out(4)=[C0 00 00 00] ret=0
+[+016.112s] [ec_poll] [12:16:51.381] ECREAD addr=0x7CA | in(4)=[CA 07 00 00] out(4)=[01 00 00 00] ret=0
+[+016.127s] [ec] [12:16:51.397] ECWRITE addr=0x7A6(BATT_MODE) val=0x28(40) | in(8)=[A6 07 00 00 28 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+016.143s] [ec_poll] [12:16:51.413] ECREAD addr=0x74C | in(4)=[4C 07 00 00] out(4)=[C6 00 00 00] ret=0
+[+016.161s] [ec] [12:16:51.429] ECREAD addr=0x49F | in(4)=[9F 04 00 00] out(4)=[5A 00 00 00] ret=0
+[+016.175s] [ec] [12:16:51.445] ECREAD addr=0x782 | in(4)=[82 07 00 00] out(4)=[18 00 00 00] ret=0
+[+016.191s] [ec] [12:16:51.461] ECREAD addr=0x782 | in(4)=[82 07 00 00] out(4)=[18 00 00 00] ret=0
+[+016.207s] [ec] [12:16:51.477] ECREAD addr=0x726(OEM9) | in(4)=[26 07 00 00] out(4)=[80 00 00 00] ret=0
+[+016.223s] [ec] [12:16:51.493] ECREAD addr=0x74E | in(4)=[4E 07 00 00] out(4)=[00 00 00 00] ret=0
+[+016.238s] [ec] [12:16:51.508] ECWRITE addr=0x74E val=0x0(0) | in(8)=[4E 07 00 00 00 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+016.254s] [ec_poll] [12:16:51.524] ECREAD addr=0x7CA | in(4)=[CA 07 00 00] out(4)=[01 00 00 00] ret=0
+[+016.270s] [ec_poll] [12:16:51.540] ECREAD addr=0x74C | in(4)=[4C 07 00 00] out(4)=[C6 00 00 00] ret=0
+[+016.286s] [ec] [12:16:51.556] ECREAD addr=0x740(PROJECT_ID) | in(4)=[40 07 00 00] out(4)=[1A 00 00 00] ret=0
+[+016.302s] [ec] [12:16:51.572] ECREAD addr=0x728 | in(4)=[28 07 00 00] out(4)=[04 00 00 00] ret=0
+[+016.302s] [wmi] [12:16:51.572] CoCreateInstance(CLSID_WbemLocator) detected - WMI session
+[+016.318s] [ec] [12:16:51.588] ECWRITE addr=0x728 val=0x4(4) | in(8)=[28 07 00 00 04 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+016.334s] [ec] [12:16:51.604] ECREAD addr=0xD4F | in(4)=[4F 0D 00 00] out(4)=[01 00 00 00] ret=0
+[+016.350s] [ec_poll] [12:16:51.620] ECREAD addr=0x742 | in(4)=[42 07 00 00] out(4)=[22 00 00 00] ret=0
+[+016.366s] [ec] [12:16:51.637] ECREAD addr=0x730(PL1_DEF_GAM) | in(4)=[30 07 00 00] out(4)=[4B 00 00 00] ret=0
+[+016.381s] [ec_poll] [12:16:51.651] ECREAD addr=0x7CC | in(4)=[CC 07 00 00] out(4)=[81 00 00 00] ret=0
+[+016.397s] [ec] [12:16:51.667] ECREAD addr=0x731(PL2_DEF_GAM) | in(4)=[31 07 00 00] out(4)=[55 00 00 00] ret=0
+[+016.413s] [ec] [12:16:51.683] ECREAD addr=0x732(PL4_DEF_GAM) | in(4)=[32 07 00 00] out(4)=[91 00 00 00] ret=0
+[+016.429s] [ec] [12:16:51.699] ECREAD addr=0x73D | in(4)=[3D 07 00 00] out(4)=[00 00 00 00] ret=0
+[+016.445s] [setup] [MODULE] Loaded: DisplayInfo.dll at 0x7ffd6bf60000
+[+016.445s] [setup] [MODULE] Loaded: rasadhlp.dll at 0x7ffdd3db0000
+[+016.445s] [setup] [MODULE] Loaded: fwpuclnt.dll at 0x7ffdd4460000
+[+016.445s] [setup] [MODULE] Loaded: UEFI_Firmware.dll at 0x7ffdc7ba0000
+[+016.445s] [setup] [MODULE] Loaded: perfos.dll at 0x7ffd8b790000
+[+016.445s] [setup] [MODULE] Loaded: PowrProf.dll at 0x7ffdd8020000
+[+016.445s] [setup] [MODULE] Loaded: SHCORE.dll at 0x7ffddaaa0000
+[+016.446s] [setup] [MODULE] Loaded: wtsapi32.dll at 0x7ffdd68a0000
+[+016.446s] [setup] [MODULE] Loaded: DWMAPI.dll at 0x7ffdd6c40000
+[+016.446s] [setup] [MODULE] Loaded: d3d9.dll at 0x7ffd6bda0000
+[+016.446s] [setup] [MODULE] Loaded: dxcore.dll at 0x7ffdd71c0000
+[+016.446s] [setup] [MODULE] Loaded: dataexchange.dll at 0x7ffd95450000
+[+016.446s] [setup] [MODULE] Loaded: hid.dll at 0x7ffdd78a0000
+[+016.446s] [setup] [INFO] hid.dll now loaded - hooking HID functions
+[+016.446s] [setup] [OK] HidD_SetFeature
+[+016.446s] [setup] [OK] HidD_GetFeature
+[+016.446s] [setup] [OK] HidD_SetOutputReport
+[+016.446s] [setup] [MODULE] Loaded: MMDevApi.dll at 0x7ffdbfb90000
+[+016.446s] [setup] [MODULE] Loaded: AUDIOSES.DLL at 0x7ffdbe440000
+[+016.446s] [ec_poll] [12:16:51.715] ECREAD addr=0x727(ESHUTTER) | in(4)=[27 07 00 00] out(4)=[C0 00 00 00] ret=0
+[+016.461s] [ec_poll] [12:16:51.731] ECREAD addr=0x7CA | in(4)=[CA 07 00 00] out(4)=[01 00 00 00] ret=0
+[+016.476s] [ec] [12:16:51.747] ECREAD addr=0x733 | in(4)=[33 07 00 00] out(4)=[01 00 00 00] ret=0
+[+016.492s] [ec_poll] [12:16:51.762] ECREAD addr=0x78E | in(4)=[8E 07 00 00] out(4)=[FC 00 00 00] ret=0
+[+016.509s] [ec] [12:16:51.778] ECREAD addr=0x734 | in(4)=[34 07 00 00] out(4)=[2D 00 00 00] ret=0
+[+016.510s] [hid] [12:16:51.778] HidD_SetFeature | h=0xd70 dev=? len=9 buf=[00 12 00 03 00 00 00 00 00] ret=0x1
+[+016.524s] [ec] [12:16:51.794] ECREAD addr=0x735 | in(4)=[35 07 00 00] out(4)=[2D 00 00 00] ret=0
+[+016.540s] [ec_poll] [12:16:51.810] ECREAD addr=0x74C | in(4)=[4C 07 00 00] out(4)=[C6 00 00 00] ret=0
+[+016.556s] [ec] [12:16:51.826] ECREAD addr=0x7AB(LOGO_ONOFF) | in(4)=[AB 07 00 00] out(4)=[81 00 00 00] ret=0
+[+016.572s] [ec] [12:16:51.842] ECREAD addr=0x736 | in(4)=[36 07 00 00] out(4)=[91 00 00 00] ret=0
+[+016.588s] [ec] [12:16:51.858] ECREAD addr=0x737 | in(4)=[37 07 00 00] out(4)=[01 00 00 00] ret=0
+[+016.604s] [ec] [12:16:51.874] ECREAD addr=0x494 | in(4)=[94 04 00 00] out(4)=[00 00 00 00] ret=0
+[+016.620s] [ec] [12:16:51.890] ECREAD addr=0x740(PROJECT_ID) | in(4)=[40 07 00 00] out(4)=[1A 00 00 00] ret=0
+[+016.636s] [ec] [12:16:51.906] ECREAD addr=0x7A7 | in(4)=[A7 07 00 00] out(4)=[D2 00 00 00] ret=0
+[+016.637s] [hid] [12:16:51.906] HidD_SetFeature | h=0x1148 dev=? len=9 buf=[00 1A 02 01 04 00 00 00 01] ret=0x1
+[+016.652s] [ec_poll] [12:16:51.922] ECREAD addr=0x7CA | in(4)=[CA 07 00 00] out(4)=[01 00 00 00] ret=0
+[+016.668s] [ec_poll] [12:16:51.938] ECREAD addr=0x74C | in(4)=[4C 07 00 00] out(4)=[C6 00 00 00] ret=0
+[+016.684s] [ec] [12:16:51.954] ECREAD addr=0x7A8 | in(4)=[A8 07 00 00] out(4)=[D2 00 00 00] ret=0
+[+016.700s] [ec] [12:16:51.970] ECREAD addr=0x7A9 | in(4)=[A9 07 00 00] out(4)=[D2 00 00 00] ret=0
+[+016.716s] [ec] [12:16:51.986] ECREAD addr=0x7AA | in(4)=[AA 07 00 00] out(4)=[01 00 00 00] ret=0
+[+016.732s] [ec_poll] [12:16:52.002] ECREAD addr=0x7C5(OEM5_FANCURVE) | in(4)=[C5 07 00 00] out(4)=[E0 00 00 00] ret=0
+[+016.752s] [ec] [12:16:52.022] ECREAD addr=0x7D8(TCC_DEF_GAM) | in(4)=[D8 07 00 00] out(4)=[0A 00 00 00] ret=0
+[+016.763s] [ec] [12:16:52.033] ECREAD addr=0x7D9(TCC_DEF_OFF) | in(4)=[D9 07 00 00] out(4)=[19 00 00 00] ret=0
+[+016.764s] [hid] [12:16:52.033] HidD_SetFeature | h=0xd70 dev=? len=9 buf=[00 14 00 01 FF 00 00 00 00] ret=0x1
+[+016.779s] [ec] [12:16:52.049] ECREAD addr=0x7DA | in(4)=[DA 07 00 00] out(4)=[0A 00 00 00] ret=0
+[+016.795s] [ec] [12:16:52.065] ECREAD addr=0x7D3 | in(4)=[D3 07 00 00] out(4)=[00 00 00 00] ret=0
+[+016.811s] [ec_poll] [12:16:52.081] ECREAD addr=0x7CA | in(4)=[CA 07 00 00] out(4)=[01 00 00 00] ret=0
+[+016.827s] [ec_poll] [12:16:52.097] ECREAD addr=0x74C | in(4)=[4C 07 00 00] out(4)=[C6 00 00 00] ret=0
+[+016.844s] [ec_poll] [12:16:52.113] ECREAD addr=0x7CC | in(4)=[CC 07 00 00] out(4)=[81 00 00 00] ret=0
+[+016.861s] [ec] [12:16:52.129] IOCTL_0x9C40A500 | in(2)=[BB 00] out(4)=[D2 D2 D2 0A] ret=0
+[+016.874s] [ec] [12:16:52.145] IOCTL_0x9C40A500 | in(2)=[BB 01] out(4)=[D2 D2 0A 37] ret=0
+[+016.891s] [ec_poll] [12:16:52.161] ECREAD addr=0x727(ESHUTTER) | in(4)=[27 07 00 00] out(4)=[C0 00 00 00] ret=0
+[+016.891s] [hid] [12:16:52.161] HidD_SetFeature | h=0x11d8 dev=? len=9 buf=[00 80 00 00 00 00 00 00 00] ret=0x1
+[+016.907s] [ec] [12:16:52.176] IOCTL_0x9C40A500 | in(2)=[BB 02] out(4)=[D2 0A 37 19] ret=0
+[+016.908s] [wmi] [12:16:52.176] CoCreateInstance(CLSID_WbemLocator) detected - WMI session
+[+016.916s] [wmi] [12:16:52.176] CoCreateInstance(CLSID_WbemLocator) detected - WMI session
+[+016.922s] [ec] [12:16:52.192] IOCTL_0x9C40A500 | in(2)=[BB 03] out(4)=[0A 37 19 57] ret=0
+[+016.938s] [ec_poll] [12:16:52.208] ECREAD addr=0x7A6(BATT_MODE) | in(4)=[A6 07 00 00] out(4)=[28 00 00 00] ret=0
+[+016.955s] [ec] [12:16:52.224] IOCTL_0x9C40A500 | in(2)=[BB 04] out(4)=[37 19 57 5F] ret=0
+[+016.969s] [ec] [12:16:52.240] IOCTL_0x9C40A500 | in(2)=[BB 05] out(4)=[19 57 5F FF] ret=0
+[+016.986s] [ec] [12:16:52.256] IOCTL_0x9C40A500 | in(2)=[BB 06] out(4)=[57 5F FF FF] ret=0
+[+017.001s] [ec] [12:16:52.271] IOCTL_0x9C40A500 | in(2)=[BB 07] out(4)=[5F FF FF FF] ret=0
+[+017.017s] [ec] [12:16:52.287] IOCTL_0x9C40A500 | in(2)=[BB 08] out(4)=[FF FF FF FF] ret=0
+[+017.017s] [hid] [12:16:52.287] HidD_SetFeature | h=0x1148 dev=? len=9 buf=[00 09 22 64 00 00 00 00 00] ret=0x1
+[+017.033s] [ec] [12:16:52.303] IOCTL_0x9C40A500 | in(2)=[BB 09] out(4)=[BB 09 00 00] ret=0
+[+017.040s] [hid] [12:16:52.303] HidD_GetFeature | h=0x11d8 dev=? len=9 buf=[00 A1 01 00 03 01 00 08 00] ret=0x1
+[+017.049s] [ec] [12:16:52.318] IOCTL_0x9C40A500 | in(2)=[BB 0A] out(4)=[BB 0A 00 00] ret=0
+[+017.064s] [ec] [12:16:52.334] IOCTL_0x9C40A500 | in(2)=[BB 0B] out(4)=[BB 0B 00 00] ret=0
+[+017.116s] [ec_poll] [12:16:52.381] ECREAD addr=0x7CC | in(4)=[CC 07 00 00] out(4)=[81 00 00 00] ret=0
+[+017.127s] [ec_poll] [12:16:52.397] ECREAD addr=0x727(ESHUTTER) | in(4)=[27 07 00 00] out(4)=[C0 00 00 00] ret=0
+[+017.142s] [ec_poll] [12:16:52.413] ECREAD addr=0x7CC | in(4)=[CC 07 00 00] out(4)=[81 00 00 00] ret=0
+[+017.143s] [hid] [12:16:52.413] HidD_SetFeature | h=0xd70 dev=? len=9 buf=[00 08 02 01 07 32 08 00 00] ret=0x1
+[+017.160s] [ec] [12:16:52.429] ECREAD addr=0x7C6(OEM6_APPLY) | in(4)=[C6 07 00 00] out(4)=[00 00 00 00] ret=0
+[+017.217s] [ec_poll] [12:16:52.476] ECREAD addr=0x727(ESHUTTER) | in(4)=[27 07 00 00] out(4)=[C0 00 00 00] ret=0
+[+017.238s] [ec] [12:16:52.508] ECWRITE addr=0x727(ESHUTTER) val=0xC0(192) | in(8)=[27 07 00 00 C0 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+017.254s] [ec] [12:16:52.524] ECWRITE addr=0x751(FAN_CTRL) val=0x0(0) | in(8)=[51 07 00 00 00 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+017.270s] [ec] [12:16:52.540] ECREAD addr=0x751(FAN_CTRL) | in(4)=[51 07 00 00] out(4)=[00 00 00 00] ret=0
+[+017.270s] [hid] [12:16:52.540] HidD_SetFeature | h=0x11d8 dev=? len=9 buf=[00 80 00 00 00 00 00 00 00] ret=0x1
+[+017.286s] [ec] [12:16:52.556] ECREAD addr=0x726(OEM9) | in(4)=[26 07 00 00] out(4)=[80 00 00 00] ret=0
+[+017.301s] [ec] [12:16:52.572] ECWRITE addr=0x726(OEM9) val=0x80(128) | in(8)=[26 07 00 00 80 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+017.318s] [ec_poll] [12:16:52.587] ECREAD addr=0x7CA | in(4)=[CA 07 00 00] out(4)=[01 00 00 00] ret=0
+[+017.333s] [ec_poll] [12:16:52.603] ECREAD addr=0x74C | in(4)=[4C 07 00 00] out(4)=[C6 00 00 00] ret=0
+[+017.350s] [ec] [12:16:52.619] ECREAD addr=0x7A5 | in(4)=[A5 07 00 00] out(4)=[00 00 00 00] ret=0
+[+017.367s] [ec] [12:16:52.635] ECREAD addr=0x7C6(OEM6_APPLY) | in(4)=[C6 07 00 00] out(4)=[00 00 00 00] ret=0
+[+017.381s] [ec] [12:16:52.651] ECWRITE addr=0x7C6(OEM6_APPLY) val=0x0(0) | in(8)=[C6 07 00 00 00 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+017.397s] [hid] [12:16:52.667] HidD_SetFeature | h=0x1148 dev=? len=9 buf=[00 12 00 03 00 00 00 00 00] ret=0x1
+[+017.400s] [ec_poll] [12:16:52.669] ECREAD addr=0x7C5(OEM5_FANCURVE) | in(4)=[C5 07 00 00] out(4)=[E0 00 00 00] ret=0
+[+017.413s] [ec] [12:16:52.683] ECWRITE addr=0x7C5(OEM5_FANCURVE) val=0xE0(224) | in(8)=[C5 07 00 00 E0 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+017.413s] [hid] [12:16:52.683] HidD_GetFeature | h=0x11d8 dev=? len=9 buf=[00 A1 01 00 03 01 00 08 00] ret=0x1
+[+017.429s] [ec] [12:16:52.699] ECWRITE addr=0xF00(CPU_TEMP_UP[0]) val=0x30(48) | in(8)=[00 0F 00 00 30 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+017.445s] [ec] [12:16:52.715] ECWRITE addr=0x783(PL1) val=0xD2(210) | in(8)=[83 07 00 00 D2 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+017.460s] [ec] [12:16:52.730] ECWRITE addr=0x784(PL2) val=0xD2(210) | in(8)=[84 07 00 00 D2 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+017.476s] [ec] [12:16:52.746] ECWRITE addr=0xF11(CPU_TEMP_DN[1]) val=0x2E(46) | in(8)=[11 0F 00 00 2E 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+017.492s] [ec] [12:16:52.762] ECWRITE addr=0xF20(CPU_DUTY[0]) val=0x0(0) | in(8)=[20 0F 00 00 00 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+017.508s] [ec] [12:16:52.778] ECWRITE addr=0xF01(CPU_TEMP_UP[1]) val=0x34(52) | in(8)=[01 0F 00 00 34 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+017.524s] [ec] [12:16:52.794] ECWRITE addr=0xF12(CPU_TEMP_DN[2]) val=0x32(50) | in(8)=[12 0F 00 00 32 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+017.524s] [hid] [12:16:52.794] HidD_SetFeature | h=0x11d8 dev=? len=9 buf=[00 80 00 00 00 00 00 00 00] ret=0x1
+[+017.540s] [ec] [12:16:52.810] ECWRITE addr=0xF21(CPU_DUTY[1]) val=0x40(64) | in(8)=[21 0F 00 00 40 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+017.555s] [ec_poll] [12:16:52.825] ECREAD addr=0x727(ESHUTTER) | in(4)=[27 07 00 00] out(4)=[C0 00 00 00] ret=0
+[+017.571s] [ec] [12:16:52.841] ECWRITE addr=0x785(PL4) val=0xAD(173) | in(8)=[85 07 00 00 AD 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+017.590s] [ec] [12:16:52.857] ECWRITE addr=0xF02(CPU_TEMP_UP[2]) val=0x38(56) | in(8)=[02 0F 00 00 38 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+017.602s] [ec] [12:16:52.873] ECWRITE addr=0xF13(CPU_TEMP_DN[3]) val=0x36(54) | in(8)=[13 0F 00 00 36 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+017.618s] [ec] [12:16:52.889] ECWRITE addr=0xF22(CPU_DUTY[2]) val=0x46(70) | in(8)=[22 0F 00 00 46 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+017.635s] [ec] [12:16:52.904] ECWRITE addr=0xF03(CPU_TEMP_UP[3]) val=0x3C(60) | in(8)=[03 0F 00 00 3C 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+017.650s] [ec] [12:16:52.920] ECWRITE addr=0x786(TCC_OFFSET) val=0x94(148) | in(8)=[86 07 00 00 94 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+017.651s] [hid] [12:16:52.920] HidD_SetFeature | h=0x1148 dev=? len=9 buf=[00 14 02 01 FF 04 00 00 00] ret=0x1
+[+017.667s] [hid] [12:16:52.936] HidD_GetFeature | h=0x11d8 dev=? len=9 buf=[00 A1 01 00 03 01 00 08 00] ret=0x1
+[+017.671s] [ec] [12:16:52.936] ECWRITE addr=0xF14(CPU_TEMP_DN[4]) val=0x3A(58) | in(8)=[14 0F 00 00 3A 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+017.682s] [ec] [12:16:52.952] ECWRITE addr=0xF23(CPU_DUTY[3]) val=0x50(80) | in(8)=[23 0F 00 00 50 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+017.698s] [ec] [12:16:52.968] ECWRITE addr=0xF04(CPU_TEMP_UP[4]) val=0x40(64) | in(8)=[04 0F 00 00 40 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+017.714s] [ec] [12:16:52.984] ECWRITE addr=0xF15(CPU_TEMP_DN[5]) val=0x3E(62) | in(8)=[15 0F 00 00 3E 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+017.729s] [ec] [12:16:53.000] ECWRITE addr=0xF24(CPU_DUTY[4]) val=0x64(100) | in(8)=[24 0F 00 00 64 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+017.745s] [ec] [12:16:53.015] ECWRITE addr=0xF05(CPU_TEMP_UP[5]) val=0x44(68) | in(8)=[05 0F 00 00 44 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+017.761s] [ec] [12:16:53.031] ECWRITE addr=0xF16(CPU_TEMP_DN[6]) val=0x42(66) | in(8)=[16 0F 00 00 42 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+017.777s] [ec] [12:16:53.047] ECWRITE addr=0xF25(CPU_DUTY[5]) val=0x6E(110) | in(8)=[25 0F 00 00 6E 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+017.778s] [hid] [12:16:53.048] HidD_SetFeature | h=0x11d8 dev=? len=9 buf=[00 80 00 00 00 00 00 00 00] ret=0x1
+[+017.794s] [ec] [12:16:53.063] ECWRITE addr=0xF06(CPU_TEMP_UP[6]) val=0x48(72) | in(8)=[06 0F 00 00 48 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+017.809s] [ec] [12:16:53.079] ECWRITE addr=0xF17(CPU_TEMP_DN[7]) val=0x46(70) | in(8)=[17 0F 00 00 46 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+017.825s] [ec] [12:16:53.095] ECWRITE addr=0xF26(CPU_DUTY[6]) val=0x78(120) | in(8)=[26 0F 00 00 78 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+017.840s] [ec] [12:16:53.111] ECWRITE addr=0xF07(CPU_TEMP_UP[7]) val=0x4C(76) | in(8)=[07 0F 00 00 4C 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+017.856s] [ec] [12:16:53.126] ECWRITE addr=0x744(TGP) val=0x37(55) | in(8)=[44 07 00 00 37 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+017.872s] [ec] [12:16:53.142] ECWRITE addr=0x745(DB_TOTAL) val=0xFF(255) | in(8)=[45 07 00 00 FF 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+017.888s] [ec] [12:16:53.158] ECWRITE addr=0x746(DB_MAX) val=0x19(25) | in(8)=[46 07 00 00 19 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+017.904s] [ec] [12:16:53.174] ECWRITE addr=0xF18(CPU_TEMP_DN[8]) val=0x4A(74) | in(8)=[18 0F 00 00 4A 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+017.905s] [hid] [12:16:53.174] HidD_SetFeature | h=0x1148 dev=? len=9 buf=[00 08 22 01 01 64 01 00 00] ret=0x1
+[+017.920s] [ec] [12:16:53.190] ECWRITE addr=0xF27(CPU_DUTY[7]) val=0x8C(140) | in(8)=[27 0F 00 00 8C 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+017.920s] [hid] [12:16:53.190] HidD_GetFeature | h=0x11d8 dev=? len=9 buf=[00 A1 01 00 03 01 00 08 00] ret=0x1
+[+017.936s] [ec] [12:16:53.206] ECWRITE addr=0xF08(CPU_TEMP_UP[8]) val=0x50(80) | in(8)=[08 0F 00 00 50 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+017.952s] [ec] [12:16:53.222] ECREAD addr=0x743(DB_CTRL) | in(4)=[43 07 00 00] out(4)=[07 00 00 00] ret=0
+[+017.968s] [ec] [12:16:53.238] ECWRITE addr=0x743(DB_CTRL) val=0x7(7) | in(8)=[43 07 00 00 07 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+017.984s] [ec] [12:16:53.254] ECREAD addr=0x743(DB_CTRL) | in(4)=[43 07 00 00] out(4)=[07 00 00 00] ret=0
+[+017.999s] [ec] [12:16:53.270] ECWRITE addr=0x743(DB_CTRL) val=0x7(7) | in(8)=[43 07 00 00 07 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.016s] [ec] [12:16:53.286] ECWRITE addr=0xF19(CPU_TEMP_DN[9]) val=0x4E(78) | in(8)=[19 0F 00 00 4E 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.031s] [ec] [12:16:53.301] ECWRITE addr=0xF28(CPU_DUTY[8]) val=0xA0(160) | in(8)=[28 0F 00 00 A0 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.032s] [hid] [12:16:53.301] HidD_SetFeature | h=0x11d8 dev=? len=9 buf=[00 80 00 00 00 00 00 00 00] ret=0x1
+[+018.047s] [ec] [12:16:53.317] ECWRITE addr=0xF09(CPU_TEMP_UP[9]) val=0x55(85) | in(8)=[09 0F 00 00 55 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.063s] [ec] [12:16:53.333] ECWRITE addr=0x787(FAN_SWITCH_SPEED) val=0x81(129) | in(8)=[87 07 00 00 81 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.084s] [ec] [12:16:53.349] ECWRITE addr=0xF1A(CPU_TEMP_DN[10]) val=0x52(82) | in(8)=[1A 0F 00 00 52 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.095s] [ec] [12:16:53.365] ECWRITE addr=0xF29(CPU_DUTY[9]) val=0xB4(180) | in(8)=[29 0F 00 00 B4 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.111s] [ec] [12:16:53.381] ECWRITE addr=0xF0A(CPU_TEMP_UP[10]) val=0xFF(255) | in(8)=[0A 0F 00 00 FF 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.126s] [ec] [12:16:53.396] ECREAD addr=0x743(DB_CTRL) | in(4)=[43 07 00 00] out(4)=[07 00 00 00] ret=0
+[+018.142s] [ec] [12:16:53.412] ECWRITE addr=0xF1B(CPU_TEMP_DN[11]) val=0xFF(255) | in(8)=[1B 0F 00 00 FF 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.158s] [ec] [12:16:53.428] ECWRITE addr=0x743(DB_CTRL) val=0x7(7) | in(8)=[43 07 00 00 07 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.175s] [hid] [12:16:53.444] HidD_GetFeature | h=0x11d8 dev=? len=9 buf=[00 80 31 05 00 00 00 00 00] ret=0x1
+[+018.175s] [ec] [12:16:53.444] ECREAD addr=0x743(DB_CTRL) | in(4)=[43 07 00 00] out(4)=[07 00 00 00] ret=0
+[+018.190s] [ec] [12:16:53.460] ECWRITE addr=0xF2A(CPU_DUTY[10]) val=0xB4(180) | in(8)=[2A 0F 00 00 B4 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.191s] [hid] [12:16:53.460] HidD_SetFeature | h=0x11d8 dev=? len=9 buf=[00 1A 03 01 04 00 00 00 01] ret=0x1
+[+018.206s] [ec] [12:16:53.476] ECWRITE addr=0xF0B(CPU_TEMP_UP[11]) val=0xFF(255) | in(8)=[0B 0F 00 00 FF 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.222s] [ec] [12:16:53.492] ECWRITE addr=0x743(DB_CTRL) val=0x7(7) | in(8)=[43 07 00 00 07 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.238s] [ec] [12:16:53.508] ECREAD addr=0x494 | in(4)=[94 04 00 00] out(4)=[00 00 00 00] ret=0
+[+018.253s] [ec] [12:16:53.523] ECREAD addr=0x740(PROJECT_ID) | in(4)=[40 07 00 00] out(4)=[1A 00 00 00] ret=0
+[+018.270s] [ec_poll] [12:16:53.539] ECREAD addr=0x7CA | in(4)=[CA 07 00 00] out(4)=[01 00 00 00] ret=0
+[+018.286s] [ec] [12:16:53.555] ECWRITE addr=0xF1C(CPU_TEMP_DN[12]) val=0xFF(255) | in(8)=[1C 0F 00 00 FF 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.301s] [ec] [12:16:53.571] ECWRITE addr=0xF2B(CPU_DUTY[11]) val=0xB4(180) | in(8)=[2B 0F 00 00 B4 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.317s] [ec_poll] [12:16:53.587] ECREAD addr=0x74C | in(4)=[4C 07 00 00] out(4)=[C6 00 00 00] ret=0
+[+018.318s] [hid] [12:16:53.587] HidD_SetFeature | h=0x11d8 dev=? len=9 buf=[00 09 23 64 00 00 00 00 00] ret=0x1
+[+018.333s] [ec_poll] [12:16:53.603] ECREAD addr=0x7CA | in(4)=[CA 07 00 00] out(4)=[01 00 00 00] ret=0
+[+018.333s] [wmi] [12:16:53.603] CoCreateInstance(CLSID_WbemLocator) detected - WMI session
+[+018.348s] [ec] [12:16:53.619] ECWRITE addr=0xF0C(CPU_TEMP_UP[12]) val=0xFF(255) | in(8)=[0C 0F 00 00 FF 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.364s] [ec_poll] [12:16:53.634] ECREAD addr=0x7CC | in(4)=[CC 07 00 00] out(4)=[81 00 00 00] ret=0
+[+018.380s] [ec] [12:16:53.650] ECREAD addr=0x7C7 | in(4)=[C7 07 00 00] out(4)=[0C 00 00 00] ret=0
+[+018.396s] [ec_poll] [12:16:53.666] ECREAD addr=0x74C | in(4)=[4C 07 00 00] out(4)=[C6 00 00 00] ret=0
+[+018.412s] [ec] [12:16:53.682] ECWRITE addr=0xF1D(CPU_TEMP_DN[13]) val=0xFF(255) | in(8)=[1D 0F 00 00 FF 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.427s] [ec] [12:16:53.698] ECWRITE addr=0xF2C(CPU_DUTY[12]) val=0xB4(180) | in(8)=[2C 0F 00 00 B4 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.443s] [ec] [12:16:53.714] ECWRITE addr=0xF0D(CPU_TEMP_UP[13]) val=0xFF(255) | in(8)=[0D 0F 00 00 FF 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.444s] [hid] [12:16:53.714] HidD_SetFeature | h=0x1284 dev=? len=9 buf=[00 80 00 00 00 00 00 00 00] ret=0x1
+[+018.459s] [ec] [12:16:53.729] ECWRITE addr=0x7C7 val=0xC(12) | in(8)=[C7 07 00 00 0C 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.478s] [ec] [12:16:53.745] ECWRITE addr=0xF1E(CPU_TEMP_DN[14]) val=0xFF(255) | in(8)=[1E 0F 00 00 FF 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.491s] [ec] [12:16:53.761] ECWRITE addr=0xF2D(CPU_DUTY[13]) val=0xB4(180) | in(8)=[2D 0F 00 00 B4 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.506s] [ec] [12:16:53.776] ECWRITE addr=0xF0E(CPU_TEMP_UP[14]) val=0xFF(255) | in(8)=[0E 0F 00 00 FF 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.522s] [ec] [12:16:53.792] ECWRITE addr=0xF1F(CPU_TEMP_DN[15]) val=0xFF(255) | in(8)=[1F 0F 00 00 FF 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.538s] [ec] [12:16:53.808] ECWRITE addr=0xF2E(CPU_DUTY[14]) val=0xB4(180) | in(8)=[2E 0F 00 00 B4 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.554s] [ec] [12:16:53.824] ECWRITE addr=0xF0F(CPU_TEMP_UP[15]) val=0xFF(255) | in(8)=[0F 0F 00 00 FF 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.570s] [ec] [12:16:53.840] ECWRITE addr=0xF2F(CPU_DUTY[15]) val=0xB4(180) | in(8)=[2F 0F 00 00 B4 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.572s] [hid] [12:16:53.840] HidD_SetFeature | h=0x11d8 dev=? len=9 buf=[00 12 00 03 00 00 00 00 00] ret=0x1
+[+018.573s] [wmi] [12:16:53.840] CoCreateInstance(CLSID_WbemLocator) detected - WMI session
+[+018.585s] [ec] [12:16:53.855] ECWRITE addr=0xF30(GPU_TEMP_UP[0]) val=0x2E(46) | in(8)=[30 0F 00 00 2E 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.586s] [hid] [12:16:53.855] HidD_GetFeature | h=0x1284 dev=? len=9 buf=[00 A1 01 00 03 01 00 08 00] ret=0x1
+[+018.601s] [ec] [12:16:53.871] ECWRITE addr=0xF41(GPU_TEMP_DN[1]) val=0x2C(44) | in(8)=[41 0F 00 00 2C 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.617s] [ec_poll] [12:16:53.887] ECREAD addr=0x7A6(BATT_MODE) | in(4)=[A6 07 00 00] out(4)=[28 00 00 00] ret=0
+[+018.633s] [ec] [12:16:53.903] ECWRITE addr=0x7A6(BATT_MODE) val=0x28(40) | in(8)=[A6 07 00 00 28 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.649s] [ec] [12:16:53.919] ECWRITE addr=0xF50(GPU_DUTY[0]) val=0x0(0) | in(8)=[50 0F 00 00 00 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.664s] [ec] [12:16:53.934] ECWRITE addr=0xF31(GPU_TEMP_UP[1]) val=0x32(50) | in(8)=[31 0F 00 00 32 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.680s] [ec] [12:16:53.950] ECWRITE addr=0xF42(GPU_TEMP_DN[2]) val=0x30(48) | in(8)=[42 0F 00 00 30 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.681s] [wmi] [12:16:53.950] CoCreateInstance(CLSID_WbemLocator) detected - WMI session
+[+018.695s] [wmi] [12:16:53.960] CoCreateInstance(CLSID_WbemLocator) detected - WMI session
+[+018.696s] [ec] [12:16:53.966] ECWRITE addr=0xF51(GPU_DUTY[1]) val=0x3C(60) | in(8)=[51 0F 00 00 3C 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.697s] [hid] [12:16:53.966] HidD_SetFeature | h=0x1148 dev=? len=9 buf=[00 08 22 01 01 64 01 00 00] ret=0x1
+[+018.713s] [ec] [12:16:53.982] ECWRITE addr=0xF32(GPU_TEMP_UP[2]) val=0x36(54) | in(8)=[32 0F 00 00 36 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.728s] [ec] [12:16:53.998] ECWRITE addr=0xF43(GPU_TEMP_DN[3]) val=0x34(52) | in(8)=[43 0F 00 00 34 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.744s] [ec] [12:16:54.014] ECWRITE addr=0xF52(GPU_DUTY[2]) val=0x46(70) | in(8)=[52 0F 00 00 46 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.759s] [ec] [12:16:54.030] ECWRITE addr=0xF33(GPU_TEMP_UP[3]) val=0x3A(58) | in(8)=[33 0F 00 00 3A 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.775s] [ec] [12:16:54.045] ECWRITE addr=0xF44(GPU_TEMP_DN[4]) val=0x38(56) | in(8)=[44 0F 00 00 38 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.791s] [ec] [12:16:54.061] ECWRITE addr=0xF53(GPU_DUTY[3]) val=0x50(80) | in(8)=[53 0F 00 00 50 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.807s] [ec] [12:16:54.077] ECWRITE addr=0xF34(GPU_TEMP_UP[4]) val=0x3E(62) | in(8)=[34 0F 00 00 3E 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.823s] [ec] [12:16:54.093] ECWRITE addr=0xF45(GPU_TEMP_DN[5]) val=0x3C(60) | in(8)=[45 0F 00 00 3C 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.823s] [hid] [12:16:54.093] HidD_SetFeature | h=0x1284 dev=? len=9 buf=[00 80 00 00 00 00 00 00 00] ret=0x1
+[+018.839s] [ec] [12:16:54.109] ECWRITE addr=0xF54(GPU_DUTY[4]) val=0x66(102) | in(8)=[54 0F 00 00 66 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.855s] [ec] [12:16:54.125] ECWRITE addr=0xF35(GPU_TEMP_UP[5]) val=0x42(66) | in(8)=[35 0F 00 00 42 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.870s] [ec] [12:16:54.141] ECWRITE addr=0xF46(GPU_TEMP_DN[6]) val=0x40(64) | in(8)=[46 0F 00 00 40 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.886s] [ec] [12:16:54.156] ECWRITE addr=0xF55(GPU_DUTY[5]) val=0x6E(110) | in(8)=[55 0F 00 00 6E 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.902s] [ec] [12:16:54.172] ECWRITE addr=0xF36(GPU_TEMP_UP[6]) val=0x46(70) | in(8)=[36 0F 00 00 46 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.918s] [ec] [12:16:54.188] ECWRITE addr=0xF47(GPU_TEMP_DN[7]) val=0x44(68) | in(8)=[47 0F 00 00 44 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.934s] [ec] [12:16:54.204] ECWRITE addr=0xF56(GPU_DUTY[6]) val=0x78(120) | in(8)=[56 0F 00 00 78 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.949s] [ec] [12:16:54.220] ECWRITE addr=0xF37(GPU_TEMP_UP[7]) val=0x4A(74) | in(8)=[37 0F 00 00 4A 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.950s] [hid] [12:16:54.220] HidD_SetFeature | h=0x11d8 dev=? len=9 buf=[00 14 03 01 00 FF 00 00 00] ret=0x1
+[+018.966s] [ec] [12:16:54.236] ECWRITE addr=0xF48(GPU_TEMP_DN[8]) val=0x48(72) | in(8)=[48 0F 00 00 48 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.966s] [hid] [12:16:54.236] HidD_GetFeature | h=0x1284 dev=? len=9 buf=[00 A1 01 00 03 01 00 08 00] ret=0x1
+[+018.981s] [ec] [12:16:54.252] ECWRITE addr=0xF57(GPU_DUTY[7]) val=0x8C(140) | in(8)=[57 0F 00 00 8C 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+018.998s] [ec] [12:16:54.268] ECWRITE addr=0xF38(GPU_TEMP_UP[8]) val=0x4E(78) | in(8)=[38 0F 00 00 4E 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+019.014s] [ec] [12:16:54.284] ECWRITE addr=0xF49(GPU_TEMP_DN[9]) val=0x4C(76) | in(8)=[49 0F 00 00 4C 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+019.029s] [ec] [12:16:54.299] ECWRITE addr=0xF58(GPU_DUTY[8]) val=0xA0(160) | in(8)=[58 0F 00 00 A0 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+019.045s] [ec] [12:16:54.315] ECWRITE addr=0xF39(GPU_TEMP_UP[9]) val=0x51(81) | in(8)=[39 0F 00 00 51 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+019.061s] [ec] [12:16:54.331] ECWRITE addr=0xF4A(GPU_TEMP_DN[10]) val=0x50(80) | in(8)=[4A 0F 00 00 50 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+019.077s] [ec] [12:16:54.347] ECWRITE addr=0xF59(GPU_DUTY[9]) val=0xB4(180) | in(8)=[59 0F 00 00 B4 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+019.080s] [hid] [12:16:54.347] HidD_SetFeature | h=0x1284 dev=? len=9 buf=[00 80 00 00 00 00 00 00 00] ret=0x1
+[+019.092s] [ec] [12:16:54.362] ECWRITE addr=0xF3A(GPU_TEMP_UP[10]) val=0xFF(255) | in(8)=[3A 0F 00 00 FF 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+019.108s] [ec] [12:16:54.379] ECWRITE addr=0xF4B(GPU_TEMP_DN[11]) val=0xFF(255) | in(8)=[4B 0F 00 00 FF 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+019.124s] [ec] [12:16:54.394] ECWRITE addr=0xF5A(GPU_DUTY[10]) val=0xB4(180) | in(8)=[5A 0F 00 00 B4 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+019.140s] [ec] [12:16:54.410] ECWRITE addr=0xF3B(GPU_TEMP_UP[11]) val=0xFF(255) | in(8)=[3B 0F 00 00 FF 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+019.156s] [ec] [12:16:54.426] ECWRITE addr=0xF4C(GPU_TEMP_DN[12]) val=0xFF(255) | in(8)=[4C 0F 00 00 FF 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+019.172s] [ec] [12:16:54.442] ECWRITE addr=0xF5B(GPU_DUTY[11]) val=0xB4(180) | in(8)=[5B 0F 00 00 B4 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+019.188s] [ec] [12:16:54.458] ECWRITE addr=0xF3C(GPU_TEMP_UP[12]) val=0xFF(255) | in(8)=[3C 0F 00 00 FF 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+019.204s] [ec] [12:16:54.474] ECWRITE addr=0xF4D(GPU_TEMP_DN[13]) val=0xFF(255) | in(8)=[4D 0F 00 00 FF 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+019.205s] [hid] [12:16:54.474] HidD_SetFeature | h=0x11d8 dev=? len=9 buf=[00 08 23 01 01 64 01 00 00] ret=0x1
+[+019.220s] [ec] [12:16:54.490] ECWRITE addr=0xF5C(GPU_DUTY[12]) val=0xB4(180) | in(8)=[5C 0F 00 00 B4 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+019.220s] [hid] [12:16:54.490] HidD_GetFeature | h=0x1284 dev=? len=9 buf=[00 A1 01 00 03 01 00 08 00] ret=0x1
+[+019.236s] [ec] [12:16:54.506] ECWRITE addr=0xF3D(GPU_TEMP_UP[13]) val=0xFF(255) | in(8)=[3D 0F 00 00 FF 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+019.252s] [ec] [12:16:54.521] ECWRITE addr=0xF4E(GPU_TEMP_DN[14]) val=0xFF(255) | in(8)=[4E 0F 00 00 FF 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+019.267s] [ec] [12:16:54.537] ECWRITE addr=0xF5D(GPU_DUTY[13]) val=0xB4(180) | in(8)=[5D 0F 00 00 B4 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+019.283s] [ec] [12:16:54.553] ECWRITE addr=0xF3E(GPU_TEMP_UP[14]) val=0xFF(255) | in(8)=[3E 0F 00 00 FF 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+019.299s] [ec] [12:16:54.569] ECWRITE addr=0x706(BIOS_CTRL) val=0x41(65) | in(8)=[06 07 00 00 41 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+019.319s] [ec] [12:16:54.585] ECWRITE addr=0xF4F(GPU_TEMP_DN[15]) val=0xFF(255) | in(8)=[4F 0F 00 00 FF 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+019.331s] [ec] [12:16:54.601] ECWRITE addr=0xF5E(GPU_DUTY[14]) val=0xB4(180) | in(8)=[5E 0F 00 00 B4 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+019.332s] [hid] [12:16:54.601] HidD_SetFeature | h=0x1284 dev=? len=9 buf=[00 80 00 00 00 00 00 00 00] ret=0x1
+[+019.347s] [ec] [12:16:54.617] ECWRITE addr=0xF3F(GPU_TEMP_UP[15]) val=0xFF(255) | in(8)=[3F 0F 00 00 FF 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+019.363s] [ec] [12:16:54.633] ECWRITE addr=0xF5F(GPU_DUTY[15]) val=0xB4(180) | in(8)=[5F 0F 00 00 B4 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+019.379s] [ec] [12:16:54.649] ECREAD addr=0xF00(CPU_TEMP_UP[0]) | in(4)=[00 0F 00 00] out(4)=[30 00 00 00] ret=0
+[+019.395s] [ec] [12:16:54.665] ECREAD addr=0xF01(CPU_TEMP_UP[1]) | in(4)=[01 0F 00 00] out(4)=[34 00 00 00] ret=0
+[+019.411s] [ec] [12:16:54.681] ECREAD addr=0x7C6(OEM6_APPLY) | in(4)=[C6 07 00 00] out(4)=[00 00 00 00] ret=0
+[+019.426s] [ec] [12:16:54.696] ECREAD addr=0x767(TRIGGER) | in(4)=[67 07 00 00] out(4)=[00 00 00 00] ret=0
+[+019.442s] [ec] [12:16:54.712] ECWRITE addr=0x767(TRIGGER) val=0x0(0) | in(8)=[67 07 00 00 00 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+019.458s] [setup] [MODULE] Loaded: Windows.ApplicationModel.dll at 0x7ffda7250000
+[+019.459s] [setup] [MODULE] Loaded: Windows.Devices.Radios.dll at 0x7ffdca580000
+[+019.459s] [setup] [MODULE] Loaded: Windows.Devices.Enumeration.dll at 0x7ffdaaf50000
+[+019.459s] [setup] [MODULE] Loaded: PROPSYS.dll at 0x7ffdd44f0000
+[+019.459s] [setup] [MODULE] Loaded: StructuredQuery.dll at 0x7ffdaad90000
+[+019.459s] [setup] [MODULE] Loaded: MSWB7.dll at 0x7ffdaa980000
+[+019.459s] [setup] [MODULE] Loaded: DevDispItemProvider.dll at 0x7ffdaa940000
+[+019.459s] [setup] [MODULE] Loaded: DDORes.dll at 0x7ffdaa920000
+[+019.459s] [setup] [MODULE] Loaded: DefaultDeviceManager.dll at 0x7ffdaa910000
+[+019.459s] [setup] [MODULE] Loaded: BthRadioMedia.dll at 0x7ffdc98e0000
+[+019.459s] [setup] [MODULE] Loaded: WlanRadioManager.dll at 0x7ffdba530000
+[+019.459s] [setup] [MODULE] Loaded: napinsp.dll at 0x7ffd76f60000
+[+019.460s] [setup] [MODULE] Loaded: winrnr.dll at 0x7ffd76f40000
+[+019.460s] [setup] [MODULE] Loaded: nlansp_c.dll at 0x7ffd76870000
+[+019.460s] [setup] [MODULE] Loaded: wshbth.dll at 0x7ffd76850000
+[+019.460s] [ec_poll] [12:16:54.728] ECREAD addr=0x7C5(OEM5_FANCURVE) | in(4)=[C5 07 00 00] out(4)=[E0 00 00 00] ret=0
+[+019.474s] [ec] [12:16:54.744] ECWRITE addr=0x7C5(OEM5_FANCURVE) val=0xE0(224) | in(8)=[C5 07 00 00 E0 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+019.474s] [hid] [12:16:54.744] HidD_GetFeature | h=0x1284 dev=? len=9 buf=[00 80 31 05 00 00 00 00 00] ret=0x1
+[+019.490s] [ec] [12:16:54.760] ECWRITE addr=0x769(LOGO_R) val=0x0(0) | in(8)=[69 07 00 00 00 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+019.494s] [hid] [12:16:54.760] HidD_SetFeature | h=0x1284 dev=? len=9 buf=[00 1A 01 01 04 00 00 00 01] ret=0x1
+[+019.505s] [ec] [12:16:54.776] ECWRITE addr=0x7C6(OEM6_APPLY) val=0x4(4) | in(8)=[C6 07 00 00 04 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+019.521s] [ec] [12:16:54.791] ECREAD addr=0x7C6(OEM6_APPLY) | in(4)=[C6 07 00 00] out(4)=[04 00 00 00] ret=0
+[+019.537s] [ec] [12:16:54.807] ECWRITE addr=0x7C6(OEM6_APPLY) val=0x0(0) | in(8)=[C6 07 00 00 00 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+019.553s] [ec_poll] [12:16:54.823] ECREAD addr=0x7C5(OEM5_FANCURVE) | in(4)=[C5 07 00 00] out(4)=[E0 00 00 00] ret=0
+[+019.569s] [ec] [12:16:54.839] ECWRITE addr=0x7C5(OEM5_FANCURVE) val=0xE0(224) | in(8)=[C5 07 00 00 E0 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+019.584s] [ec] [12:16:54.854] ECWRITE addr=0x76A(LOGO_G) val=0x32(50) | in(8)=[6A 07 00 00 32 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+019.600s] [ec_poll] [12:16:54.870] ECREAD addr=0x7CA | in(4)=[CA 07 00 00] out(4)=[01 00 00 00] ret=0
+[+019.617s] [ec] [12:16:54.886] ECWRITE addr=0x76B(LOGO_B) val=0x0(0) | in(8)=[6B 07 00 00 00 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+019.618s] [hid] [12:16:54.886] HidD_SetFeature | h=0x1284 dev=? len=9 buf=[00 09 21 4B 00 00 00 00 00] ret=0x1
+[+019.633s] [ec_poll] [12:16:54.902] ECREAD addr=0x74C | in(4)=[4C 07 00 00] out(4)=[C6 00 00 00] ret=0
+[+019.649s] [ec_poll] [12:16:54.918] ECREAD addr=0x7CA | in(4)=[CA 07 00 00] out(4)=[01 00 00 00] ret=0
+[+019.665s] [ec] [12:16:54.934] ECREAD addr=0x7AB(LOGO_ONOFF) | in(4)=[AB 07 00 00] out(4)=[81 00 00 00] ret=0
+[+019.680s] [ec] [12:16:54.950] ECWRITE addr=0xF00(CPU_TEMP_UP[0]) val=0x30(48) | in(8)=[00 0F 00 00 30 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+019.696s] [ec] [12:16:54.966] ECWRITE addr=0xF11(CPU_TEMP_DN[1]) val=0x2E(46) | in(8)=[11 0F 00 00 2E 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+019.712s] [ec] [12:16:54.982] ECWRITE addr=0x7AB(LOGO_ONOFF) val=0x81(129) | in(8)=[AB 07 00 00 81 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+019.728s] [ec] [12:16:54.997] ECREAD addr=0x78C(OEM2_TURBO) | in(4)=[8C 07 00 00] out(4)=[00 00 00 00] ret=0
+[+019.743s] [ec_poll] [12:16:55.013] ECREAD addr=0x74C | in(4)=[4C 07 00 00] out(4)=[C6 00 00 00] ret=0
+[+019.759s] [ec] [12:16:55.029] ECWRITE addr=0x78C(OEM2_TURBO) val=0x10(16) | in(8)=[8C 07 00 00 10 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+019.774s] [ec] [12:16:55.045] ECWRITE addr=0xF20(CPU_DUTY[0]) val=0x0(0) | in(8)=[20 0F 00 00 00 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+019.790s] [ec] [12:16:55.060] ECWRITE addr=0xF01(CPU_TEMP_UP[1]) val=0x34(52) | in(8)=[01 0F 00 00 34 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+019.806s] [ec] [12:16:55.076] ECWRITE addr=0xF12(CPU_TEMP_DN[2]) val=0x32(50) | in(8)=[12 0F 00 00 32 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+019.822s] [ec_poll] [12:16:55.092] ECREAD addr=0x766 | in(4)=[66 07 00 00] out(4)=[93 00 00 00] ret=0
+[+019.823s] [hid] [12:16:55.092] HidD_SetFeature | h=0x1284 dev=? len=9 buf=[00 12 00 03 00 00 00 00 00] ret=0x1
+[+019.838s] [ec_poll] [12:16:55.108] ECREAD addr=0x7CA | in(4)=[CA 07 00 00] out(4)=[01 00 00 00] ret=0
+[+019.854s] [ec_poll] [12:16:55.124] ECREAD addr=0x74C | in(4)=[4C 07 00 00] out(4)=[C6 00 00 00] ret=0
+[+019.870s] [ec_poll] [12:16:55.140] ECREAD addr=0x7CA | in(4)=[CA 07 00 00] out(4)=[01 00 00 00] ret=0
+[+019.886s] [ec] [12:16:55.156] ECWRITE addr=0xF21(CPU_DUTY[1]) val=0x40(64) | in(8)=[21 0F 00 00 40 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+019.901s] [ec_poll] [12:16:55.171] ECREAD addr=0x7CC | in(4)=[CC 07 00 00] out(4)=[81 00 00 00] ret=0
+[+019.917s] [ec_poll] [12:16:55.187] ECREAD addr=0x74C | in(4)=[4C 07 00 00] out(4)=[C6 00 00 00] ret=0
+[+019.933s] [ec] [12:16:55.203] ECWRITE addr=0xF02(CPU_TEMP_UP[2]) val=0x38(56) | in(8)=[02 0F 00 00 38 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+019.949s] [ec_poll] [12:16:55.219] ECREAD addr=0x7CA | in(4)=[CA 07 00 00] out(4)=[01 00 00 00] ret=0
+[+019.964s] [ec_poll] [12:16:55.234] ECREAD addr=0x74C | in(4)=[4C 07 00 00] out(4)=[C6 00 00 00] ret=0
+[+019.981s] [ec_poll] [12:16:55.250] ECREAD addr=0x7CA | in(4)=[CA 07 00 00] out(4)=[01 00 00 00] ret=0
+[+019.981s] [hid] [12:16:55.250] HidD_SetFeature | h=0x1284 dev=? len=9 buf=[00 14 01 01 FF 00 00 00 00] ret=0x1
+[+019.996s] [ec_poll] [12:16:55.266] ECREAD addr=0x74C | in(4)=[4C 07 00 00] out(4)=[C6 00 00 00] ret=0
+[+020.013s] [ec] [12:16:55.282] ECWRITE addr=0xF13(CPU_TEMP_DN[3]) val=0x36(54) | in(8)=[13 0F 00 00 36 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.028s] [ec] [12:16:55.298] ECWRITE addr=0xF22(CPU_DUTY[2]) val=0x46(70) | in(8)=[22 0F 00 00 46 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.044s] [ec] [12:16:55.314] ECWRITE addr=0xF03(CPU_TEMP_UP[3]) val=0x3C(60) | in(8)=[03 0F 00 00 3C 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.060s] [ec] [12:16:55.330] ECWRITE addr=0xF14(CPU_TEMP_DN[4]) val=0x3A(58) | in(8)=[14 0F 00 00 3A 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.076s] [ec] [12:16:55.346] ECWRITE addr=0xF23(CPU_DUTY[3]) val=0x50(80) | in(8)=[23 0F 00 00 50 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.091s] [ec] [12:16:55.362] ECWRITE addr=0xF04(CPU_TEMP_UP[4]) val=0x40(64) | in(8)=[04 0F 00 00 40 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.107s] [ec] [12:16:55.377] ECWRITE addr=0xF15(CPU_TEMP_DN[5]) val=0x3E(62) | in(8)=[15 0F 00 00 3E 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.123s] [ec] [12:16:55.393] ECWRITE addr=0xF24(CPU_DUTY[4]) val=0x64(100) | in(8)=[24 0F 00 00 64 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.139s] [ec] [12:16:55.409] ECWRITE addr=0xF05(CPU_TEMP_UP[5]) val=0x44(68) | in(8)=[05 0F 00 00 44 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.155s] [ec] [12:16:55.425] ECWRITE addr=0xF16(CPU_TEMP_DN[6]) val=0x42(66) | in(8)=[16 0F 00 00 42 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.171s] [ec] [12:16:55.441] ECWRITE addr=0xF25(CPU_DUTY[5]) val=0x6E(110) | in(8)=[25 0F 00 00 6E 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.187s] [ec] [12:16:55.457] ECWRITE addr=0xF06(CPU_TEMP_UP[6]) val=0x48(72) | in(8)=[06 0F 00 00 48 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.202s] [ec] [12:16:55.472] ECWRITE addr=0xF17(CPU_TEMP_DN[7]) val=0x46(70) | in(8)=[17 0F 00 00 46 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.218s] [ec] [12:16:55.488] ECWRITE addr=0xF26(CPU_DUTY[6]) val=0x78(120) | in(8)=[26 0F 00 00 78 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.219s] [hid] [12:16:55.488] HidD_SetFeature | h=0x1284 dev=? len=9 buf=[00 08 21 05 05 4B 01 01 00] ret=0x1
+[+020.234s] [ec] [12:16:55.505] ECWRITE addr=0xF07(CPU_TEMP_UP[7]) val=0x4C(76) | in(8)=[07 0F 00 00 4C 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.250s] [ec] [12:16:55.521] ECWRITE addr=0xF18(CPU_TEMP_DN[8]) val=0x4A(74) | in(8)=[18 0F 00 00 4A 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.266s] [ec] [12:16:55.536] ECWRITE addr=0xF27(CPU_DUTY[7]) val=0x8C(140) | in(8)=[27 0F 00 00 8C 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.282s] [ec] [12:16:55.552] ECWRITE addr=0xF08(CPU_TEMP_UP[8]) val=0x50(80) | in(8)=[08 0F 00 00 50 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.298s] [ec] [12:16:55.568] ECWRITE addr=0xF19(CPU_TEMP_DN[9]) val=0x4E(78) | in(8)=[19 0F 00 00 4E 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.314s] [ec] [12:16:55.584] ECWRITE addr=0xF28(CPU_DUTY[8]) val=0xA0(160) | in(8)=[28 0F 00 00 A0 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.330s] [ec] [12:16:55.600] ECWRITE addr=0xF09(CPU_TEMP_UP[9]) val=0x55(85) | in(8)=[09 0F 00 00 55 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.346s] [ec] [12:16:55.616] ECWRITE addr=0xF1A(CPU_TEMP_DN[10]) val=0x52(82) | in(8)=[1A 0F 00 00 52 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.362s] [ec] [12:16:55.632] ECWRITE addr=0xF29(CPU_DUTY[9]) val=0xB4(180) | in(8)=[29 0F 00 00 B4 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.378s] [ec] [12:16:55.648] ECWRITE addr=0xF0A(CPU_TEMP_UP[10]) val=0xFF(255) | in(8)=[0A 0F 00 00 FF 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.394s] [ec] [12:16:55.664] ECWRITE addr=0xF1B(CPU_TEMP_DN[11]) val=0xFF(255) | in(8)=[1B 0F 00 00 FF 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.409s] [ec] [12:16:55.679] ECWRITE addr=0xF2A(CPU_DUTY[10]) val=0xB4(180) | in(8)=[2A 0F 00 00 B4 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.425s] [ec] [12:16:55.695] ECWRITE addr=0xF0B(CPU_TEMP_UP[11]) val=0xFF(255) | in(8)=[0B 0F 00 00 FF 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.441s] [ec] [12:16:55.711] ECWRITE addr=0xF1C(CPU_TEMP_DN[12]) val=0xFF(255) | in(8)=[1C 0F 00 00 FF 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.457s] [ec] [12:16:55.727] ECWRITE addr=0xF2B(CPU_DUTY[11]) val=0xB4(180) | in(8)=[2B 0F 00 00 B4 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.473s] [ec] [12:16:55.743] ECWRITE addr=0xF0C(CPU_TEMP_UP[12]) val=0xFF(255) | in(8)=[0C 0F 00 00 FF 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.489s] [ec] [12:16:55.759] ECWRITE addr=0xF1D(CPU_TEMP_DN[13]) val=0xFF(255) | in(8)=[1D 0F 00 00 FF 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.505s] [ec] [12:16:55.775] ECWRITE addr=0xF2C(CPU_DUTY[12]) val=0xB4(180) | in(8)=[2C 0F 00 00 B4 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.521s] [ec] [12:16:55.791] ECWRITE addr=0xF0D(CPU_TEMP_UP[13]) val=0xFF(255) | in(8)=[0D 0F 00 00 FF 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.537s] [ec] [12:16:55.806] ECWRITE addr=0xF1E(CPU_TEMP_DN[14]) val=0xFF(255) | in(8)=[1E 0F 00 00 FF 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.552s] [ec] [12:16:55.822] ECWRITE addr=0xF2D(CPU_DUTY[13]) val=0xB4(180) | in(8)=[2D 0F 00 00 B4 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.568s] [ec] [12:16:55.838] ECWRITE addr=0xF0E(CPU_TEMP_UP[14]) val=0xFF(255) | in(8)=[0E 0F 00 00 FF 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.584s] [ec] [12:16:55.854] ECWRITE addr=0xF1F(CPU_TEMP_DN[15]) val=0xFF(255) | in(8)=[1F 0F 00 00 FF 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.600s] [ec] [12:16:55.870] ECWRITE addr=0xF2E(CPU_DUTY[14]) val=0xB4(180) | in(8)=[2E 0F 00 00 B4 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.615s] [ec] [12:16:55.886] ECWRITE addr=0xF0F(CPU_TEMP_UP[15]) val=0xFF(255) | in(8)=[0F 0F 00 00 FF 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.631s] [ec] [12:16:55.902] ECWRITE addr=0xF2F(CPU_DUTY[15]) val=0xB4(180) | in(8)=[2F 0F 00 00 B4 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.647s] [ec] [12:16:55.918] ECWRITE addr=0xF30(GPU_TEMP_UP[0]) val=0x2E(46) | in(8)=[30 0F 00 00 2E 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.663s] [ec] [12:16:55.934] ECWRITE addr=0xF41(GPU_TEMP_DN[1]) val=0x2C(44) | in(8)=[41 0F 00 00 2C 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.679s] [ec] [12:16:55.950] ECWRITE addr=0xF50(GPU_DUTY[0]) val=0x0(0) | in(8)=[50 0F 00 00 00 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.695s] [ec] [12:16:55.965] ECWRITE addr=0xF31(GPU_TEMP_UP[1]) val=0x32(50) | in(8)=[31 0F 00 00 32 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.711s] [ec] [12:16:55.981] ECWRITE addr=0xF42(GPU_TEMP_DN[2]) val=0x30(48) | in(8)=[42 0F 00 00 30 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.727s] [ec] [12:16:55.997] ECWRITE addr=0xF51(GPU_DUTY[1]) val=0x3C(60) | in(8)=[51 0F 00 00 3C 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.743s] [ec] [12:16:56.013] ECWRITE addr=0xF32(GPU_TEMP_UP[2]) val=0x36(54) | in(8)=[32 0F 00 00 36 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.758s] [ec] [12:16:56.029] ECWRITE addr=0xF43(GPU_TEMP_DN[3]) val=0x34(52) | in(8)=[43 0F 00 00 34 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.775s] [ec] [12:16:56.045] ECWRITE addr=0xF52(GPU_DUTY[2]) val=0x46(70) | in(8)=[52 0F 00 00 46 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.790s] [ec] [12:16:56.061] ECWRITE addr=0xF33(GPU_TEMP_UP[3]) val=0x3A(58) | in(8)=[33 0F 00 00 3A 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.807s] [ec] [12:16:56.076] ECWRITE addr=0xF44(GPU_TEMP_DN[4]) val=0x38(56) | in(8)=[44 0F 00 00 38 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.822s] [ec] [12:16:56.093] ECWRITE addr=0xF53(GPU_DUTY[3]) val=0x50(80) | in(8)=[53 0F 00 00 50 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.838s] [ec] [12:16:56.108] ECWRITE addr=0xF34(GPU_TEMP_UP[4]) val=0x3E(62) | in(8)=[34 0F 00 00 3E 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.854s] [ec] [12:16:56.124] ECWRITE addr=0xF45(GPU_TEMP_DN[5]) val=0x3C(60) | in(8)=[45 0F 00 00 3C 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.869s] [ec] [12:16:56.140] ECWRITE addr=0xF54(GPU_DUTY[4]) val=0x66(102) | in(8)=[54 0F 00 00 66 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.885s] [ec] [12:16:56.155] ECWRITE addr=0xF35(GPU_TEMP_UP[5]) val=0x42(66) | in(8)=[35 0F 00 00 42 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.901s] [ec] [12:16:56.171] ECWRITE addr=0xF46(GPU_TEMP_DN[6]) val=0x40(64) | in(8)=[46 0F 00 00 40 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.916s] [ec] [12:16:56.187] ECWRITE addr=0xF55(GPU_DUTY[5]) val=0x6E(110) | in(8)=[55 0F 00 00 6E 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.933s] [ec] [12:16:56.203] ECWRITE addr=0xF36(GPU_TEMP_UP[6]) val=0x46(70) | in(8)=[36 0F 00 00 46 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.949s] [ec] [12:16:56.219] ECWRITE addr=0xF47(GPU_TEMP_DN[7]) val=0x44(68) | in(8)=[47 0F 00 00 44 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.964s] [ec] [12:16:56.234] ECWRITE addr=0xF56(GPU_DUTY[6]) val=0x78(120) | in(8)=[56 0F 00 00 78 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.980s] [ec] [12:16:56.250] ECWRITE addr=0xF37(GPU_TEMP_UP[7]) val=0x4A(74) | in(8)=[37 0F 00 00 4A 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+020.995s] [ec] [12:16:56.266] ECWRITE addr=0xF48(GPU_TEMP_DN[8]) val=0x48(72) | in(8)=[48 0F 00 00 48 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+021.011s] [ec] [12:16:56.281] ECWRITE addr=0xF57(GPU_DUTY[7]) val=0x8C(140) | in(8)=[57 0F 00 00 8C 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+021.027s] [ec] [12:16:56.297] ECWRITE addr=0xF38(GPU_TEMP_UP[8]) val=0x4E(78) | in(8)=[38 0F 00 00 4E 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+021.043s] [ec] [12:16:56.313] ECWRITE addr=0xF49(GPU_TEMP_DN[9]) val=0x4C(76) | in(8)=[49 0F 00 00 4C 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+021.059s] [ec] [12:16:56.329] ECWRITE addr=0xF58(GPU_DUTY[8]) val=0xA0(160) | in(8)=[58 0F 00 00 A0 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+021.075s] [ec] [12:16:56.345] ECWRITE addr=0xF39(GPU_TEMP_UP[9]) val=0x51(81) | in(8)=[39 0F 00 00 51 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+021.090s] [ec] [12:16:56.361] ECWRITE addr=0xF4A(GPU_TEMP_DN[10]) val=0x50(80) | in(8)=[4A 0F 00 00 50 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+021.106s] [ec] [12:16:56.376] ECWRITE addr=0xF59(GPU_DUTY[9]) val=0xB4(180) | in(8)=[59 0F 00 00 B4 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+021.122s] [ec] [12:16:56.392] ECWRITE addr=0xF3A(GPU_TEMP_UP[10]) val=0xFF(255) | in(8)=[3A 0F 00 00 FF 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+021.138s] [ec] [12:16:56.408] ECWRITE addr=0xF4B(GPU_TEMP_DN[11]) val=0xFF(255) | in(8)=[4B 0F 00 00 FF 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+021.154s] [ec] [12:16:56.424] ECWRITE addr=0xF5A(GPU_DUTY[10]) val=0xB4(180) | in(8)=[5A 0F 00 00 B4 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+021.170s] [ec] [12:16:56.440] ECWRITE addr=0xF3B(GPU_TEMP_UP[11]) val=0xFF(255) | in(8)=[3B 0F 00 00 FF 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+021.186s] [ec] [12:16:56.456] ECWRITE addr=0xF4C(GPU_TEMP_DN[12]) val=0xFF(255) | in(8)=[4C 0F 00 00 FF 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+021.202s] [ec] [12:16:56.472] ECWRITE addr=0xF5B(GPU_DUTY[11]) val=0xB4(180) | in(8)=[5B 0F 00 00 B4 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+021.217s] [ec] [12:16:56.488] ECWRITE addr=0xF3C(GPU_TEMP_UP[12]) val=0xFF(255) | in(8)=[3C 0F 00 00 FF 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+021.234s] [ec] [12:16:56.504] ECWRITE addr=0xF4D(GPU_TEMP_DN[13]) val=0xFF(255) | in(8)=[4D 0F 00 00 FF 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+021.249s] [ec] [12:16:56.520] ECWRITE addr=0xF5C(GPU_DUTY[12]) val=0xB4(180) | in(8)=[5C 0F 00 00 B4 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+021.266s] [ec] [12:16:56.536] ECWRITE addr=0xF3D(GPU_TEMP_UP[13]) val=0xFF(255) | in(8)=[3D 0F 00 00 FF 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+021.282s] [ec] [12:16:56.552] ECWRITE addr=0xF4E(GPU_TEMP_DN[14]) val=0xFF(255) | in(8)=[4E 0F 00 00 FF 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+021.298s] [ec] [12:16:56.568] ECWRITE addr=0xF5D(GPU_DUTY[13]) val=0xB4(180) | in(8)=[5D 0F 00 00 B4 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+021.313s] [ec] [12:16:56.583] ECWRITE addr=0xF3E(GPU_TEMP_UP[14]) val=0xFF(255) | in(8)=[3E 0F 00 00 FF 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+021.329s] [ec] [12:16:56.599] ECWRITE addr=0xF4F(GPU_TEMP_DN[15]) val=0xFF(255) | in(8)=[4F 0F 00 00 FF 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+021.344s] [ec] [12:16:56.615] ECWRITE addr=0xF5E(GPU_DUTY[14]) val=0xB4(180) | in(8)=[5E 0F 00 00 B4 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+021.360s] [ec] [12:16:56.631] ECWRITE addr=0xF3F(GPU_TEMP_UP[15]) val=0xFF(255) | in(8)=[3F 0F 00 00 FF 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+021.376s] [ec_poll] [12:16:56.646] ECREAD addr=0x7CC | in(4)=[CC 07 00 00] out(4)=[81 00 00 00] ret=0
+[+021.393s] [ec] [12:16:56.662] ECWRITE addr=0xF5F(GPU_DUTY[15]) val=0xB4(180) | in(8)=[5F 0F 00 00 B4 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+021.408s] [ec] [12:16:56.678] ECREAD addr=0xF00(CPU_TEMP_UP[0]) | in(4)=[00 0F 00 00] out(4)=[30 00 00 00] ret=0
+[+021.424s] [ec] [12:16:56.694] ECREAD addr=0xF01(CPU_TEMP_UP[1]) | in(4)=[01 0F 00 00] out(4)=[34 00 00 00] ret=0
+[+021.440s] [ec] [12:16:56.710] ECREAD addr=0x7C6(OEM6_APPLY) | in(4)=[C6 07 00 00] out(4)=[00 00 00 00] ret=0
+[+021.456s] [ec] [12:16:56.726] ECWRITE addr=0x7C6(OEM6_APPLY) val=0x4(4) | in(8)=[C6 07 00 00 04 00 00 00] out(4)=[FE FF FF FF] ret=0
+[+022.841s] [ec_poll] [12:16:58.111] ECREAD addr=0x7CC | in(4)=[CC 07 00 00] out(4)=[81 00 00 00] ret=0
+[+024.355s] [ec_poll] [12:16:59.625] ECREAD addr=0x7CC | in(4)=[CC 07 00 00] out(4)=[81 00 00 00] ret=0
+[+025.867s] [ec_poll] [12:17:01.137] ECREAD addr=0x7CC | in(4)=[CC 07 00 00] out(4)=[81 00 00 00] ret=0
+[+027.381s] [ec_poll] [12:17:02.650] ECREAD addr=0x7CC | in(4)=[CC 07 00 00] out(4)=[81 00 00 00] ret=0
+[+028.895s] [ec_poll] [12:17:04.165] ECREAD addr=0x7CC | in(4)=[CC 07 00 00] out(4)=[81 00 00 00] ret=0
+[+030.409s] [ec_poll] [12:17:05.678] ECREAD addr=0x7CC | in(4)=[CC 07 00 00] out(4)=[81 00 00 00] ret=0
+[+031.731s] 
+[+031.731s] Stopped after 31.7s, captured 559 messages
