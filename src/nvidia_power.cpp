@@ -73,18 +73,26 @@ void Power::restart() {
     DWORD code=0;if(!GetExitCodeProcess(handle.get(),&code) || code) throw std::runtime_error("GPU restart failed; restart Windows to activate staged limits");
     for(int i=0;;++i) {try {api_->reinitialize();Sleep(5000);return;} catch(...) {if(i>=19) throw;Sleep(250);}}
 }
-void Power::restore_budget() {
+void Power::restore_budget(bool restore_f7) {
     if(!budget_original_ || !budget_applied_) return;auto saved=*budget_original_,applied=*budget_applied_;budget_original_=budget_applied_={};
-    try {auto current=api_->budget(),desired=current;if(current.f7==applied.f7) desired.f7=saved.f7;if(current.platform==applied.platform) desired.platform=saved.platform;if(desired!=current) api_->set_budget(desired);}
+    try {auto current=api_->budget(),desired=current;if(restore_f7 && current.f7==applied.f7) desired.f7=saved.f7;if(current.platform==applied.platform) desired.platform=saved.platform;if(desired!=current) api_->set_budget(desired);}
     catch(const std::exception& ex) {log_(std::string("NVIDIA laptop budget not restored: ")+ex.what());}
 }
-void Power::apply(int watts) {
+void Power::apply(int watts,bool dynamic_boost) {
     if(watts<0 || int64_t(watts)*1000>UINT32_MAX) throw std::runtime_error("Invalid NVIDIA watts");uint32_t target=uint32_t(watts)*1000;
-    bool raise=enabled && target>original_.power.max;
-    if(raise) {auto current=api_->budget();if(!budget_applied_ || budget_applied_->platform!=current.platform) budget_original_=current;
-        auto desired=current.raise(target,*budget_original_);if(desired!=current) {budget_applied_=desired;api_->set_budget(desired);}}
-    api_->set_power(target);if(!raise) restore_budget();else log_("NVIDIA requested "+std::to_string(watts)+" W (above stock; laptop budget raised)");
+    // EC/ACPI publishes the new mode's F7 asynchronously. Do not restore the old
+    // mode's F7 over it, or carry the old mode's added platform headroom forward.
+    // The delayed GPU check qualifies the newly published budget after a switch.
+    bool mode_changed=budget_boost_ && *budget_boost_!=dynamic_boost;
+    if(mode_changed) restore_budget(false);
+    budget_boost_=dynamic_boost;
+    bool raise=false;
+    if(enabled && !mode_changed) {auto current=api_->budget();if(!budget_applied_ || budget_applied_->platform!=current.platform) budget_original_=current;
+        // Dynamic Boost can lower the live laptop budget below the VBIOS maximum.
+        raise=target>budget_original_->f7;
+        if(raise) {auto desired=current.raise(target,*budget_original_);if(desired!=current) {budget_applied_=desired;api_->set_budget(desired);}}}
+    api_->set_power(target);if(!raise) restore_budget();else log_("NVIDIA requested "+std::to_string(watts)+" W (laptop budget raised)");
 }
 bool Power::at_most(int watts) {auto p=api_->power();return p.requested && *p.requested<=uint32_t(watts)*1000 && p.enforced<=uint32_t(watts)*1000;}
-bool Power::applied(int watts) {return api_->power().requested==uint32_t(watts)*1000 && (watts<=stock_watts() || api_->budget().f7>=uint32_t(watts)*1000);}
+bool Power::applied(int watts) {return api_->power().requested==uint32_t(watts)*1000 && (!enabled || api_->budget().f7>=uint32_t(watts)*1000);}
 }
