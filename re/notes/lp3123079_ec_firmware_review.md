@@ -70,8 +70,9 @@ Address convention below:
 
 The common bank-call stubs at CODE 0x1100/0x1114/0x1128 select these banks. CODE
 addresses are instruction locations, **not host-writable EC RAM addresses**.
-The main BIOS payload was not fully unpacked/analyzed; no conclusion about its
-UEFI variable layout or safe NVRAM writes follows from this review. The embedded
+This review did not unpack the main BIOS. The later
+[`cooler/OCPL investigation`](liquid_cooler_ec_policy.md#amd-acpi-handoff)
+extracts its ACPI tables; neither review establishes safe NVRAM writes. The embedded
 `ITE EC-V14.6` string is not sufficient to decode the package's `14.810` version.
 
 ## 1. Project-ID collision is proved in firmware

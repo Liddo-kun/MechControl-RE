@@ -277,7 +277,12 @@ The EC has two liquid cooling registers confirmed across 45 of 46 OEM profiles:
 | `0x7E6` | `ADDR_LC_FAN_VALUE` | Liquid cooling fan duty |
 | `0x7E7` | `ADDR_LC_PUMP_VALUE` | Liquid cooling pump duty |
 
-These are likely bookkeeping registers updated by the OEM app for EC-side telemetry or auto-mode. Since we send commands directly over BLE to the cooler's MCU, these registers are not needed. They may become useful if EC-based auto-mode (temp-reactive pump/fan curves) is implemented in the future.
+The recovered older OEM service reads these for auto-mode fan/pump requests.
+Manual BLE commands do not need them. Separately, the OEM sets **0x7C7 bit 1**
+when BLE connects and clears it on disconnect. MechControl's BLE implementation
+omits this EC connection notification. The Intel ACPI field is `LCSE`; see
+[`register_reference.md`, section 11.9.1](register_reference.md#1191-liquid-cooler-connection-signal-0x7c7-bit-1)
+for evidence and model scope.
 
 ---
 
@@ -287,7 +292,7 @@ These are likely bookkeeping registers updated by the OEM app for EC-side teleme
 |---------|-------------|
 | Auto-mode (temp-based curves) | Adds complexity: needs temp polling loop, curve UI, pump safety logic. Manual control is the useful first step. |
 | Telemetry readback | Investigated thoroughly. Probe tool tested 8 candidate commands -- no response. ETW capture of OEM app showed no telemetry commands beyond what we already implement. The cooler does not appear to support readback. DSDT `BTLC` packet is likely host-to-cooler (sending temps), not cooler-to-host. |
-| EC registers 0x7E6/0x7E7 | Bookkeeping only. BLE direct control doesn't need them. |
+| EC registers 0x7E6/0x7E7 | OEM auto-mode requests; manual BLE control doesn't need them. Separate EC connection notification at 0x7C7 bit 1 is also omitted (see section 7). |
 | Fan LED (separate zone) | OEM's `FanLEDControl` is a distinct command from `LEDControl`. Tuxedo doesn't implement it. Could be added if the cooler has separate fan LEDs. |
 | Pump duty slider | Removed from UI. Pump is voltage-controlled only -- duty cycle byte has no hardware effect. Still sent in protocol (default 60) for compatibility. |
 

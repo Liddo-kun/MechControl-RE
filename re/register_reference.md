@@ -448,7 +448,7 @@ The byte is a bitfield (OEM code does RMW `| 1` to set it): bit 0 = activation (
    Write(0x727, Read(0x727) | 0x40)         -- CUME bit (PECI loop enable)
 5. Write(0x7C5, Read(0x7C5) | 0xE0)        -- fan curve enable
 6. Write fan table (0xF00-0xF5F)            -- CPU+GPU curves
-7. Write(0x7C7, 0x0C)                       -- fan curve parameter
+7. Write(0x7C7, 0x0C)                       -- OCPL=3, LCSE=0 (see 11.9.1)
 8. Write(0x7C6, 0x04)                       -- fan curve commit
 9. Write(0x706, 0x41)                       -- BIOS_CTRL init complete
 -- Verify: Read(0x741) & 0x05 == 0x01       -- EC active confirmation (bit 7 may be set)
@@ -705,7 +705,7 @@ OEM config bytes, BIOS OEM bytes, watchdog, complex power status.
 | `0x7A5` | RW | ADDR_AP_OEM_BYTE3 | AP OEM byte 3 |
 | `0x7C5` | RW | ADDR_AP_OEM_BYTE5 | Multi-bitfield: bit 7=fan curve enable, bit 6=service managed(?), bit 5=logo flag. Read-modify-write. |
 | `0x7C6` | RW | ADDR_AP_OEM_BYTE6 | Fan curve apply/mode flag. Write 0x04 to activate fan table, EC ignores 0xF00+ while 0x00. |
-| `0x7C7` | RW | ADDR_AP_OEM_BYTE7 | OEM byte 7. Written 0x0C during init. Near OEM5/OEM6. |
+| `0x7C7` | RW | ADDR_AP_OEM_BYTE7 | Bit 1 = host-reported liquid cooler connection (`LCSE`); bits 2-4 = OC/power level (`OCPL`). Current init writes 0x0C (level 3, cooler disconnected). See 11.9.1. |
 | `0x7C8` | RW | ADDR_AP_OEM_BYTE8 | OEM byte 8 |
 | `0x7CA` | R | ADDR_BIOS_OEM_BYTE8 | BIOS OEM byte 8 (polled by OEM app) |
 | `0x7CC` | R | ADDR_COMPLEX_POWER_STATUS | Complex power status / watchdog. OEM polls ~1.5s (reads 0x81). |
@@ -727,6 +727,45 @@ SSD temp, module IDs, ROM IDs, TCC offset defaults, port ID, liquid cooling.
 | `0x7E6` | RW | ADDR_LC_FAN_VALUE | Liquid cooling fan value |
 | `0x7E7` | RW | ADDR_LC_PUMP_VALUE | Liquid cooling pump value |
 | `0x7FB` | RW | ADDR_CHANGE_PORT_ID_WKD | Change port ID (WKD) |
+
+### 11.9.1 Liquid cooler connection signal (0x7C7 bit 1)
+
+Confirmed 2026-11-06 in the statically recovered Eluktronics 4.23.47.11
+GCUService: `LiquidCooling.SetECSupport(bool)` reads 0x7C7, changes only bit 1
+(mask 0x02), and writes it back. Its BLE Connected handler sets the bit; the
+default/disconnected handler clears it. This reports a software connection,
+not a physical hose or flow measurement. The separate support flag is 0x7A4 bit 7.
+
+Independent Intel ACPI evidence: `acpi/dsdt.dsl:104512-104515` names bit 1
+`LCSE` and bits 2-4 `OCPL`. The recovered service's `ReadHWOCLevel()` also
+decodes bits 2-4 as levels 0-3. The earlier "fan curve parameter" description
+of 0x7C7 was incorrect. Any connection update must preserve the other bits.
+
+Read-only IDY_7Y sample: 0x7A4=0x80, 0x7C7=0x0C (LCSE clear). Current native
+`src/controller.cpp` initialization writes that whole byte, and `src/cooler.cpp`
+does not signal EC connection changes. BLE control alone therefore does not
+implement the OEM connection notification. A scratch-only test build subsequently
+verified bit-1-only writes through WriteGuard on this machine. Forty-second
+CPU/GPU comparisons retained LCSE=1 but still reduced measured CPU power from
+about 200 W to 112-125 W; bit-off runs also reduced CPU power. This does not
+establish a fixed cooler allowance or reproduce the reported delayed battery draw.
+
+Source provenance/decryption: `notes/ec_0x741_bits.md`. Recovered local source:
+`C:/Temp/tandem/astra-741/service-decrypted.cs:23227-23295,23347-23354,23796-23818`.
+Read-only probe and sample: `C:/Temp/tandem/cooler-ec-investigation/`.
+
+AMD firmware confirms alternate CPU/GPU/fan policy and battery/protection
+decisions gated by this bit. Its battery/GPIO effects survive custom controls,
+but it **does not disable the separate adapter-current limiter** (about 430 W
+nominal for the 420 W adapter class). The reported 2-3-minute battery-draw onset
+remains unresolved. Exact offsets, GPIO decisions, timer findings and Intel tests:
+[`notes/liquid_cooler_ec_policy.md`](notes/liquid_cooler_ec_policy.md).
+
+In that AMD image, **OCPL=3 is normal**, not a maximum-power preset. GPU
+temperature >=87 C selects OCPL=2; recovery requires <82 C and an expired
+60-invocation hold. Level 2 subtracts 5 W from the firmware-table cTGP offset,
+but the activation+CUME custom GPU branch bypasses that adjustment. The EC
+produces this field independently of LCSE and may overwrite host values.
 
 ---
 

@@ -2,7 +2,19 @@
 
 ## Context
 
-This machine has a **shunt-modded GPU** (GFID=0x1B, ModuleIdGpu=0x1B). The shunt mod removes the GPU-side power limit detection, allowing it to draw more power. However, the EC still manages power delivery between CPU and GPU via the NPCF (Notify PCIe Function) system. Understanding and tuning these EC registers could unlock more GPU power.
+Historical IDY_7Y snapshots with a shunt-modded GPU (GFID=0x1B). Values below
+are from those snapshots, not current measurements. NPCF is NVIDIA's platform
+power-control interface. A shunt mod changes power measurement; it does not
+establish that every GPU or platform limit is bypassed.
+
+**Units corrected 2026-11-06:** NVPCF dynamic power parameters use **125 mW
+(1/8 W) units**, not watts. ACPI multiplies EC values by 8 to encode them.
+The configurable-TGP field is an offset relative to the GPU's static TGP,
+not the total CPU+GPU budget. Sources: NVIDIA
+[`nvpcf.h`](https://github.com/NVIDIA/open-gpu-kernel-modules/blob/e6a2e01579fbbd1ca2ed43fef2ee2589e9bd8bd9/src/nvidia/inc/kernel/platform/nvpcf.h)
+(`NVPCF_DYNAMIC_PARAMS_2X_POWER_UNIT_MW`) and
+[`client_resource.c`](https://github.com/NVIDIA/open-gpu-kernel-modules/blob/e6a2e01579fbbd1ca2ed43fef2ee2589e9bd8bd9/src/nvidia/src/kernel/rmapi/client_resource.c)
+(`ctgpOffsetmW`, `targetTppOffsetmW`, `maxOutputOffsetmW`).
 
 ## DSDT-Discovered GPU Power Registers
 
@@ -13,19 +25,19 @@ The DSDT defines a complete GPU power management system in the EC memory region 
 | Register | DSDT Name | Description | OEM Value | Scaling |
 |----------|-----------|-------------|-----------|---------|
 | `0x743` | (bits) | DB ctrl — GNEN (bit 0), ECDC (bit 1) | 0x05 | Bitfield |
-| `0x744` | CTVA | GPU control value A (base TGP) | 0x37 (55) | Direct W |
+| `0x744` | CTVA | Configurable TGP input offset | 0x37 (55) | +55 W relative to model/VBIOS base; see register reference |
 | `0x745` | DBCT | dGPU dynamic power control | 0x00 | Direct W |
 | `0x746` | MXDB | Max dGPU power | 0x05 (5) | Direct W |
 | `0x747` | MIDB | Min dGPU power | 0x00 | Direct W |
-| `0x7D5` | DBAP | **dGPU amperage/power** — EC uses `DBAP * 8` for NPCF power allocation | 0x05 (40W) | x8 watts |
+| `0x7D5` | DBAP | EC-produced Dynamic Boost maximum offset; ACPI sends `DBAP * 8` as AMAT/MAGA | 0x05 (+5 W) | 1 W per EC count |
 | `0x7D6` | DBSP | dGPU spec/sustain power | 0x00 | Unknown |
 
-### Thermal Budget Registers
+### Published NVIDIA Power Parameters
 
 | Register | DSDT Name | Description | OEM Value | Scaling |
 |----------|-----------|-------------|-----------|---------|
-| `0x788` | CTWA | **Thermal workload adjustment** — EC uses `CTWA * 8` for AC thermal budget | 0x37 (440W) | x8 watts |
-| `0x7F7` | ETPP | **Extended thermal power point** — EC uses `ETPP * 8` | 0x00 | x8 watts |
+| `0x788` | CTWA | EC-produced configurable-TGP offset; ACPI sends `CTWA * 8` as ACBT/TGPA | 0x37 (+55 W) | 1 W per EC count |
+| `0x7F7` | ETPP | EC-produced TPP parameter; ACPI sends `ETPP * 8` as ATPP/TPPA under its CUME condition | 0x00 | 1 W per EC count |
 
 ### GPU Identity & Status
 
@@ -59,40 +71,33 @@ The EC communicates GPU power needs to the OS via ACPI:
 
 1. EC receives power state change → triggers `_Q84` query
 2. `_Q84` reads `DBEN` and `DBAP` from EC
-3. Sets `NPCF.DBAC` (enable) and `NPCF.AMAT = DBAP * 8` (power in watts)
+3. Sets `NPCF.DBAC` (disable flag: 0=enabled) and `NPCF.AMAT = DBAP * 8` (encoded in 1/8 W)
 4. OS/driver receives notification and adjusts GPU power delivery
 
 Other EC queries:
 - `_Q80`/`_Q81`: GPU power state changes, triggers `NPCF.NPCF()` via dGPU UUID `36b49710-2483-11e7-9598-0800200c9a66`
-- `_Q83`: Thermal management — `NPCF.ACBT = CTWA * 8`
-- `_Q9C`: Extended thermal power point — `NPCF.ATPP = ETPP * 8`
+- `_Q83`: Configurable-TGP update — `NPCF.ACBT = CTWA * 8`
+- `_Q9C`: TPP update — `NPCF.ATPP = ETPP * 8` when CUME is clear
 
-### GPU Model Thermal Ceiling (from DSDT init)
+### GPU Model TPP Parameter (from DSDT init)
 
 GFID-based thermal power point assignment:
-- GFID 0x19: `ATPP = 0x04D8` = 1240W
-- GFID 0x1A: `ATPP = 0x0640` = 1600W
-- **GFID 0x1B: `ATPP = 0x0640` = 1600W** (this machine)
+- GFID 0x19: `ATPP = 0x04D8` = 155 W in protocol units
+- GFID 0x1A: `ATPP = 0x0640` = 200 W in protocol units
+- **GFID 0x1B: `ATPP = 0x0640` = 200 W in protocol units** (this machine)
 
-## Exploration Ideas
+The NVIDIA driver interprets this as a TPP offset parameter; these numbers alone
+do not establish an absolute total-system or adapter limit.
 
-### 1. CTWA (0x788) — Total Thermal Budget
-Currently 55 → 440W total budget for CPU+GPU. With a shunt mod, the GPU can physically draw more than its allocated share. Increasing CTWA could tell the EC to allow a higher total power envelope. **Caution:** the AC adapter has a physical watt limit.
+## Interpretation Limits
 
-### 2. DBAP (0x7D5) — GPU Power Allocation
-Currently 5 → 40W via NPCF. This seems dynamic (EC adjusts it based on load). Writing a higher value might increase the GPU's power allocation, but the EC may overwrite it.
-
-### 3. OCP1/OCP2 (0x763/0x764) — Overcurrent Protection
-These are 0x00 when the OEM app runs but 0x2D (45) in standalone. The OEM clears them during init. If these are enforced power limits, clearing them removes a cap. Already cleared by MechControl's EC init in working state.
-
-### 4. MXDB (0x746) — Max dGPU Power
-Currently 5W — but this is the Dynamic Boost max, not total GPU power. With shunt mod, DB isn't the limiting factor.
-
-### 5. PCIEPowerControl UEFI Variable
-4 bytes = `0x35` (53). Unknown meaning. Under GUID `{7a09bc55-83e8-4d4d-93b0-89d80eedb720}`. Could be a PCIe slot power budget that limits GPU power delivery at the BIOS level.
-
-### 6. ETPP (0x7F7) — Extended Thermal Power Point
-Currently 0. The EC uses `ETPP * 8` to set `NPCF.ATPP`. Writing a value here could override the GFID-based default (1600W). Not useful unless the default is too low.
+- 0x788 and 0x7D5 are EC-produced outputs, not established independent host controls.
+- The OCP1/OCP2 snapshot difference does not prove that the OEM clears them or
+  that writing zero disables a limit. Current native initialization does not
+  explicitly write these addresses.
+- `PCIEPowerControl` UEFI variable value 0x35, under GUID
+  `{7a09bc55-83e8-4d4d-93b0-89d80eedb720}`, remains uninterpreted.
+- Cooler/OCPL firmware analysis: [`liquid_cooler_ec_policy.md`](liquid_cooler_ec_policy.md).
 
 ## Saved Data
 
@@ -107,10 +112,3 @@ Currently 0. The EC uses `ETPP * 8` to set `NPCF.ATPP`. Writing a value here cou
 - `ec_snapshot.exe snapshot` / `ec_snapshot.exe diff` — full EC dump and comparison
 - `ec_write.exe <addr> <value>` — write individual EC registers (use with caution)
 - `fan_table_dump.exe` — quick view of key power + fan registers
-
-## Safety Notes
-
-- **CTWA controls total system power budget.** Setting it above the AC adapter's capacity could cause shutdown under load.
-- **OCP registers may exist for hardware protection.** Clearing them on untested hardware could damage VRMs.
-- **DBAP is likely EC-managed.** The EC updates it dynamically; manual writes may be immediately overwritten.
-- **Always take an EC snapshot before experimenting** so you can compare and revert.
