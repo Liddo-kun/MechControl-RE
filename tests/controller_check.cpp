@@ -109,7 +109,7 @@ struct GpuFixture : nv::Power {
         if(g.nvvdd_ma || g.msvdd_ma || g.board_input_ma) modified=true;
         enabled=unlock;if(g.nvvdd_ma) rails.nv.current=*g.nvvdd_ma;if(g.msvdd_ma) rails.ms->current=*g.msvdd_ma;++sets;
     }
-    void apply(int watts) override {read();request=watts*1000;++sets;}
+    void apply(int watts,bool) override {read();request=watts*1000;++sets;}
     bool at_most(int watts) override {read();return request && *request<=uint32_t(watts*1000);}
     bool applied(int watts) override {read();return request==uint32_t(watts*1000);}
 };
@@ -178,7 +178,9 @@ void gpu_integration(const std::filesystem::path& root) {
     before=driver->sets;check(c.execute(CliCommand{{"gpu","--nvvdd","125.0001A"}}).code==2 && driver->sets==before,"fractional milliamp request fails without writes");
     check(c.execute(CliCommand{{"gpu","--nvvdd","200A"}}).code==1 && driver->sets==before,"CLI above active ceiling refuses without restart or current writes");
     driver->fail_budget=true;r.state->writes.clear();GpuSettings above;above.tgp=200;
-    auto refused_budget=c.execute(GpuApply{above});check(refused_budget.code==1 && !refused_budget.partial && r.state->writes.empty() && driver->request==70000u && driver->enabled,"unsupported budget refuses above-stock GPU EC/F8 requests without discarding the working owner");driver->fail_budget=false;
+    auto refused_budget=c.execute(GpuApply{above});check(refused_budget.code==1 && !refused_budget.partial && r.state->writes.empty() && driver->request==70000u && driver->enabled,"unsupported budget refuses above-stock GPU EC/F8 requests without discarding the working owner");
+    above.tgp=175;above.dynamic_boost_enabled=false;
+    refused_budget=c.execute(GpuApply{above});check(refused_budget.code==1 && !refused_budget.partial && r.state->writes.empty() && driver->request==70000u,"unlocked stock-ceiling request also qualifies the live budget before EC/F8 writes when Dynamic Boost is off");driver->fail_budget=false;
     driver->request={};status=c.execute(CliCommand{{"status","--json"}});j=parse(status.text);
     check(j["gpu"]["tgp"]["value"]==95 && j["gpu"]["requestedWatts"].is_null(),"awake status drops cached below-floor setpoint when driver reset cleared the actual request");
     auto p=profile();p.gpu->bios_override_enabled=false;write_json(root/"gpu/userprofile_1.json",p,true);
@@ -597,7 +599,7 @@ int main(int argc,char** argv) {
              std::cout<<"Verified owned override enabled: "<<power.enabled<<'\n';
              bool budget_supported=true;try {power.budget();} catch(const std::exception& ex) {budget_supported=false;std::cout<<"Budget unavailable: "<<ex.what()<<'\n';}
              if(!budget_supported && power.enabled) {auto before=power.limits();
-                 bool refused=false;try {power.apply(power.stock_watts()+1);} catch(const std::exception& ex){refused=true;std::cout<<ex.what()<<'\n';}
+                 bool refused=false;try {power.apply(power.stock_watts()+1,true);} catch(const std::exception& ex){refused=true;std::cout<<ex.what()<<'\n';}
                  auto after=power.limits();check(refused && before.requested==after.requested,"invalid budget refuses above-stock F8 raise without changing the driver request");}
             }
             auto delivery=std::make_shared<Delivery>();Log log(directory/"worker.log");WorkerOptions options;options.state_directory=directory;

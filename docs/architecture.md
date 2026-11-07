@@ -36,8 +36,10 @@ known actions in damaged records that the older reader can lose.
 shared at `%ProgramData%/MechControl/NvidiaOverrides/originals.txt`; they are not
 per-release settings and must not be replaced by an old backup during rollback.
 `peripherals.*`, `cooler.*` and `ble.*` own HID lighting and BLE operations. Queue
-acceptance is not completed cooler Apply or saved state. Independent usable GPU
-features survive unsupported F7 data; unsupported above-stock writes do not.
+acceptance is not completed cooler Apply or saved state. Unlocked GPU power writes
+qualify and maintain the live F7 laptop budget, which can fall below the VBIOS
+maximum when Dynamic Boost is off. Independent usable GPU features survive
+unsupported F7 data; unlocked power writes do not.
 
 Settings, five slots, peripheral state and logs live beside the executable.
 Settings/slots use flushed temporary-file replacement; slot temporaries are not

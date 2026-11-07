@@ -40,7 +40,7 @@ public:
     std::optional<mech::nv::Dlppc> dlppc() override {return mech::nv::Dlppc{true,7,2048};}
     bool needs_restart(bool,const mech::config::GpuSettings&) override {return false;}
     void configure(bool unlock,const mech::config::GpuSettings&,bool) override {enabled=unlock;}
-    void apply(int watts) override {requested_=watts;}
+    void apply(int watts,bool) override {requested_=watts;}
     bool at_most(int watts) override {return requested_<=watts;}bool applied(int watts) override {return requested_==watts;}
 };
 inline mech::WorkerOptions ui_page_options(const std::filesystem::path& root,std::shared_ptr<UiPageState> state) {

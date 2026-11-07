@@ -86,13 +86,13 @@ void Controller::apply_gpu(GpuSettings g) {
     auto requested=g;auto min=control_limit(session_.profile,"TGP").min;
     auto held=[&] {if(thermal_->holds(Gpu)) {if(!gpu_minimum_) throw std::runtime_error("Model-specific GPU minimum unavailable");g.tgp=gpu_unlocked_?std::clamp(std::min(g.tgp,driver_watts_.value_or(g.tgp)),gpu_min(),min):min;g.dynamic_boost_enabled=false;g.dynamic_boost_watts=0;}};
     held();
-    if(!nvidia_busy_ && gpu_unlocked_ && g.tgp+(g.dynamic_boost_enabled?g.dynamic_boost_watts:0)>nvidia_->stock_watts()) {
-        nvidia_work([&]{nvidia_->budget();});held(); // No above-stock EC request on an unqualified budget, or after an intervening trip.
+    if(!nvidia_busy_ && gpu_unlocked_) {
+        nvidia_work([&]{nvidia_->budget();});held(); // Qualify the live budget before EC writes, including a reduced Dynamic Boost-off budget.
     }
     batch(gpu_plan(g));
     if(nvidia_busy_) throw std::runtime_error("NVIDIA operation in progress; EC minimum applied, driver verification pending");
     if(gpu_unlocked_ || gpu_driver_uncertain_) {
-        int watts=0;nvidia_work([&]{auto power=nvidia_->limits();watts=std::min(int(power.max/1000),g.tgp+(g.dynamic_boost_enabled?g.dynamic_boost_watts:0));nvidia_->apply(watts);});driver_watts_=watts;
+        int watts=0;nvidia_work([&]{auto power=nvidia_->limits();watts=std::min(int(power.max/1000),g.tgp+(g.dynamic_boost_enabled?g.dynamic_boost_watts:0));nvidia_->apply(watts,g.dynamic_boost_enabled);});driver_watts_=watts;
     } else driver_watts_={};
     last_gpu_=requested;if(nvidia_) gpu_check_at_=GetTickCount64()+3000;
     thermal_->enforce(true);

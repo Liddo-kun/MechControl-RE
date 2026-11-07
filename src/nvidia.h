@@ -103,14 +103,15 @@ public:
     virtual void set_dlppc(bool active) {api_->set_dlppc(active);}
     virtual bool needs_restart(bool,const config::GpuSettings&);
     virtual void configure(bool,const config::GpuSettings&,bool allow_restart);
-    virtual void apply(int watts);virtual bool at_most(int);virtual bool applied(int);
+    virtual void apply(int watts,bool dynamic_boost);virtual bool at_most(int);virtual bool applied(int);
 protected:
     Power()=default; // Injected controller fixtures provide the same narrow backend operations.
 private:
-    void verify(const Bytes&);void restore_budget();void restart();
+    void verify(const Bytes&);void restore_budget(bool restore_f7=true);void restart();
     std::unique_ptr<Api> api_;std::unique_ptr<Store> store_;Bios original_;
     bool board_verified_=false;
     std::optional<Budget> budget_original_,budget_applied_;
+    std::optional<bool> budget_boost_;
     std::function<void(const std::string&)> log_;
 };
 // Value-only profile planning: never opens NVIDIA for automatic or stock-current loads.
