@@ -19,8 +19,10 @@
     "logoOnOff": "0x7AB", "logoR": "0x769", "logoG": "0x76A", "logoB": "0x76B",
     "logoTrigger": "0x767", "logoCommit": "0x78C",
     "projectId": "0x740",
-    "fanSwitchSpeed": "0x787"
+    "fanSwitchSpeed": "0x787",
+    "ecBypass": "0x780", "ecBypassLimits": "0x781", "acStatus": "0x490", "ecRunState": "0x6E6"
   },
+  "ecBypass": { "value": "0xA2", "ecVersions": ["77.0"] },
   "fanTable": {
     "format": "RamFan1",
     "cpuTempUpBase": "0xF00", "cpuTempDownBase": "0xF10", "cpuDutyBase": "0xF20",
@@ -64,6 +66,7 @@
     "0x787",
     "0x741", "0x7C6",
     "0x708", "0x709", "0x748", "0x706", "0x7C7",
+    "0x780",
     "0xF00-0xF5F"
   ]
 }

@@ -15,8 +15,9 @@ template<class F> static std::optional<int> unique(uint32_t mask,F match) {
 }
 struct Api::Native {
     using Query=void*(__cdecl*)(uint32_t);
-    HMODULE nvapi=nullptr,nvml=nullptr;Query query=nullptr;void* gpu=nullptr;void* device=nullptr;
-    bool initialized=false,nvml_initialized=false,platform_initialized=false;
+    HMODULE nvapi=nullptr,nvml=nullptr;Query query=nullptr;void* gpu=nullptr;
+    uint32_t bus=0,pci=0,subsystem=0; // NVAPI identity the NVML device must match.
+    bool initialized=false,platform_initialized=false;
     using Dispatch=int(__cdecl*)(uint32_t,void*,uint32_t,uint64_t,uint8_t,uint8_t,uint32_t);
     Dispatch dispatch=nullptr;uint32_t native_size=0;
     Bytes scratch;
@@ -32,11 +33,29 @@ struct Api::Native {
         scratch.assign(b.size()+8192,0xcd);std::copy(b.begin(),b.end(),scratch.begin()+4096);
         call_guarded(id,scratch,platform);std::copy(scratch.begin()+4096,scratch.end()-4096,b.begin());
     }
-    uint32_t enforced() {uint32_t value=0;check(symbol<int(__cdecl*)(void*,uint32_t*)>("nvmlDeviceGetEnforcedPowerLimit")(device,&value),"NVML enforced power");return value;}
-    uint32_t clock() {uint32_t v=0;check(symbol<int(__cdecl*)(void*,uint32_t,uint32_t*)>("nvmlDeviceGetClockInfo")(device,0,&v),"NVML graphics clock");return v;}
+    uint32_t enforced(void* device) {uint32_t value=0;check(symbol<int(__cdecl*)(void*,uint32_t*)>("nvmlDeviceGetEnforcedPowerLimit")(device,&value),"NVML enforced power");return value;}
+    uint32_t clock(void* device) {uint32_t v=0;check(symbol<int(__cdecl*)(void*,uint32_t,uint32_t*)>("nvmlDeviceGetClockInfo")(device,0,&v),"NVML graphics clock");return v;}
+    void* device(Identity* found) {
+        uint32_t count=0;check(symbol<int(__cdecl*)(uint32_t*)>("nvmlDeviceGetCount_v2")(&count),"NVML Count");void* device=nullptr;
+        for(uint32_t i=0;i<count;++i) {
+            void* candidate=nullptr;check(symbol<int(__cdecl*)(uint32_t,void**)>("nvmlDeviceGetHandleByIndex_v2")(i,&candidate),"NVML Handle");Bytes data(68);
+            check(symbol<int(__cdecl*)(void*,void*)>("nvmlDeviceGetPciInfo_v3")(candidate,data.data()),"NVML PCI info");
+            if(u32(data,20)!=bus || u32(data,28)!=pci || u32(data,32)!=subsystem) continue;
+            require(!device,"ambiguous NVAPI/NVML PCI identity");device=candidate;if(!found) continue;
+            std::string bdf(reinterpret_cast<char*>(data.data()+36),strnlen(reinterpret_cast<char*>(data.data()+36),32));auto dot=bdf.rfind('.');
+            require(dot!=std::string::npos && dot+2==bdf.size() && bdf.back()>='0' && bdf.back()<='7' && u32(data,24)<=31,"PCI function identity");
+            found->domain=u32(data,16);found->slot=u32(data,24);found->function=bdf.back()-'0';
+        }
+        require(device!=nullptr,"NVML adapter does not match NVAPI PCI identity");return device;
+    }
+    // NVML handles crash when used after a GPU reset (a driver reset on waking, a GPU restart), so each use opens NVML afresh.
+    template<class F> void session(F use,Identity* found=nullptr) {
+        check(symbol<int(__cdecl*)()>("nvmlInit_v2")(),"NVML Init");auto shutdown=symbol<int(__cdecl*)()>("nvmlShutdown");
+        try {use(device(found));} catch(...) {shutdown();throw;}
+        shutdown();
+    }
     ~Native() {
         if(platform_initialized) {auto p=query(0xd7c61344);if(p) reinterpret_cast<int(__cdecl*)(uint32_t)>(p)(1);}
-        if(nvml_initialized) {auto p=GetProcAddress(nvml,"nvmlShutdown");if(p) reinterpret_cast<int(__cdecl*)()>(p)();}
         if(initialized) {auto p=query(0xd22bdd7e);if(p) reinterpret_cast<int(__cdecl*)()>(p)();}
         if(nvml) FreeLibrary(nvml);if(nvapi) FreeLibrary(nvapi);
     }
@@ -73,7 +92,11 @@ struct Api::Native {
         require(std::all_of(guarded.begin(),guarded.begin()+4096,[](auto v){return v==0xcd;}) && std::all_of(guarded.end()-4096,guarded.end(),[](auto v){return v==0xcd;}),"F7 buffer overrun");
         require(u32(b,0x30)==handle && u32(b,0x34)==method && u32(b,0x3c)==(1u<<index) && u32(b,offset+4)==0xf7,"F7 response identity");
         for(size_t i=0x38;i<b.size();++i) if(i!=0x38 && i!=offset-4 && i!=offset-3 && !(i>=0x3c && i<0x40) && !(i>=offset && i<offset+8)) require(b[i]==0,"F7 response bounds");
-        check(status,"F7 dispatch");require(u32(b,0x2c)==1,"F7 completion");auto result=u32(b,offset);require(result && result!=UINT32_MAX,"F7 value");return result;
+        check(status,"F7 dispatch");require(u32(b,0x2c)==1,"F7 completion");auto result=u32(b,offset);
+        // Seen after the driver reset the GPU on waking from Modern Standby; only a GPU restart cleared it.
+        if(!result || result==UINT32_MAX) throw std::runtime_error("NVIDIA laptop power budget (F7) is unreadable. This usually follows a GPU driver reset, for example on waking from sleep. "
+            "Turn the GPU unlock off and on to restart the GPU, or restart Windows.");
+        return result;
     }
     Bytes platform() {
         init_budget();Bytes b(0xc88);put(b,0,1);put(b,4,0x10c88);call(0x93456591,b,true);
@@ -91,17 +114,7 @@ Api::Api() {
     uint32_t pci=0,subsystem=0,revision=0,ext=0,bus=0,driver=0;char branch[64]{};
     check(n.resolve<int(__cdecl*)(void*,uint32_t*,uint32_t*,uint32_t*,uint32_t*)>(0x2ddfb66e)(n.gpu,&pci,&subsystem,&revision,&ext),"PCIIdentifiers");
     check(n.resolve<int(__cdecl*)(void*,uint32_t*)>(0x1be0b8e5)(n.gpu,&bus),"BusId");check(n.resolve<int(__cdecl*)(uint32_t*,char*)>(0x2926aaad)(&driver,branch),"DriverVersion");
-    n.nvml=Native::load(L"nvml.dll");check(n.symbol<int(__cdecl*)()>("nvmlInit_v2")(),"NVML Init");n.nvml_initialized=true;
-    check(n.symbol<int(__cdecl*)(uint32_t*)>("nvmlDeviceGetCount_v2")(&count),"NVML Count");
-    for(uint32_t i=0;i<count;++i) {
-        void* candidate=nullptr;check(n.symbol<int(__cdecl*)(uint32_t,void**)>("nvmlDeviceGetHandleByIndex_v2")(i,&candidate),"NVML Handle");Bytes data(68);
-        check(n.symbol<int(__cdecl*)(void*,void*)>("nvmlDeviceGetPciInfo_v3")(candidate,data.data()),"NVML PCI info");
-        if(u32(data,20)!=bus || u32(data,28)!=pci || u32(data,32)!=subsystem) continue;
-        require(!n.device,"ambiguous NVAPI/NVML PCI identity");std::string bdf(reinterpret_cast<char*>(data.data()+36),strnlen(reinterpret_cast<char*>(data.data()+36),32));auto dot=bdf.rfind('.');
-        require(dot!=std::string::npos && dot+2==bdf.size() && bdf.back()>='0' && bdf.back()<='7' && u32(data,24)<=31,"PCI function identity");
-        n.device=candidate;identity.domain=u32(data,16);identity.slot=u32(data,24);identity.function=bdf.back()-'0';
-    }
-    require(n.device!=nullptr,"NVML adapter does not match NVAPI PCI identity");
+    n.nvml=Native::load(L"nvml.dll");n.bus=bus;n.pci=pci;n.subsystem=subsystem;n.session([](void*){},&identity);
     call_=[this](uint32_t id,Bytes& b){native_->call(id,b);};
     auto str=[&](uint32_t id){Bytes b(64);call_(id,b);return std::string(reinterpret_cast<char*>(b.data()),strnlen(reinterpret_cast<char*>(b.data()),b.size()));};
     identity.device=static_cast<uint16_t>(pci>>16);identity.subsystem=subsystem;identity.bus=bus;identity.bios=str(0xa561fd7d);identity.name=str(0xceee8e9f);
@@ -123,7 +136,8 @@ Api::Board Api::board() {
 Bytes Api::power_control(int i) {auto b=packet(0x528,0x10528);put(b,4,1u<<i);put(b,0x2c+i*0x28,0xf8);return b;}
 PowerLimits Api::power() {
     auto p=board();auto c=power_control(p.index);call_(0x33ab0353,c);version(c,0x10528);require(u32(c,4)==(1u<<p.index) && u32(c,0x2c+p.index*0x28)==0xf8,"F8 selection readback");
-    auto v=u32(c,0x28+p.index*0x28);return {p.min,p.def,p.max,native_?native_->enforced():0,v && v!=UINT32_MAX?std::optional(v):std::nullopt};
+    uint32_t enforced=0;if(native_) native_->session([&](void* d){enforced=native_->enforced(d);});
+    auto v=u32(c,0x28+p.index*0x28);return {p.min,p.def,p.max,enforced,v && v!=UINT32_MAX?std::optional(v):std::nullopt};
 }
 void Api::set_power(uint32_t mw) {auto p=board();require(mw>=p.min && mw<=p.max,"power request range");auto c=power_control(p.index);put(c,0x28+p.index*0x28,mw);call_(0x17695269,c);
     for(int i=0;;++i) {auto r=power();if(r.requested==mw && r.enforced<=mw) return;if(i==15) throw std::runtime_error("NVIDIA F8/enforced readback failed");Sleep(100);}}
@@ -200,7 +214,7 @@ Telemetry Api::telemetry() {
     auto limit=[&](Policy p)->std::optional<uint32_t> {auto v=u32(b,entry(p.index)+4);return u32(b,entry(p.index))==p.type && v>=p.min && v<=p.max?std::optional(v):std::nullopt;};
     t.nv_prediction=value(current,0x1690);t.ms_prediction=value(current,0x1e70);t.current_khz=value(current,4);t.power_khz=value(power,4);t.ceiling_khz=value(current,0x24);if(!t.ceiling_khz) t.ceiling_khz=value(power,0x24);
     t.nv_limit=limit(r.nv);if(r.ms) t.ms_limit=limit(*r.ms);if(r.input) t.input_limit=limit(*r.input);if(board_power && u32(b,entry(*board_power)+8)) t.gpu_mw=u32(b,entry(*board_power)+8);t.core_mw=value(power,0x60);
-    if(native_) {try {t.clock_mhz=native_->clock();} catch(...) {}try {t.enforced_mw=native_->enforced();} catch(...) {}}
+    if(native_) try {native_->session([&](void* d){try {t.clock_mhz=native_->clock(d);} catch(...) {}t.enforced_mw=native_->enforced(d);});} catch(...) {}
     t.ipc=inline_activity();return t;
 }
 }

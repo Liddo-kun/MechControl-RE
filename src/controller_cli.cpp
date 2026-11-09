@@ -34,6 +34,7 @@ Json Controller::presentation(bool read,bool gpu_live,int page) {
         j["identity"]={{"baseboard",session_.identity.baseboard},{"cpu",session_.identity.cpu_name}};
     }
     if((read && (page==1 || page==-2)) || fan_revision_!=presented_fan_) {j["fan"]=fan_intent_;presented_fan_=fan_revision_;}
+    if((read && (page==0 || page==-2)) || advanced_revision_!=presented_advanced_) {j["advanced"]=advanced_status();presented_advanced_=advanced_revision_;}
     if(read && (page==2 || page==-2)) j["thermal"]=thermal_->state();
     if(page==1 && linked_ && (read || written_revision_!=presented_written_)) {
         j["writtenCpu"]=nullable(written_cpu_);j["writtenGpu"]=nullable(written_gpu_);presented_written_=written_revision_;
@@ -94,8 +95,10 @@ Json Controller::gpu_budget() {
 }
 Json Controller::cpu_status() {
     if(!enabled("cpuPower")) return nullptr;
-    auto& p=session_.profile;auto v=cpu();return {{"pl1",setting(v.pl1,control_limit(p,"PL1"))},{"pl2",setting(v.pl2,control_limit(p,"PL2"))},
-        {"pl4",setting(v.pl4,control_limit(p,"PL4"))},{"tempLimit",setting(v.temp_limit,control_limit(p,"cpuTempLimit"))}};}
+    auto& p=session_.profile;std::string preset;auto v=cpu(&preset);Json j={{"pl1",setting(v.pl1,control_limit(p,"PL1"))},{"pl2",setting(v.pl2,control_limit(p,"PL2"))},
+        {"pl4",setting(v.pl4,control_limit(p,"PL4"))},{"tempLimit",setting(v.temp_limit,control_limit(p,"cpuTempLimit"))}};
+    if(!preset.empty()) j["preset"]=preset; // No custom limits set; see cpu().
+    return j;}
 Json Controller::gpu_status(bool presentation) {
     if(!enabled("gpuPower")) return nullptr;
     auto& p=session_.profile;auto v=gpu();auto l=control_limit(p,"TGP");l.min=gpu_min();l.max=gpu_max();
@@ -146,9 +149,14 @@ Json Controller::fans_status() {
     return {{"boost",boost_value},{"cpuRpm",s.cpu_rpm},{"gpuRpm",s.gpu_rpm},{"cpuDutyPercent",s.cpu_percent.value_or(0)},
         {"gpuDutyPercent",s.gpu_percent.value_or(0)},{"cpuTempC",s.cpu_temp.value_or(0)},{"gpuTempC",s.gpu_temp.value_or(0)}};
 }
+// Owned state only, no EC reads: the bypass and the live liquid cooler flag.
+Json Controller::advanced_status() const {
+    return {{"ecBypass",{{"available",bypass_supported_},{"active",bypass_active_},{"clearing",bypass_clearing_},{"status",bypass_status_}}},
+        {"coolerFlag",{{"available",session_.hardware.liquid_cooling()},{"connected",cooler_flag_}}}};
+}
 Json Controller::status() {
     Json value={{"model",session_.profile.project_id},{"cpu",cpu_status()},{"gpu",gpu_status()},{"fans",fans_status()}};
-    value["failsafe"]={{"tripped",thermal_->tripped()},{"state",thermal_->status()}};return value;
+    value["failsafe"]={{"tripped",thermal_->tripped()},{"state",thermal_->status()}};value.update(advanced_status());return value;
 }
 static int whole(const std::string& text) {
     int v=0;auto [end,error]=std::from_chars(text.data(),text.data()+text.size(),v);
@@ -182,9 +190,17 @@ static std::string text_status(const Json& j) {
     auto setting_text=[](const Json& v,const char* unit) {
         return std::to_string(v.at("value").get<int>())+" "+unit+" ("+std::to_string(v.at("min").get<int>())+"-"+std::to_string(v.at("max").get<int>())+" "+unit+")";
     };
+    auto advanced=[&] {
+        auto& b=j.at("ecBypass");auto& f=j.at("coolerFlag");auto on=[](bool v){return v?"on":"off";};
+        auto status=b.at("status").get<std::string>();
+        out<<"EC    power-limit bypass "<<(!b.at("available").get<bool>()?"unavailable":!status.empty()?status:"Off")<<"; liquid cooler flag ";
+        if(!f.at("available").get<bool>()) out<<"unavailable";else out<<on(f.at("connected").get<bool>());
+    };
     if(j.contains("model")) {
         out<<"Model "<<j.at("model").get<std::string>()<<"; thermal failsafe: "<<j.at("failsafe").at("state").get<std::string>()<<"\r\n";
-        for(const char* group:{"gpu","cpu","fans"}) out<<(j.at(group).is_null()?std::string(group==std::string("gpu")?"GPU":"CPU")+"   power control unavailable":text_status(j.at(group)))<<(std::string(group)=="fans"?"":"\r\n");
+        for(const char* group:{"gpu","cpu","fans"}) out<<(j.at(group).is_null()?std::string(group==std::string("gpu")?"GPU":"CPU")+"   power control unavailable":text_status(j.at(group)))<<"\r\n";
+        advanced();
+    } else if(j.contains("ecBypass")) {advanced();
     } else if(j.contains("pl1")) {
         out<<"CPU   PL1 "<<setting_text(j.at("pl1"),"W")<<"; PL2 "<<setting_text(j.at("pl2"),"W")<<"; PL4 "<<setting_text(j.at("pl4"),"W")<<"; temp limit "<<setting_text(j.at("tempLimit"),"C");
     } else if(j.contains("tgp")) {
@@ -217,10 +233,14 @@ cli::Reply Controller::cli(const std::vector<std::string>& arguments) {
     if(args.size()==1 && args[0]=="status") {auto j=status();return {0,json?j.dump():text_status(j)};}
     std::optional<ControlCommand> command;std::string group;
     try {
-        if(args.empty()) throw std::invalid_argument("Expected status, cpu, gpu, or fan boost on|off");
+        if(args.empty()) throw std::invalid_argument("Expected status, cpu, gpu, fan boost, ec-bypass or cooler-flag");
         if(args[0]=="fan") {
             if(args.size()!=3 || args[1]!="boost" || (args[2]!="on" && args[2]!="off")) throw std::invalid_argument("Usage: fan boost on|off");
             command=FanBoost{args[2]=="on"};group="fans";
+        } else if(args[0]=="ec-bypass" || args[0]=="cooler-flag") {
+            if(args.size()!=2 || (args[1]!="on" && args[1]!="off")) throw std::invalid_argument("Usage: "+args[0]+" on|off");
+            if(args[0]=="ec-bypass") command=EcBypassApply{args[1]=="on"};else command=CoolerFlag{args[1]=="on"};
+            group="ec";
         } else if(args[0]=="cpu" || args[0]=="gpu") {
             bool is_cpu=args[0]=="cpu";
             if(args.size()<3 || args.size()%2==0) throw std::invalid_argument("Expected one or more option/value pairs");
@@ -260,7 +280,7 @@ cli::Reply Controller::cli(const std::vector<std::string>& arguments) {
     auto result=execute(*command);
     diagnostic_(std::string(result.code?"[CLI] Not applied: ":"[CLI] Applied: ")+args[0]+(result.code?"; "+result.text:""));
     if(result.code) return {result.code,result.text};
-    auto j=group=="cpu"?cpu_status():group=="gpu"?gpu_status():fans_status();return {0,json?j.dump():text_status(j)};
+    auto j=group=="cpu"?cpu_status():group=="gpu"?gpu_status():group=="ec"?advanced_status():fans_status();return {0,json?j.dump():text_status(j)};
 }
 std::string Controller::defaults(const std::string& key) {
     auto& p=session_.profile;

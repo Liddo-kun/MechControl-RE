@@ -13,6 +13,9 @@ struct Redirect { std::string read_addr, transform; std::optional<int> tj_max; }
 struct BatteryMode { std::string name, value; };
 struct Logo { uint8_t r=0,g=0,b=0,on_off=0; };
 struct Mode { int pl1=0,pl2=0; std::optional<int> pl4,ctgp,dynamic_boost,tcc_offset; std::optional<FanDefaults> fan_curve; };
+// EC power-limit bypass, offered only on EC firmware ("0x454.0x47D" in decimal) whose image was checked.
+using EcVersion=std::pair<int,int>; // Major, minor.
+struct EcBypass { std::string value; std::vector<std::pair<EcVersion,EcVersion>> ec_versions; }; // Inclusive ranges from "M.m" or "M.m-M.m".
 struct FanTable {
     std::string format="RamFan1", cpu_up,cpu_down,cpu_duty,gpu_up,gpu_down,gpu_duty;
     int entries=16,active=10,padding_temp=255; bool has_gpu=true;
@@ -32,6 +35,7 @@ struct MachineProfile {
     std::optional<Logo> default_logo;
     std::optional<std::map<std::string,Mode>> modes;
     std::optional<std::vector<std::string>> mode_presets; // EC presets extraction may expose; absent keeps all three.
+    std::optional<EcBypass> ec_bypass;
     int reg(const std::string& name) const;
     int tj_max() const;
     int tgp_offset() const;
@@ -46,7 +50,7 @@ void from_json(const Json&,Curve&); void to_json(Json&,const Curve&);
 void from_json(const Json&,FanDefaults&);
 void from_json(const Json&,Limit&); void from_json(const Json&,Bitfield&);
 void from_json(const Json&,Redirect&); void from_json(const Json&,BatteryMode&);
-void from_json(const Json&,Logo&); void from_json(const Json&,Mode&);
+void from_json(const Json&,Logo&); void from_json(const Json&,Mode&); void from_json(const Json&,EcBypass&);
 void from_json(const Json&,FanTable&); void from_json(const Json&,MachineProfile&);
 MachineProfile load_machine(const std::filesystem::path& path);
 void apply_universal_defaults(MachineProfile&);

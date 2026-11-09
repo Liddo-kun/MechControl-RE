@@ -61,11 +61,11 @@ void to_json(Json& j,const LightingState& v) { j=Json::object(); OPT("keyboard",
 void from_json(const Json& j,UserProfile& v) {
     object(j); F("name",name); F("projectId",project_id); F("savedAt",saved_at);
     if(!valid_date(v.saved_at)) throw std::runtime_error("Invalid savedAt");
-    F("cpu",cpu); F("gpu",gpu); F("gpuFailsafe",protection); F("fan",fan); F("battery",battery); F("lighting",lighting); F("liquidCooler",cooler);
+    F("cpu",cpu); F("gpu",gpu); F("gpuFailsafe",protection); F("fan",fan); F("battery",battery); F("lighting",lighting); F("liquidCooler",cooler); F("liquidCoolerConnected",liquid_cooler_connected);
 }
 void to_json(Json& j,const UserProfile& v) {
     j=Json::object(); OPT("name",name); OPT("projectId",project_id); PUT("savedAt",saved_at);
-    OPT("cpu",cpu); OPT("gpu",gpu); OPT("gpuFailsafe",protection); OPT("fan",fan); OPT("battery",battery); OPT("lighting",lighting); OPT("liquidCooler",cooler);
+    OPT("cpu",cpu); OPT("gpu",gpu); OPT("gpuFailsafe",protection); OPT("fan",fan); OPT("battery",battery); OPT("lighting",lighting); OPT("liquidCooler",cooler); PUT("liquidCoolerConnected",liquid_cooler_connected);
 }
 void from_json(const Json& j,Trip& v) {
     object(j); F("Time",time); if(v.time && !valid_date(*v.time,true)) throw std::runtime_error("Invalid trip time");

@@ -65,7 +65,7 @@ Sensors read_sensors(EcTransport& ec,const config::MachineProfile& p,Detail deta
     if(p.registers.contains("gpuTemp") && !s.gpu_temp) s.gpu_temp=read("gpuTemp");
     if(detail==Detail::temperatures) return s;
     s.adapter_amps=ec.read(0x449)/10.0;
-    auto lo=ec.read(0x60C),hi=ec.read(0x60D); s.system_watts=lo|(hi<<8);
+    auto lo=ec.read(0x60C),hi=ec.read(0x60D); s.adapter_raw=lo|(hi<<8);
     s.db_live=ec.read(0x7D5); s.tgp_live=ec.read(0x788)+p.tgp_offset();
     return s;
 }
@@ -216,7 +216,7 @@ config::Json EcSession::diagnostic_report() {
         {"sensors",{{"cpuRpm",s.cpu_rpm},{"gpuRpm",s.gpu_rpm},{"cpuTemp",nullable(s.cpu_temp)},
             {"gpuTemp",nullable(s.gpu_temp)},{"cpuTempLimit",nullable(s.cpu_limit)},
             {"cpuPercent",nullable(s.cpu_percent)},{"gpuPercent",nullable(s.gpu_percent)},
-            {"systemWatts",nullable(s.system_watts)},{"adapterAmps",nullable(s.adapter_amps)},
+            {"adapterCurrentRaw",nullable(s.adapter_raw)},{"adapterAmps",nullable(s.adapter_amps)},
             {"batterySoc",nullable(s.battery_soc)},{"batteryMode",nullable(s.battery_mode)},
             {"boost",nullable(s.boost)},{"curveEnabled",nullable(s.curve_enabled)},
             {"dbLiveWatts",nullable(s.db_live)},{"tgpLiveWatts",nullable(s.tgp_live)}}}};

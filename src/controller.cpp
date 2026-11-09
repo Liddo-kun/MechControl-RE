@@ -1,6 +1,7 @@
 #include "controller.h"
 #include "config_text.h"
 #include <algorithm>
+#include <climits>
 #include <cmath>
 #include <thread>
 #include <typeinfo>
@@ -87,6 +88,16 @@ Controller::Controller(EcSession& session,std::filesystem::path directory,std::f
     thermal_=std::make_unique<ThermalProtection>(store_,supported,[this](int a){emergency(a);},[this](int a){return matches(a);},
         [this]{return temperature("gpuTemp");},diagnostic_);
     session_.guard->recover=[this]{return recover("write verify failure");};
+    if(p.ec_bypass) try {
+        for(const char* name:{"ecBypass","ecBypassLimits","acStatus","ecRunState"}) if(!p.registers.contains(name)) throw std::runtime_error(std::string("profile has no ")+name+" register");
+        if(!enabled("cpuPower")) throw std::runtime_error("CPU power control unavailable");
+        session_.guard->admit(p.reg("ecBypass"));
+        auto major=session.hardware.at(0x454),minor=session.hardware.at(0x47D);
+        if(!major || !minor) throw std::runtime_error("EC version unread");
+        EcVersion live{*major,*minor};auto version=std::to_string(live.first)+"."+std::to_string(live.second);
+        if(std::ranges::none_of(p.ec_bypass->ec_versions,[&](const auto& r){return r.first<=live && live<=r.second;})) throw std::runtime_error("EC version "+version+" has not been checked");
+        bypass_supported_=true;diagnostic_("EC power-limit bypass available (EC version "+version+")");
+    } catch(const std::exception& ex) {diagnostic_(std::string("EC power-limit bypass unavailable: ")+ex.what());}
 }
 Controller::~Controller() {session_.guard->recover={};} // Leave linked crash-safe tails and all EC state unchanged.
 bool Controller::enabled(const char* feature) const {return session_.validation.enabled.contains(feature);}
@@ -117,8 +128,20 @@ uint8_t Controller::read(const char* name) {return session_.transport().read(ses
 std::optional<int> Controller::temperature(const char* name) {
     try {return read(name);} catch(...) {return {};}
 }
-CpuSettings Controller::cpu() {return {read("PL1"),read("PL2"),encoding::decode_pl4(read("PL4"),session_.profile.pl4_doubled()),
-    encoding::decode_cpu_temperature(read("cpuTempLimitRead"),session_.profile.cpu_encoding()=="direct",session_.profile.tj_max())};}
+// A PL register at 0 means no custom limit: the EC keeps one of its presets, and no known register says which.
+// The Gaming preset (else the first) stands in, so Apply and Save never use 0 or the slider minimum.
+CpuSettings Controller::cpu(std::string* preset) {
+    auto& p=session_.profile;
+    CpuSettings c{read("PL1"),read("PL2"),encoding::decode_pl4(read("PL4"),p.pl4_doubled()),
+        encoding::decode_cpu_temperature(read("cpuTempLimitRead"),p.cpu_encoding()=="direct",p.tj_max())};
+    if((!c.pl1 || !c.pl2 || !c.pl4) && p.modes && !p.modes->empty()) {
+        auto mode=p.modes->find("gaming");if(mode==p.modes->end()) mode=p.modes->begin();bool filled=false;
+        auto fill=[&](int& v,std::optional<int> d,const char* key) {if(!v && d && *d) {auto l=control_limit(p,key);v=std::clamp(*d,l.min,l.max);filled=true;}};
+        fill(c.pl1,mode->second.pl1,"PL1");fill(c.pl2,mode->second.pl2,"PL2");fill(c.pl4,mode->second.pl4,"PL4");
+        if(filled && preset) *preset=mode->first;
+    }
+    return c;
+}
 GpuSettings Controller::gpu(bool driver_read) {
     GpuSettings g;auto ctrl=read("tgpDbCtrl");g.tgp=read("tgp")+session_.profile.tgp_offset();
     read("dbTotalPower");g.dynamic_boost_watts=read("dbMaxTgp");g.dynamic_boost_enabled=(ctrl&2)!=0;
@@ -141,6 +164,7 @@ CpuSettings Controller::minimum_cpu() {
 }
 void Controller::batch(const std::vector<EcWrite>& writes) {
     for(auto w:writes) session_.guard->admit(w.address);
+    if(bypass_clearing_ && !emergency_) throw std::runtime_error("The EC power-limit bypass could not be cleared; other EC writes are refused until it is");
     int epoch=epoch_;writes_started_=true;
     session_.guard->apply(writes);
     if(epoch!=epoch_) throw std::runtime_error("EC reactivated during application; complete group must be reapplied");
@@ -166,6 +190,9 @@ void Controller::dimming(bool value) {
 }
 void Controller::emergency(int action) {
     auto& p=session_.profile;
+    clear_bypass("thermal failsafe trip");
+    // Emergency reductions proceed even while a failed bypass clear refuses normal writes.
+    struct Scope {bool& value;Scope(bool& v):value(v){value=true;}~Scope(){value=false;}} scope(emergency_);
     if(action==Gpu) {if(!gpu_minimum_) throw std::runtime_error("Model-specific GPU minimum unavailable");GpuSettings g;g.tgp=control_limit(p,"TGP").min;apply_gpu(g);}
     if(action==Cpu) {if(!cpu_minimum_) throw std::runtime_error("Model-specific CPU minimum unavailable");auto c=minimum_cpu();batch(cpu_writes(p,c.pl1,c.pl2,c.pl4,c.temp_limit));}
     if(action==Fan) {if(!fan_boost_) throw std::runtime_error("Fan boost unavailable");batch({fan_boost_write(p,true)});}
@@ -183,7 +210,7 @@ bool Controller::matches(int action) {
 bool Controller::initialize(std::vector<std::string>& errors) {
     // Each reference init step runs even after an independent step fails.
     const std::vector<std::vector<EcWrite>> steps={{{0x709,5},{0x708,1}},{{0x741,5}},{{0x748,129}},
-        {{0x726,128,128},{0x727,64,64}},{{0x7C5,96,96}},{{0x7C7,12}},{{0x706,65}}};
+        {{0x726,128,128},{0x727,64,64}},{{0x7C5,96,96}},{{0x7C7,uint8_t(cooler_flag_?0x0E:0x0C)}},{{0x706,65}}};
     std::string log="--- EC Initialization ---";
     for(const auto& step:steps) {
         std::string label,detail;
@@ -210,6 +237,8 @@ bool Controller::recover(const char* reason) {
     else diagnostic_("EC activation lost (0x741 = "+hex_text(state)+", detected via "+reason+"); re-running EC init");
     recovering_=true;++epoch_;thermal_->invalidate();last_duty_=-1;fan_application_=FanApplication::unapplied;
     try {
+        // Reinitialization restores the custom CPU gates even if this clear failed and keeps retrying.
+        clear_bypass("EC reinitialization");
         std::vector<std::string> errors;
         if(!initialize(errors)) throw std::runtime_error(errors.back());
         recovering_=false;reapply_=true;watchdog_=GetTickCount64()+30000;return true;
@@ -220,7 +249,13 @@ std::vector<std::string> Controller::start() {
     std::vector<std::string> init_errors;
     recovering_=true;
     // As in the source, a missing acknowledgement is only a warning here; the watchdog retries it.
-    try {initialize(init_errors);} catch(...) {recovering_=false;throw;}
+    try {
+        // The bypass never survives a restart: a value left by a crash is cleared before EC init.
+        if(bypass_supported_ && session_.transport().read(session_.profile.reg("ecBypass"))==uint8_t(hex(session_.profile.ec_bypass->value))) {
+            bypass_active_=true;clear_bypass("left set by a previous run");
+        }
+        initialize(init_errors);
+    } catch(...) {recovering_=false;throw;}
     recovering_=false;watchdog_=GetTickCount64()+30000;
     auto& ft=session_.profile.fan_table;int profile_active=ft.active;bool profile_gpu=ft.has_gpu;
     session_.snapshot_fans();
@@ -316,6 +351,7 @@ void Controller::apply_profile(const UserProfile& profile,const nv::ProfilePlan&
     }
     if(enabled("fanControl")) {boost(profile.fan->boost);speed(profile.fan->switch_enabled,profile.fan->switch_ms);}
     if(enabled("battery")) battery(profile.battery->mode);
+    if(session_.hardware.liquid_cooling() && profile.liquid_cooler_connected!=cooler_flag_) cooler_flag(profile.liquid_cooler_connected);
     // Peripheral failures are independent and log-only, as in the source.
     if(lighting_) lighting_->apply(*profile.lighting);
     if(peripheral_hardware_) try {dimming(profile.lighting->local_dimming);}
@@ -354,6 +390,66 @@ void Controller::battery(int mode) {
 void Controller::speed(bool enabled_value,int ms) {
     if(!enabled("fanControl")) throw std::runtime_error("Fan control unavailable");
     batch({{session_.profile.reg("fanSwitchSpeed"),encoding::switch_speed(enabled_value,ms)}});
+}
+// EC power-limit bypass: the verified firmware skips its adaptive CPU-limit reduction and publishes the
+// existing custom PL1/PL2/PL4 instead, but also runs the fans at full and changes protection outputs. Outside
+// its normal running state the EC hangs with it set, so every power transition clears it first.
+void Controller::bypass(bool on) {
+    if(!on) {if(!clear_bypass("turned off")) throw std::runtime_error("EC power-limit bypass not cleared: "+bypass_status_);return;}
+    if(!bypass_supported_) throw std::runtime_error("EC power-limit bypass is not available for this model and EC version");
+    if(bypass_clearing_) throw std::runtime_error("The previous EC power-limit bypass has not been cleared");
+    if(bypass_active_) return;
+    auto& p=session_.profile;auto& ec=session_.transport();auto address=p.reg("ecBypass");auto value=uint8_t(hex(p.ec_bypass->value));
+    if(!(ec.read(p.reg("acStatus"))&1)) throw std::runtime_error("AC power is not connected");
+    if(ec.read(p.reg("ecRunState"))!=1) throw std::runtime_error("The EC is not in its normal running state");
+    if(ec.read(p.reg("ecBypassLimits"))!=0 || ec.read(address)!=0) throw std::runtime_error("EC bypass registers are not in their normal state");
+    if(!(ec.read(0x741)&1) || !(ec.read(0x727)&0x40)) throw std::runtime_error("Custom CPU control is not active (0x741 bit 0, 0x727 bit 6)");
+    writes_started_=true;bypass_active_=true;
+    try {session_.guard->write(address,value);if(ec.read(address)!=value) throw std::runtime_error("EC power-limit bypass readback mismatch");}
+    catch(...) {clear_bypass("turning on failed");throw;}
+    SetThreadExecutionState(ES_CONTINUOUS|ES_SYSTEM_REQUIRED);bypass_status_="Active";++advanced_revision_;
+    diagnostic_("[EC Bypass] "+hex_text(address,3)+" = "+hex_text(value)+" verified; existing CPU limits apply within about 24 s; automatic sleep blocked");
+}
+// Returns false while the clear keeps failing; the tick retries it and batch() refuses normal writes.
+bool Controller::clear_bypass(const std::string& reason) {
+    if(!bypass_active_ && !bypass_clearing_) return true;
+    auto address=session_.profile.reg("ecBypass");
+    try {session_.guard->write(address,0);if(session_.transport().read(address)!=0) throw std::runtime_error("readback mismatch");}
+    catch(const std::exception& ex) {
+        if(!bypass_clearing_) diagnostic_("[EC Bypass] Clearing failed ("+reason+"): "+ex.what()+"; retrying every second, other EC writes refused");
+        bypass_clearing_=true;bypass_reason_=reason;bypass_status_="NOT CLEARED ("+reason+"): "+ex.what();++advanced_revision_;return false;
+    }
+    bypass_active_=bypass_clearing_=false;SetThreadExecutionState(ES_CONTINUOUS);bypass_status_="Off ("+reason+")";++advanced_revision_;
+    diagnostic_("[EC Bypass] Cleared ("+reason+"); "+hex_text(address,3)+" = 0x00 verified");return true;
+}
+void Controller::watch_bypass() {
+    if(bypass_clearing_) {clear_bypass(bypass_reason_);return;}
+    if(!bypass_active_) return;
+    auto& p=session_.profile;auto& ec=session_.transport();std::string reason;
+    if(thermal_->tripped()) reason="thermal failsafe trip";
+    else try {
+        auto current=ec.read(p.reg("ecBypass"));
+        if(current==0) {bypass_active_=false;SetThreadExecutionState(ES_CONTINUOUS);bypass_status_="Off (cleared by the EC)";++advanced_revision_;diagnostic_("[EC Bypass] The EC cleared it");return;}
+        if(current!=uint8_t(hex(p.ec_bypass->value))) reason="unexpected EC value "+hex_text(current);
+        else if(!(ec.read(p.reg("acStatus"))&1)) reason="AC power lost";
+        else if(ec.read(p.reg("ecRunState"))!=1) reason="EC left its normal running state";
+        else if(!(ec.read(0x741)&1) || !(ec.read(0x727)&0x40)) reason="custom CPU control lost";
+    } catch(const std::exception& ex) {reason=std::string("EC read failed: ")+ex.what();}
+    if(!reason.empty()) clear_bypass(reason);
+}
+// Host-reported liquid cooler connection (LCSE). Only bit 1 changes; the EC owns the OC level in bits 2-4.
+void Controller::cooler_flag(bool connected) {
+    if(!session_.hardware.liquid_cooling()) throw std::runtime_error("The EC does not report liquid cooler support (0x7A4 bit 7)");
+    batch({{0x7C7,uint8_t(connected?2:0),2}});
+    if(((session_.transport().read(0x7C7)&2)!=0)!=connected) throw std::runtime_error("Liquid cooler flag readback mismatch (0x7C7 bit 1)");
+    cooler_flag_=connected;++advanced_revision_;
+    diagnostic_(std::string("[Cooler flag] 0x7C7 bit 1 ")+(connected?"set":"cleared"));
+}
+// The EC clears the flag on power transitions; EC reinitialization writes it with the init byte.
+void Controller::ensure_cooler_flag(const char* when) {
+    if(!cooler_flag_) return;
+    try {if(session_.transport().read(0x7C7)&2) return;diagnostic_(std::string("Liquid cooler flag cleared by the EC; reapplying after ")+when);cooler_flag(true);}
+    catch(const std::exception& ex) {diagnostic_(std::string("Liquid cooler flag not reapplied: ")+ex.what());}
 }
 void Controller::fans(const FanSettings& f) {
     auto& p=session_.profile;
@@ -414,6 +510,7 @@ UserProfile Controller::capture(int slot) {
         profile.fan->gpu_curve=session_.profile.fan_table.has_gpu?saved_curve(*fan_intent_.gpu_curve,session_.profile.fan_table):placeholder();
     } else {profile.fan->cpu_curve=placeholder();profile.fan->gpu_curve=placeholder();}
     if(enabled("battery")) profile.battery->mode=encoding::decode_battery(read("batteryMode"));
+    profile.liquid_cooler_connected=cooler_flag_;
     // Unavailable owners must not discard target-slot peripheral intent. An unreadable
     // existing slot refuses capture rather than being silently replaced with defaults.
     if(auto previous=store_.load(slot)) {profile.lighting=previous->lighting;profile.cooler=previous->cooler;}
@@ -446,11 +543,13 @@ void Controller::recover_settings() {
     }
 }
 std::optional<Sensors> Controller::tick(ULONGLONG now) {
+    watch_bypass();
     if(resume_at_ && now>=resume_at_ && !nvidia_busy_) { // In-flight NVIDIA work cannot verify the GPU hold.
         resume_at_=0;watchdog_=now+30000;
         try {if(!recover("resume")) thermal_->enforce();} catch(const std::exception& ex){diagnostic_(ex.what());}
+        ensure_cooler_flag("resume");
     }
-    if(now>=watchdog_) {watchdog_=now+30000;try {recover("watchdog");} catch(const std::exception& ex){diagnostic_(ex.what());}}
+    if(now>=watchdog_) {watchdog_=now+30000;try {recover("watchdog");} catch(const std::exception& ex){diagnostic_(ex.what());}ensure_cooler_flag("watchdog check");}
     Sensors shared;bool safety=thermal_->monitoring();
     if(safety || linked_) {shared.gpu_temp=temperature("gpuTemp").value_or(0);thermal_->sample(shared.gpu_temp,nvidia_busy_);}
     if(lighting_ && !peripheral_busy_) lighting_->tick(now);
@@ -496,8 +595,17 @@ ControlResult Controller::execute(const ControlCommand& command) {
         if(c->page==5) {data["coolerAvailable"]=bool(cooler_);if(cooler_) {data["cooler"]=cooler_->snapshot();if(data["cooler"]["bluetoothAvailable"].is_null()) cooler_->request({CoolerAction::availability});}}
         data["ui"]=presentation(true,false,c->page);r.peripherals=std::move(data);return r;
     }
-    if(auto c=std::get_if<AcEvent>(&command)) {if(on_ac_!=c->on_ac) {on_ac_=c->on_ac;gpu_check_at_=GetTickCount64()+5000;}return state();}
+    if(auto c=std::get_if<AcEvent>(&command)) {
+        if(!c->on_ac) clear_bypass("AC power lost");
+        if(on_ac_!=c->on_ac) {on_ac_=c->on_ac;gpu_check_at_=GetTickCount64()+5000;}return state();
+    }
+    if(auto c=std::get_if<PowerTransition>(&command)) {
+        auto r=state();
+        if(!clear_bypass(c->kind==PowerTransition::display_off?"display off":c->kind==PowerTransition::suspend?"sleep":"exit or Windows shutdown")) {r.code=1;r.text=bypass_status_;}
+        return r;
+    }
     if(std::holds_alternative<Resume>(command)) {
+        clear_bypass("resume");
         thermal_->invalidate();++epoch_;fan_application_=FanApplication::unapplied;resume_at_=GetTickCount64()+3000;watchdog_=resume_at_;gpu_check_at_=GetTickCount64()+8000;if(lighting_) lighting_->resume(GetTickCount64());
         return state();
     }
@@ -525,6 +633,10 @@ ControlResult Controller::execute(const ControlCommand& command) {
                 result.peripherals=Json{{"plan",{{"restart",value.restart},{"unlock",value.unlock},{"wasUnlocked",gpu_unlocked_},{"slot",c.slot},{"gpu",*g},{"stockWatts",nvidia_?nvidia_->stock_watts():0}}}};
             } else if constexpr(std::is_same_v<T,GpuUnlock>) {unlock_gpu(c.enabled);result.applied=true;
             } else if constexpr(std::is_same_v<T,DlppcApply>) {dlppc(c.disabled);result.applied=true;result.saved=true;
+            } else if constexpr(std::is_same_v<T,EcBypassApply>) {
+                if(c.enabled) explicit_apply([&]{bypass(true);});else bypass(false);result.applied=true;
+                result.text=c.enabled?"EC power-limit bypass on (not saved)":"EC power-limit bypass off";
+            } else if constexpr(std::is_same_v<T,CoolerFlag>) {cooler_flag(c.connected);result.applied=true;
             } else if constexpr(std::is_same_v<T,FanBoost>) {
                 if(!c.enabled) {thermal_->check_before_apply();if(thermal_->holds(Fan)) throw std::runtime_error("Fan boost is held by thermal protection");}
                 boost(c.enabled);result.applied=true;

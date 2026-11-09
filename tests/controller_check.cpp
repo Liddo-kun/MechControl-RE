@@ -112,6 +112,8 @@ struct GpuFixture : nv::Power {
     void apply(int watts,bool) override {read();request=watts*1000;++sets;}
     bool at_most(int watts) override {read();return request && *request<=uint32_t(watts*1000);}
     bool applied(int watts) override {read();return request==uint32_t(watts*1000);}
+    bool restore_currents() override {read();return std::exchange(reloaded,false);}
+    bool reloaded=false;
 };
 void peripheral_regressions(const std::filesystem::path& root) {
     auto path=root/"peripheral-regressions";int reports=0;bool simulate_gpu=false;Controller* pending=nullptr;
@@ -189,6 +191,8 @@ void gpu_integration(const std::filesystem::path& root) {
     loaded=c.execute(SlotLoad{1,false});check(loaded.code==0 && driver->restarts==0 && driver->rails.nv.current==130000 && loaded.text.find("restart")!=std::string::npos,"automatic slot clamps active currents, skips only unsupported board input, and reports notice");
     check(c.execute(DlppcApply{true}).code==0 && read_json(root/"gpu/settings.json")["disableDlppc"]==true,"DLPPC uses existing global preference storage");
     driver->dlppc_active=true;c.execute(AcEvent{false});c.tick(GetTickCount64()+6000);check(!driver->dlppc_active,"event-delayed DLPPC reapplication restores saved disable after driver reset");
+    driver->reloaded=true;auto logged=r.diagnostics.size();c.execute(AcEvent{true});c.tick(GetTickCount64()+6000);
+    check(!driver->reloaded && std::any_of(r.diagnostics.begin()+logged,r.diagnostics.end(),[](auto& s){return s.find("current limits were reset by the driver")!=std::string::npos;}),"event-delayed check reapplies current limits a driver reload reset");
     auto saved=c.execute(SlotSave{2});auto capture=read_json(root/"gpu/userprofile_2.json");check(saved.code==0 && capture["gpu"]["nvvddMilliamps"]==130000 && capture["gpu"]["biosOverrideEnabled"]==true,"real owner capture marks override only when captured settings need it");
     auto no_rails=profile();no_rails.gpu->bios_override_enabled=true;write_json(root/"gpu/userprofile_3.json",no_rails,true);driver->fail_currents=true;
     check(c.execute(SlotLoad{3,false}).code==0,"explicit override profile without currents does not depend on current-policy preflight");driver->fail_currents=false;
@@ -442,6 +446,69 @@ void capture_preservation(const std::filesystem::path& root) {
     {std::ofstream bad(path/"userprofile_4.json");bad<<"{broken";}
     check(r.controller->execute(SlotSave{4}).code==1 && std::filesystem::file_size(path/"userprofile_4.json")==7,"unreadable existing target refuses core-only overwrite instead of discarding unknown peripheral intent");
 }
+struct Bench { std::unique_ptr<EcSession> session; std::unique_ptr<Controller> controller; };
+// EC power-limit bypass (0x780) and the liquid cooler connection flag (0x7C7 bit 1). The fixture reports the
+// verified Intel EC version so IDY_7Y offers the bypass; existing fixtures omit 0x454 and keep it unavailable.
+void ec_bypass(const std::filesystem::path& root) {
+    std::vector<std::string> logs;
+    auto fresh=[](const std::function<void(State&)>& extra) {
+        auto s=std::make_shared<State>();s->bytes[0x454]=0x4D;s->bytes[0x47D]=0;s->bytes[0x6E6]=1;s->bytes[0x490]=1;if(extra) extra(*s);return s;
+    };
+    auto open=[&](std::shared_ptr<State> s,const std::filesystem::path& path) {
+        std::filesystem::create_directories(path);auto log=[&logs](const std::string& m){logs.push_back(m);};auto b=std::make_unique<Bench>();
+        b->session=std::make_unique<EcSession>([s](const std::wstring&){return std::make_unique<Fake>(s);},log,false,[](unsigned){},profiles_directory(),Identity{"X6AR55xY","fixture","intel",uint8_t{26}});
+        b->controller=std::make_unique<Controller>(*b->session,path,log,[](unsigned){},std::function<void(std::function<void()>)>{},false,std::unique_ptr<nv::Power>{},false,std::function<void(Json)>{},Lighting::Send{});
+        return b;
+    };
+    auto wrote=[](const std::shared_ptr<State>& s,int a){return std::any_of(s->writes.begin(),s->writes.end(),[&](auto w){return w.first==a;});};
+    {auto s=fresh({});auto b=open(s,root/"bypass-on");b->controller->start();s->writes.clear();
+     auto on=b->controller->execute(EcBypassApply{true});
+     check(on.code==0 && on.applied && !on.saved && s->bytes[0x780]==0xA2,"EC bypass writes 0xA2 on all preconditions and is never saved");
+     auto status=parse(b->controller->execute(CliCommand{{"status","--json"}}).text);
+     check(status["ecBypass"]["active"]==true && status["ecBypass"]["available"]==true,"status reports the live bypass state");
+     auto off=b->controller->execute(EcBypassApply{false});
+     check(off.code==0 && s->bytes[0x780]==0,"turning the bypass off clears 0x780");}
+    // Each precondition failure refuses the bypass before any 0x780 write.
+    struct Case { const char* name; std::function<void(State&)> setup; std::function<void(Controller&,State&)> after; };
+    std::vector<Case> cases={
+        {"no-ac",[](State& s){s.bytes[0x490]=0;},{}},
+        {"not-running",[](State& s){s.bytes[0x6E6]=2;},{}},
+        {"limits-set",[](State& s){s.bytes[0x781]=1;},{}},
+        {"already-set",[](State& s){s.bytes[0x780]=0x50;},{}},
+        {"custom-off",{},[](Controller&,State& s){s.bytes[0x741]=0;}},
+        {"failsafe",{},[](Controller& c,State&){ProtectionSettings p;p.enabled=true;p.threshold=50;c.execute(ProtectionApply{p});c.execute(ThermalTest{});}}};
+    for(auto& c:cases) {
+        auto s=fresh(c.setup);auto b=open(s,root/("bypass-"+std::string(c.name)));b->controller->start();if(c.after) c.after(*b->controller,*s);s->writes.clear();
+        auto r=b->controller->execute(EcBypassApply{true});
+        auto advanced=parse(b->controller->execute(CliCommand{{"status","--json"}}).text)["ecBypass"];
+        check(r.code==1 && !wrote(s,0x780) && advanced["active"]==false,(std::string("bypass refused without writing 0x780 when ")+c.name).c_str());
+    }
+    // Every lifecycle transition clears an active bypass.
+    for(auto [name,command]:std::vector<std::pair<const char*,ControlCommand>>{{"display-off",PowerTransition{PowerTransition::display_off}},
+        {"suspend",PowerTransition{PowerTransition::suspend}},{"shutdown",PowerTransition{PowerTransition::shutdown}},{"ac-loss",AcEvent{false}}}) {
+        auto s=fresh({});auto b=open(s,root/("bypass-clear-"+std::string(name)));b->controller->start();
+        check(b->controller->execute(EcBypassApply{true}).code==0 && s->bytes[0x780]==0xA2,"bypass on before transition");
+        s->writes.clear();b->controller->execute(command);
+        check(s->bytes[0x780]==0 && wrote(s,0x780),(std::string("bypass cleared on ")+name).c_str());
+    }
+    {auto s=fresh([](State& st){st.bytes[0x780]=0xA2;});auto b=open(s,root/"bypass-leftover");logs.clear();b->controller->start();
+     check(s->bytes[0x780]==0 && std::any_of(logs.begin(),logs.end(),[](auto& m){return m.find("left set by a previous run")!=std::string::npos;}),"a leftover 0xA2 is cleared at startup and logged");}
+    // Liquid cooler connection flag: bit 1 only, saved per slot, reapplied after resume.
+    {auto s=fresh([](State& st){st.bytes[0x7A4]=0x80;});auto b=open(s,root/"cooler-flag");b->controller->start();s->writes.clear();
+     check(s->bytes[0x7C7]==0x0C,"cooler flag starts clear (0x0C)");
+     auto on=b->controller->execute(CoolerFlag{true});
+     check(on.code==0 && !on.saved && s->bytes[0x7C7]==0x0E,"cooler flag sets bit 1 only, leaving OCPL bits, without saving");
+     check(b->controller->execute(SlotSave{1}).code==0 && read_json(root/"cooler-flag/userprofile_1.json")["liquidCoolerConnected"]==true,"saving a slot captures the live cooler flag");
+     check(b->controller->execute(CoolerFlag{false}).code==0 && s->bytes[0x7C7]==0x0C,"clearing the cooler flag leaves the other bits alone");
+     check(b->controller->execute(SlotSave{2}).code==0 && b->controller->execute(SlotLoad{1}).code==0 && s->bytes[0x7C7]==0x0E,"loading a slot applies its cooler flag");
+     check(b->controller->execute(SlotLoad{2}).code==0 && s->bytes[0x7C7]==0x0C,"loading a slot saved without the flag clears it");
+     b->controller->execute(SlotLoad{1});
+     b->controller->execute(CoolerFlag{true});s->bytes[0x7C7]=0x0C; // The EC clears bit 1 on a power transition.
+     auto now=GetTickCount64();b->controller->execute(Resume{});b->controller->tick(now+3100);
+     check(s->bytes[0x7C7]==0x0E,"the cooler flag is reapplied after resume");}
+    {auto s=fresh({});auto b=open(s,root/"cooler-flag-unsupported");b->controller->start();s->writes.clear();
+     check(b->controller->execute(CoolerFlag{true}).code==1 && !wrote(s,0x7C7),"the cooler flag is refused without EC liquid cooler support");}
+}
 void monitor(const std::filesystem::path& root) {
     Rig r(root/"monitor");auto& c=*r.controller;auto s=r.state;auto p=profile();p.fan->linked=true;c.execute(FanApply{*p.fan});
     ProtectionSettings protection;protection.enabled=true;protection.threshold=95;c.execute(ProtectionApply{protection});s->reads.clear();c.tick();
@@ -469,6 +536,18 @@ void x6fr(const std::filesystem::path& root) {
     Controller c(session,path,[](const std::string&){},[](unsigned){},{},false,{},false);c.start();s->writes.clear();
     auto f=*profile().fan;check(c.execute(FanApply{f}).code==0 && s->bytes[0x7C6]==0xC4,"X6FR controller preserves shared latch bits around real fan batch");
     c.execute(SlotSave{1});check(read_json(path/"userprofile_1.json")["fan"]["curveEnabled"]==true,"X6FR capture readback agrees with shared-bit write semantics");
+    // The bypass covers the checked EC version range only; PL registers at 0 (no custom limits) show the Gaming preset.
+    for(auto [major,offered]:{std::pair(117,true),std::pair(118,false)}) {
+        auto t=std::make_shared<State>();t->amd=true;t->bytes[0x463]=95;t->bytes[0x454]=uint8_t(major);t->bytes[0x47D]=0;t->bytes[0x727]=0x40;
+        for(int a:{0x783,0x784,0x785}) t->bytes[a]=0;t->bytes[0x730]=75;t->bytes[0x731]=85;t->bytes[0x732]=85;
+        std::vector<std::string> logs;auto log=[&logs](const std::string& m){logs.push_back(m);};auto dir=path/std::to_string(major);std::filesystem::create_directories(dir);
+        EcSession es([&](const std::wstring&){return std::make_unique<Fake>(t);},log,false,[](unsigned){},profiles_directory(),Identity{"X6FR5xxY","fixture","amd",uint8_t{26}});
+        Controller ec(es,dir,log,[](unsigned){},{},false,{},false);
+        check(std::ranges::any_of(logs,[](auto& m){return m.find("EC power-limit bypass available")!=std::string::npos;})==offered,offered?"X6FR EC 117.0 is inside the checked bypass range":"X6FR EC 118.0 is outside the checked bypass range");
+        if(!offered) continue;
+        auto cpu=ec.execute(UiRead{0}).peripherals->at("ui").at("cpu");
+        check(cpu["preset"]=="gaming" && cpu["pl1"]["value"]==75 && cpu["pl2"]["value"]==85 && cpu["pl4"]["value"]==85,"PL registers at 0 show the Gaming preset, not 0 W");
+    }
 }
 void worker(const std::filesystem::path& root) {
     auto path=root/"worker";std::filesystem::create_directories(path);auto state=std::make_shared<State>();
@@ -633,7 +712,7 @@ int main(int argc,char** argv) {
         std::filesystem::create_directories(base);
         auto stem=std::to_string(GetCurrentProcessId());auto root=base/stem;
         for(unsigned suffix=1;!std::filesystem::create_directory(root);++suffix) root=base/(stem+"-"+std::to_string(suffix));
-        integration(root);startup_degradation(root);gpu_integration(root);thermal(root);recovery(root);defaults_and_no_slot(root);startup_and_eligibility(root);capture_preservation(root);peripheral_intent(root);peripheral_regressions(root);monitor(root);x6fr(root);worker(root);worker_restart(root);worker_hid_delay(root);
+        integration(root);startup_degradation(root);gpu_integration(root);thermal(root);recovery(root);defaults_and_no_slot(root);startup_and_eligibility(root);capture_preservation(root);peripheral_intent(root);peripheral_regressions(root);ec_bypass(root);monitor(root);x6fr(root);worker(root);worker_restart(root);worker_hid_delay(root);
         check(!GetModuleHandleW(L"nvapi64.dll") && !GetModuleHandleW(L"nvml.dll"),"injected/stock controller status and capture do not load physical NVIDIA libraries");
         std::cout<<"Evidence: "<<root.string()<<'\n';return 0;
     } catch(const std::exception& ex) {std::cerr<<"FAIL "<<ex.what()<<'\n';return 1;}

@@ -44,6 +44,7 @@ struct UserProfile {
     std::optional<BatterySettings> battery=BatterySettings{};
     std::optional<LightingSettings> lighting=LightingSettings{};
     std::optional<CoolerSettings> cooler;
+    bool liquid_cooler_connected=false; // EC 0x7C7 bit 1; slots written before it existed leave it off, as the EC init did.
     // Structural/model preflight only. Load owns threshold validation/migration;
     // enabled controllers must validate ranges/plans before writes.
     void preflight(const std::string& current_project_id) const;
