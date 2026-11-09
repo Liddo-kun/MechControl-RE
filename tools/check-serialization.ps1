@@ -3,7 +3,7 @@ param(
     [Parameter(Mandatory)][string]$NativeCheck,
     [string]$ReferenceCommit = 'v1.6.0',
     [string]$Dotnet = 'C:/Users/Jon/.dotnet/dotnet.exe',
-    [string]$ScratchRoot = 'C:/Temp/tandem/mechcontrol-native-phase2/serialization'
+    [string]$ScratchRoot = 'C:/Temp/tandem/mechcontrol-check/serialization'
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent

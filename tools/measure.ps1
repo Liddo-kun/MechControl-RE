@@ -2,7 +2,7 @@ param(
     [Parameter(Mandatory)][int]$ProcessId,
     [int]$Seconds = 60,
     [string]$Label = 'observed',
-    [string]$OutputPath = 'C:/Temp/tandem/mechcontrol-native-phase0/baseline.json',
+    [string]$OutputPath = 'C:/Temp/tandem/mechcontrol-measure/baseline.json',
     [string]$OutputDirectory,
     [int]$IntervalSeconds = 1,
     [string]$Conditions = '',

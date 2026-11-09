@@ -1,4 +1,4 @@
-# MechControl Native
+# MechControl
 
 A Windows x64 C++20 replacement for the C# MechControl app, built without .NET or
 WinForms. It controls MECHREVO laptops through the OEM EC driver (fans, power limits,
@@ -84,12 +84,12 @@ exercises the real pages with fake hardware on an interactive desktop.
   shows that the hidden monitor is running.
 - `mcctl.exe` in the install directory controls the running app from an elevated shell:
   `mcctl status --json`, `mcctl gpu --nvvdd 240`, `mcctl help`. Its changes are not saved.
-- `docs/handoff.md` covers only switching between the C# app and the native app.
 - The OEM `UWACPIDriver` is the only OEM component required. A backup is at
   `D:\BU\UWACPIDriver-backup\` (`pnputil /add-driver UWACPIDriver.inf /install`).
 
 ## Documentation
 
-Keep `docs/architecture.md` and `docs/build.md` accurate when a change affects them.
+Keep `docs/architecture.md`, `docs/build.md` and `docs/release.md` (the README shipped in
+release packages) accurate when a change affects them.
 Keep documents short and current: replace stale statements instead of appending history.
 Raw logs, transcripts and measurements belong in `C:/Temp/tandem`, not the repository.

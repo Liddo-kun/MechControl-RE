@@ -708,7 +708,7 @@ int main(int argc,char** argv) {
             write_json(directory/"capture-status.json",parse(status.text),false);return 0;
         }
         if(argc!=1) throw std::runtime_error("Unexpected check arguments");
-        auto base=std::filesystem::path("C:/Temp/tandem/mechcontrol-native-phase4/check");
+        auto base=std::filesystem::path("C:/Temp/tandem/mechcontrol-check/controller");
         std::filesystem::create_directories(base);
         auto stem=std::to_string(GetCurrentProcessId());auto root=base/stem;
         for(unsigned suffix=1;!std::filesystem::create_directory(root);++suffix) root=base/(stem+"-"+std::to_string(suffix));

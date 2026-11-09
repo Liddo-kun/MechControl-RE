@@ -248,7 +248,7 @@ void recurring_worker(const std::filesystem::path& scratch) {
 }
 int wmain() {
     try {
-        auto scratch=std::filesystem::path(L"C:/Temp/tandem/mechcontrol-native-phase3/check")/std::to_wstring(GetCurrentProcessId());
+        auto scratch=std::filesystem::path(L"C:/Temp/tandem/mechcontrol-check/ec")/std::to_wstring(GetCurrentProcessId());
         std::filesystem::create_directories(scratch);
         require(std::filesystem::is_directory(config::executable_directory()/L"Profiles/MECHREVO"),"profiles staged beside executable rather than source fallback");
         abi_and_guard(); snapshots_and_startup(); worker_owner(scratch);shutdown_io(scratch);recurring_worker(scratch);fan_batches();

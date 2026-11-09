@@ -40,8 +40,8 @@
 1038 RCDATA "TrayIcons/kekwait_038.png"
 1039 RCDATA "TrayIcons/kekwait_039.png"
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,1,0,0
- PRODUCTVERSION 0,1,0,0
+ FILEVERSION 2,0,0,0
+ PRODUCTVERSION 2,0,0,0
  FILEOS VOS_NT_WINDOWS32
  FILETYPE VFT_APP
 BEGIN
@@ -49,9 +49,9 @@ BEGIN
  BEGIN
   BLOCK "040904b0"
   BEGIN
-    VALUE "FileDescription", "MechControl native\0"
-   VALUE "FileVersion", "0.1.0\0"
-   VALUE "ProductName", "MechControl Native\0"
+    VALUE "FileDescription", "MechControl\0"
+   VALUE "FileVersion", "2.0.0\0"
+   VALUE "ProductName", "MechControl\0"
   END
  END
  BLOCK "VarFileInfo"
