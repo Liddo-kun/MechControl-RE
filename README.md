@@ -16,9 +16,10 @@ MechControl is a native C++ Windows app. It needs no .NET runtime and keeps its 
 - **Battery:** charge modes and battery info
 - **Lighting:** keyboard, light bar, logo, idle timeout and mini-LED local dimming
 - **Bluetooth liquid cooler:** fan, pump and RGB
+- **Advanced (Power tab):** EC power-limit bypass where the model supports it (never saved; turns itself off on sleep, display off, AC loss and exit), and the EC's liquid cooler connection flag
 - **Profiles:** 5 slots. The last one used loads at startup. You can switch profiles from the tray icon.
 - **Monitoring:** live temperatures, fan speeds and power. Fan RPM can also be published as Windows performance counters.
-- **Command line (optional):** `mcctl.exe` reads and changes GPU/CPU power, NVIDIA current limits and fan boost on the running app, for scripts and agents.
+- **Command line (optional):** `mcctl.exe` reads and changes GPU/CPU power, NVIDIA current limits, fan boost and the advanced settings on the running app, for scripts and agents.
 
 ## Requirements
 
@@ -27,14 +28,16 @@ MechControl is a native C++ Windows app. It needs no .NET runtime and keeps its 
 
 ## Install
 
-1. Download a build from [Releases](https://github.com/Liddo-kun/MechControl-RE/releases), or build it yourself (see below).
+1. Download the latest build from [Releases](https://github.com/Liddo-kun/MechControl-RE/releases/latest), or build it yourself (see below).
+   - `MechControl-win-x64.zip`: the app
+   - `MechControl-win-x64-cli.zip`: the app plus the `mcctl` command line
 2. Extract it to a folder you can write to. Settings, profiles and the log are kept next to `MechControl.exe`. Keep the `Profiles` folder next to it.
 3. Stop the OEM Control Center services (`GCUService`, `GCUBridge`), or they may overwrite your settings. MechControl warns you if they're running.
 4. Run `MechControl.exe`. It starts in the system tray. Closing the window hides it; use **Exit** in the tray menu to stop it.
 
 On first run, MechControl sets a few OEM UEFI flags so the BIOS prepares the EC at boot the same way it does with the Control Center installed.
 
-Settings and profiles saved by the C# version can be used by this version. [`docs/handoff.md`](docs/handoff.md) describes switching an existing installation between the two.
+**Upgrading from the C# version (v1.6.0 or earlier):** exit it from the tray, then extract the new release over its folder. Settings, profile slots and lighting and cooler state carry over. The old `.dll` files are no longer used and can be deleted.
 
 ### Start with Windows
 
@@ -52,7 +55,7 @@ Register-ScheduledTask MechControl -Action $action -Trigger $trigger -Principal 
 
 ### Command line
 
-`mcctl.exe` is in the CLI build only (`-WithCli`, see below). It talks to the running app. Run it from an elevated shell:
+`mcctl.exe` is in the `-cli` download and in builds made with `-WithCli`. It talks to the running app. Run it from an elevated shell:
 
 ```powershell
 mcctl status                         # settings with the ranges this machine accepts, live readings
@@ -62,6 +65,8 @@ mcctl gpu --tgp 150 --db 25          # GPU TGP and Dynamic Boost (watts)
 mcctl gpu --nvvdd 240 --msvdd 75 --board-input 10.25   # NVIDIA current limits (amps)
 mcctl cpu --pl1 80 --pl2 120         # CPU power limits (watts)
 mcctl fan boost on                   # maximum fan speed
+mcctl ec-bypass on                   # EC power-limit bypass, where the model supports it
+mcctl cooler-flag on                 # tell the EC a liquid cooler is connected
 mcctl help                           # everything else
 ```
 

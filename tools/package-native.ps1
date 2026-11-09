@@ -12,7 +12,7 @@ $vswhere = "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.e
 $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
 $cmake = Join-Path $vs 'Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe'
 $variant = if ($WithCli) { 'cli' } else { 'default' }
-$name = "MechControl-native-win-x64-$variant"
+$name = if ($WithCli) { 'MechControl-win-x64-cli' } else { 'MechControl-win-x64' }
 New-Item -ItemType Directory $OutputDirectory | Out-Null
 $artifacts = foreach ($component in @('Runtime', 'DeveloperSymbols')) {
     $suffix = if ($component -eq 'Runtime') { '' } else { '-symbols' }

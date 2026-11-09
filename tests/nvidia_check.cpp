@@ -180,7 +180,7 @@ int live(bool same_values) {
 }
 int main(int argc,char** argv) {
     try {if(argc>1 && std::string(argv[1]).starts_with("--live")) return live(std::string(argv[1])=="--live-same-values");
-        auto root=std::filesystem::path(L"C:/Temp/tandem/mechcontrol-native-phase5/check")/std::to_wstring(GetCurrentProcessId());for(int i=0;!std::filesystem::create_directories(root);++i) root=std::filesystem::path(L"C:/Temp/tandem/mechcontrol-native-phase5/check")/(std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(i));
+        auto root=std::filesystem::path(L"C:/Temp/tandem/mechcontrol-check/nvidia")/std::to_wstring(GetCurrentProcessId());for(int i=0;!std::filesystem::create_directories(root);++i) root=std::filesystem::path(L"C:/Temp/tandem/mechcontrol-check/nvidia")/(std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(i));
         packets();bios_and_recovery(root);rtx40();return 0;
     } catch(const std::exception& ex) {std::cerr<<"FAIL "<<ex.what()<<'\n';return 1;}
 }

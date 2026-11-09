@@ -184,8 +184,8 @@ void radio_check(const std::filesystem::path& root) {
 int wmain(int argc,wchar_t** argv) {
     try {
         init_apartment(apartment_type::multi_threaded);
-        auto root=std::filesystem::path(L"C:/Temp/tandem/mechcontrol-native-phase6/check")/std::to_wstring(GetCurrentProcessId());
-        for(int n=0;!std::filesystem::create_directories(root);++n) root=std::filesystem::path(L"C:/Temp/tandem/mechcontrol-native-phase6/check")/(std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(n));
+        auto root=std::filesystem::path(L"C:/Temp/tandem/mechcontrol-check/peripheral")/std::to_wstring(GetCurrentProcessId());
+        for(int n=0;!std::filesystem::create_directories(root);++n) root=std::filesystem::path(L"C:/Temp/tandem/mechcontrol-check/peripheral")/(std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(n));
         if(argc==3 && std::wstring_view(argv[1])==L"--live") {root=argv[2];std::filesystem::create_directories(root);live(root);}
         else if(argc==3 && std::wstring_view(argv[1])==L"--radio-check") {root=argv[2];std::filesystem::create_directories(root);radio_check(root);}
         else {lighting(root);pending(root);}

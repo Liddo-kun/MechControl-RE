@@ -11,7 +11,7 @@ shutdown finishes; there is no guaranteed cancellation timeout.
 Controlling startup acquires `Global\MechControl` before log or hardware access.
 The optional named-pipe server submits to the same worker. It is compiled out by
 default. `--diagnose <file>` is a separate write-free, mutex-exempt EC path, not
-a controller or a substitute for release qualification.
+a controller.
 
 `configuration` contains the pinned JSON parser, profile detection and stores.
 Detection preserves baseboard-pattern precedence, CPU-vendor filtering, direct
@@ -29,8 +29,8 @@ enforcement runs before linked fans and telemetry. Held actions constrain later
 writes, and acquisitions during waits win. `thermal.*` persists existing Stage
 2/Held obligations; startup combines committed and pending settings. An enabled
 Reset requires a fresh valid below-trigger reading/mean. Hardware request readback
-is not proof of physical watts or cooling. Native recovery deliberately retains
-known actions in damaged records that the older reader can lose.
+is not proof of physical watts or cooling. Recovery deliberately retains known
+actions in damaged records that the C# app's reader can lose.
 
 The EC power-limit bypass (0x780=0xA2, benchmark mode) is offered only where the
 profile declares it and the live EC version is one the image was checked against.
@@ -65,6 +65,6 @@ intent, applied, saved and partial results. There is no background migration.
 
 `counters.*` publishes already observed RPM through PerfLib, without polling
 hardware for consumers. Registration is explicit through `tools/counters.ps1`
-in the source tree, or root-level `counters.ps1` in the runtime package.
+in the source tree, or `counters.ps1` in the release package.
 Static libraries are build boundaries, not independently deployed services.
-See [build](build.md) and [handoff/qualification](handoff.md).
+See [build](build.md).

@@ -1,54 +1,67 @@
-# MechControl Native — Windows x64
+# MechControl for Windows x64
 
-Extract the entire archive into a writable directory. Windows 10 version 2004
-(build 19041) or later is the supported API baseline. The application uses native
-Windows controls, C++/WinRT, WMI, PerfLib and system ICU. It requires neither .NET
-nor a separately installed Visual C++ runtime. It still requires the compatible
-OEM UWACPIDriver and a supported model profile; the driver is not redistributed.
-Do not run another laptop hardware controller at the same time.
+MechControl replaces the OEM Control Center on Uniwill-built MECHREVO, XMG and
+Eluktronics laptops. Project page: https://github.com/Liddo-kun/MechControl-RE
 
-Run `MechControl.exe` and approve elevation. It starts hidden in the notification
-area. Use the tray icon to show it. Closing/minimizing hides it; choose Exit in the
-tray menu to stop it. Profiles, settings, saved device state and rotating logs
-are relative to the executable, not the shell's current directory. Keep the
-`Profiles/MECHREVO` directory intact. Its reference-only capture is deliberately
-not a selectable model.
+## Requirements
 
-This is a qualification candidate, not a declaration of hardware parity. Physical
-cooler connections, GPU ROM/restart/restoration, AMD models, sleep/AC transitions,
-clean-host/19041 execution and a greater-than-72-hour soak remain unqualified.
-Developer-host checks cannot establish those results.
-Keep the functioning release until qualification, daily use and rollback are
-proven. The included [handoff procedure](docs/handoff.md), `handoff.ps1` and corrected
-`counters.ps1` provide staging/current-state transfer and counter rollback preflight,
-not an in-application installer or qualification approval. See also
-[architecture](docs/architecture.md) and [build/measurement](docs/build.md).
-Do not replace active thermal obligations or shared NVIDIA originals with
-pre-cutover settings during rollback. These final candidates supersede the frozen
-phase-8 archives for handoff, not their remaining physical/elapsed qualification.
+- Windows 10 version 2004 (build 19041) or later, or Windows 11 (x64).
+- The OEM `UWACPIDriver`, which comes with the Control Center. It is not included.
+- No .NET or Visual C++ runtime is needed.
 
-For logon startup, create an interactive Task Scheduler task targeting the full
-executable path, with highest privileges, no execution time limit and battery
-operation enabled. There is no in-application startup installer. When moving the
-directory, update that task and counter registration before removing the old copy.
+Do not run the OEM Control Center services (`GCUService`, `GCUBridge`) or another
+hardware control tool at the same time.
 
-Optional passive fan counters require explicit registration in an elevated shell.
-Stop all publishers first and choose a fresh backup directory. Keep the executable
-and manifest together at the registered path:
+## Install
+
+Extract the whole archive into a folder you can write to, and keep the `Profiles`
+folder next to `MechControl.exe`. Run `MechControl.exe` and approve elevation. It
+starts hidden in the notification area. Use the tray icon to show it. Closing the
+window hides it; choose **Exit** in the tray menu to stop it. Settings, the five
+profile slots, lighting and cooler state and `mechcontrol.log` are kept next to the
+executable.
+
+To start MechControl at logon, create a Task Scheduler task for the full executable
+path that runs with highest privileges, has no execution time limit and is allowed
+on battery. The project page has a PowerShell command for this.
+
+## Upgrading from the C# version (v1.6.0 or earlier)
+
+This version reads the C# version's settings and profile files. Exit the old version
+from the tray, then either extract this archive over the old folder, or copy
+`settings.json`, `userprofile_*.json`, `lighting_state.json` and
+`liquid_cooler_state.json` into the new folder. If a scheduled task starts
+MechControl, make sure it points at the new `MechControl.exe`. The old version's
+`.dll` files are no longer used and can be deleted.
+
+## Command line
+
+The `-cli` archive includes `mcctl.exe`. From an elevated shell it reads and changes
+CPU and GPU power, NVIDIA current limits, fan boost, the EC power-limit bypass and
+the liquid cooler flag on the running app. Run `mcctl help` for the commands. Changes apply immediately but
+are not saved.
+
+## Diagnostic report
+
+`MechControl.exe --diagnose report.json` writes a read-only report of the model, EC
+power limits, fan tables and sensors, then exits. It can run while MechControl is
+running. Attach it, or `mechcontrol.log`, when reporting a problem with your model.
+
+## Fan speed performance counters (optional)
+
+MechControl can publish CPU and GPU fan RPM as Windows performance counters. This
+needs a one-time registration from an elevated PowerShell in this folder. Exit
+MechControl first, and use a new backup directory. Registration replaces the C#
+version's counters if they were registered; the backup can restore them.
 
 ```powershell
-./counters.ps1 -Action Install -Manifest ./MechControl-counters.man -BackupDirectory C:/Temp/tandem/counter-backup
-# Start MechControl and use Get-Counter '\MechControl\CPU Fan RPM','\MechControl\GPU Fan RPM'.
-# Stop MechControl before removal or rollback.
-./counters.ps1 -Action Rollback -Manifest ./MechControl-counters.man -BackupDirectory C:/Temp/tandem/counter-backup
+./counters.ps1 -Action Install -Manifest ./MechControl-counters.man -BackupDirectory C:/Temp/counter-backup
+# Start MechControl, then: Get-Counter '\MechControl\CPU Fan RPM','\MechControl\GPU Fan RPM'
+# To remove the registration, exit MechControl and run:
+./counters.ps1 -Action Remove -Manifest ./MechControl-counters.man -BackupDirectory C:/Temp/counter-backup
+# Or, to restore the registration from before Install (including the C# version's counters):
+./counters.ps1 -Action Rollback -Manifest ./MechControl-counters.man -BackupDirectory C:/Temp/counter-backup
 ```
 
-The default archive has no CLI client or pipe server. The optional CLI archive
-includes `mcctl.exe`; an elevated `mcctl status --json` addresses the active
-controller. CLI changes are live and unsaved. `mcctl watch --interval 1000 --json`
-stops on Ctrl+C. Never substitute an ordinary second controller for a client.
-
-`MechControl.exe --diagnose C:/Temp/tandem/report.json` collects a write-free EC
-report and exits. The output directory must exist; this mode may coexist with a
-controller. Shutdown joins synchronous device calls and cannot promise to cancel
-a blocked OS/driver call. Separate symbols archives are for developers only.
+Registration points at this folder. If you move the folder, remove the registration
+first and register it again afterwards.
