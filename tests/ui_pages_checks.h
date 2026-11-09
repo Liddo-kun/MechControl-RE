@@ -29,6 +29,14 @@ void Application::checkPages(const std::filesystem::path& directory,const std::s
     fixture->fail_gpu=true;read();wait([&]{return !busy_ && gpuError_.find(L"GPU read failed")!=std::wstring::npos && !IsWindowEnabled(get(nvId));});bottom(true);capture(L"live-failed");
     fixture->fail_gpu=false;read();wait([&]{return !busy_ && IsWindowEnabled(get(nvId))!=FALSE;});fixture->asleep=true;read();wait([&]{return !busy_ && !IsWindowEnabled(get(nvId));});check(liveReason_.find(L"asleep")!=std::wstring::npos && text(get(nvId+1000))==L"--","sleeping GPU has unavailable live currents, not fresh cached limits");fixture->asleep=false;read();wait([&]{return !busy_ && IsWindowEnabled(get(nvId))!=FALSE && liveReason_.empty();});
     capture(L"power-live-bottom");bottom(false);capture(L"power-live");
+    // The advanced controls are collapsed until the link is clicked.
+    check(std::ranges::none_of(std::array{unlockId,dlppcId,nvId,msId,inputId,bypassId,coolerFlagId},[&](int id){return IsWindowVisible(get(id))!=FALSE;}),"advanced controls are hidden until expanded");
+    NMHDR expand{get(advancedId),UINT_PTR(advancedId),NM_CLICK};SendMessageW(window_,WM_NOTIFY,advancedId,reinterpret_cast<LPARAM>(&expand));pump();
+    check(std::ranges::all_of(std::array{unlockId,dlppcId,nvId,msId,inputId,bypassId,coolerFlagId},[&](int id){return IsWindowVisible(get(id))!=FALSE;}) && IsWindowEnabled(get(bypassId)) && IsWindowEnabled(get(coolerFlagId)),"the advanced link reveals the GPU override, current limits, bypass and cooler-flag controls");
+    bottom(true);capture(L"power-advanced");bottom(false);
+    SendMessageW(get(coolerFlagId),BM_SETCHECK,BST_CHECKED,0);command(coolerFlagId,BN_CLICKED);
+    wait([&]{return !busy_ && state_.value("advanced",Json::object()).value("coolerFlag",Json::object()).value("connected",false);});
+    check(checked(coolerFlagId),"the liquid cooler flag applies and binds its live state");
     page(1);wait([&]{return state_.contains("switchMs");});
     auto chartWindow=get(cpuChartId);auto before=fanIntent();check(HIWORD(SendMessageW(chartWindow,chartPointMessage,0,0))==before.cpu_curve->duty[1]/2,"step handle zero edits the NEXT duty, not the zero-duty sentinel");
     auto at=SendMessageW(chartWindow,chartPointMessage,0,1);int x=LOWORD(at),y=HIWORD(at);

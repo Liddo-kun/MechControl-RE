@@ -17,7 +17,7 @@ std::string describe(const FanSnapshot&,const std::string& title); // Hex dump f
 struct Sensors {
     int cpu_rpm=0,gpu_rpm=0;
     std::optional<int> cpu_percent,gpu_percent,cpu_limit,battery_soc,battery_mode,battery_raw,cpu_temp,gpu_temp,
-        system_watts,db_live,tgp_live;
+        adapter_raw,db_live,tgp_live; // adapter_raw: 0x60C-0x60D, a raw adapter-current ADC reading, not watts.
     std::optional<double> adapter_amps;
     std::optional<bool> boost,curve_enabled;
 };

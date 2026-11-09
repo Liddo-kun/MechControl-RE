@@ -38,10 +38,15 @@ struct ThermalReset {};
 struct ThermalTest {std::optional<config::ProtectionSettings> expected;};
 struct Visibility { bool visible; };
 struct Resume {};
+// Lifecycle events that turn the EC bypass off.
+struct PowerTransition { enum Kind { display_off,suspend,shutdown } kind; };
+struct EcBypassApply { bool enabled; }; // Never saved; see Controller::bypass.
+struct CoolerFlag { bool connected; }; // EC 0x7C7 bit 1; live until the slot is saved.
 struct CliCommand { std::vector<std::string> arguments; };
 using ControlCommand=std::variant<CpuApply,GpuApply,FanApply,FanBoost,BatteryApply,SwitchApply,
     ProtectionApply,SlotLoad,SlotSave,SlotRename,SlotClear,DefaultsApply,ThermalReset,ThermalTest,
-    Visibility,Resume,AcEvent,GpuUnlock,DlppcApply,CliCommand,LightingApply,LightingIdle,DimmingApply,PeripheralRead,CoolerRequest,BatteryPage,UiRead,UiPage,UiPreflight,FanMaster,FanEdit,FanRead>;
+    Visibility,Resume,AcEvent,GpuUnlock,DlppcApply,CliCommand,LightingApply,LightingIdle,DimmingApply,PeripheralRead,CoolerRequest,BatteryPage,UiRead,UiPage,UiPreflight,FanMaster,FanEdit,FanRead,
+    PowerTransition,EcBypassApply,CoolerFlag>;
 // Status of the current curve/master/link request, not boost/switch, physical cooling or saved state.
 enum class FanApplication { unapplied, applied, partial };
 struct ControlResult {
@@ -87,7 +92,7 @@ private:
     bool enabled(const char*) const;
     uint8_t read(const char*);
     std::optional<int> temperature(const char*);
-    config::CpuSettings cpu();
+    config::CpuSettings cpu(std::string* preset=nullptr);
     config::GpuSettings gpu(bool driver_read=false);
     bool cpu_minimum_=false,gpu_minimum_=false,fan_boost_=false;
     config::CpuSettings minimum_cpu();
@@ -128,6 +133,9 @@ private:
     void apply_gpu(config::GpuSettings);
     void validate_currents(const config::GpuSettings&);
     void check_gpu();void unlock_gpu(bool);void dlppc(bool);
+    void bypass(bool);bool clear_bypass(const std::string& reason);void watch_bypass();
+    void cooler_flag(bool connected);void ensure_cooler_flag(const char* when);
+    config::Json advanced_status() const;
     void open_dlppc();std::optional<nv::Dlppc> read_dlppc();void write_dlppc(bool active);
     std::unique_ptr<nv::Power> nvidia_;
     std::unique_ptr<nv::Api> dlppc_api_; // DLPPC needs only NVAPI; used while nvidia_ is unavailable (unsupported BIOS limits).
@@ -137,6 +145,9 @@ private:
     std::optional<int> driver_watts_;
     std::optional<config::GpuSettings> last_gpu_;
     ULONGLONG gpu_check_at_=0;
+    bool bypass_supported_=false,bypass_active_=false,bypass_clearing_=false,emergency_=false,cooler_flag_=false;
+    std::string bypass_status_,bypass_reason_;
+    unsigned advanced_revision_=0,presented_advanced_=~0u;
     std::function<void(std::function<void()>)> run_blocking_; // Existing joined wait path; never moves EC work.
     EcSession& session_;
     config::ProfileStore store_;

@@ -767,6 +767,39 @@ temperature >=87 C selects OCPL=2; recovery requires <82 C and an expired
 but the activation+CUME custom GPU branch bypasses that adjustment. The EC
 produces this field independently of LCSE and may overwrite host values.
 
+Native `src/controller.cpp` now signals this flag. EC init writes 0x7C7=0x0C
+(0x0E when the flag is already on, after EC recovery); a profile slot's
+`liquidCoolerConnected` and runtime changes are bit-1-only WriteGuard writes with
+readback; it is reapplied after resume and EC recovery, because the EC clears it
+on power transitions. It is separate from the BLE cooler connection.
+
+### 11.9.2 EC power-limit bypass (0x780 = 0xA2)
+
+Writing **0x780 = 0xA2** makes the EC skip its adaptive CPU-cap aggregation and
+publish the existing custom PL1/PL2/PL4 instead. It also forces the fans to full,
+changes thermal-cap and GPIO protection outputs, and takes up to ~24 EC calls
+(about 24 s) to take effect. Outside the normal running state (`0x6E6` != 1) the
+EC clears 0x780 and spins; so the value must never persist across a power
+transition. Confirmed by instruction-level analysis and execution of the exact
+Intel image (EC version `0x454`=0x4D, `0x47D`=0) and the AMD X6FR image
+(EC version 112.0); both load those version bytes the same way (B1 851E / B1 10611).
+`0x781` holds an alternate request the EC prefers when nonzero.
+
+MechControl exposes this only when the active profile declares `ecBypass` and the
+live EC version falls in one of its `ecVersions` entries (`"M.m"` or an inclusive
+`"M.m-M.m"` range). `X6FR5xxY.json` allows 112.0-117.0 at Jon's request: only 112.0 was
+analysed; 113.0-117.0 are assumed to keep the same 0x780 handling until a 117.0 image is
+checked. It writes 0xA2 through WriteGuard only when
+AC is present (`0x490` bit 0), the EC is running (`0x6E6`=1), `0x781`=0 and `0x780`=0,
+and custom CPU control is active (`0x741` bit 0, `0x727` bit 6). It clears 0x780 to 0
+on turn-off, sleep, display off, AC loss, a thermal failsafe trip, EC
+reinitialization, app exit, and a leftover value at startup. It is never saved.
+This is not a selective overcurrent-protection disable: see
+[`notes/liquid_cooler_ec_policy.md`](notes/liquid_cooler_ec_policy.md).
+
+`0x60C`-`0x60D` is a raw adapter-current ADC reading in this firmware (ADC6, low
+byte in `0x449`), **not** watts; System Info labels it "Adapter Current, raw ADC".
+
 ---
 
 ### 11.10 Fan Table -- RamFan1 (0xF00-0xF5F)

@@ -19,6 +19,17 @@ void from_json(const Json& j,Logo& v) { object(j); F("r",r); F("g",g); F("b",b);
 void from_json(const Json& j,Mode& v) {
     object(j); F("PL1",pl1); F("PL2",pl2); F("PL4",pl4); F("CTGP",ctgp); F("dynamicBoost",dynamic_boost); F("tccOffset",tcc_offset); F("fanCurve",fan_curve);
 }
+void from_json(const Json& j,EcBypass& v) {
+    object(j); F("value",value); std::vector<std::string> versions; field(j,"ecVersions",versions);
+    auto number=[](std::string_view s,std::string_view entry) {
+        int n=0;auto [end,error]=std::from_chars(s.data(),s.data()+s.size(),n);
+        if(s.empty() || error!=std::errc{} || end!=s.data()+s.size()) throw std::runtime_error("Invalid ecBypass EC version: "+std::string(entry));return n;
+    };
+    for(std::string_view entry:versions) {
+        auto version=[&](std::string_view s) {auto dot=s.find('.');if(dot==s.npos) number({},entry);return EcVersion{number(s.substr(0,dot),entry),number(s.substr(dot+1),entry)};};
+        auto dash=entry.find('-');auto low=version(entry.substr(0,dash));v.ec_versions.push_back({low,dash==entry.npos?low:version(entry.substr(dash+1))});
+    }
+}
 void from_json(const Json& j,FanTable& v) {
     object(j); F("format",format); F("cpuTempUpBase",cpu_up); F("cpuTempDownBase",cpu_down); F("cpuDutyBase",cpu_duty);
     F("gpuTempUpBase",gpu_up); F("gpuTempDownBase",gpu_down); F("gpuDutyBase",gpu_duty);
@@ -30,7 +41,7 @@ void from_json(const Json& j,MachineProfile& v) {
     F("registers",registers); F("fanTable",fan_table); F("limits",limits); F("bitfields",bitfields);
     F("batteryModes",battery_modes); F("baseboardPatterns",baseboard_patterns); F("cpuVendor",cpu_vendor);
     F("skipVerify",skip_verify); F("verifyRedirect",redirects); F("defaultFanCurve",default_fan);
-    F("defaultLogo",default_logo); F("modeDefaults",modes); F("modePresets",mode_presets); F("writeAllowlist",allowlist);
+    F("defaultLogo",default_logo); F("modeDefaults",modes); F("modePresets",mode_presets); F("writeAllowlist",allowlist); F("ecBypass",ec_bypass);
 }
 #undef F
 int hex(const std::string& text) {
@@ -87,7 +98,13 @@ void apply_universal_defaults(MachineProfile& p) {
             {"fanDuty",{0,200,"raw_div_2_percent",{},{}}},{"fanTemp",{0,105,"direct",{},{}}},
             {"fanSwitchSpeed",{100,12700,"fan_switch_speed",{},{}}}};
     }
-    if(!p.verified) { p.allowlist=init_allow; p.allowlist.insert(p.allowlist.end(),feature_allow.begin(),feature_allow.end()); p.skip_verify=universal_skip; }
+    if(!p.verified) {
+        // Unverified profiles use the universal lists. A declared EC bypass keeps only its own explicit entry.
+        std::set<int> listed; expand(listed,p.allowlist);
+        bool bypass=p.ec_bypass && p.registers.contains("ecBypass") && listed.contains(p.reg("ecBypass"));
+        p.allowlist=init_allow; p.allowlist.insert(p.allowlist.end(),feature_allow.begin(),feature_allow.end()); p.skip_verify=universal_skip;
+        if(bypass) p.allowlist.push_back(p.registers.at("ecBypass"));
+    }
     if(p.redirects.empty()) p.redirects["0x786"]={"0x463","inverted_offset",105};
     if(p.battery_modes.empty()) p.battery_modes={{"High Capacity","0x08"},{"Balanced","0x18"},{"Stationary","0x28"}};
 }

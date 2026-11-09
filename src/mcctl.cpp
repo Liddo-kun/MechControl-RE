@@ -11,6 +11,8 @@ constexpr auto usage = R"(mcctl - control a running MechControl (elevated shell 
   mcctl gpu [--tgp W] [--db W|on|off] [--nvvdd A] [--msvdd A] [--board-input A] [--json]
   mcctl cpu [--pl1 W] [--pl2 W] [--pl4 W] [--temp-limit C] [--json]
   mcctl fan boost on|off [--json]
+  mcctl ec-bypass on|off [--json]    (EC power-limit bypass; turns itself off on sleep, display off, AC loss, exit)
+  mcctl cooler-flag on|off [--json]  (EC liquid cooler connected flag)
 
 Changes are live and unsaved. The running controller validates commands and ranges.
 Exit codes: 0 done, 1 refused or failed, 2 usage error, 3 MechControl not reachable.

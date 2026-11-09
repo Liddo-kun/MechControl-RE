@@ -119,8 +119,8 @@ void snapshots_and_startup() {
     s->calls.clear(); auto sample=read_sensors(ec,p,Detail::full);
     require(sample.cpu_rpm==0x1234 && sample.gpu_rpm==0x5678 && sample.cpu_limit==85 && s->calls.size()==18,"X6FR profile RPM byte order, direct high-bit masked temperature and 18-byte full sample");
     s->calls.clear(); sample=read_sensors(ec,p,Detail::rpm); require(s->calls.size()==4 && !sample.cpu_temp,"tray sample reads just four RPM bytes");
-    s->calls.clear(); sample=read_sensors(ec,p,Detail::monitor); require(s->calls.size()==11 && sample.curve_enabled && !sample.cpu_temp && !sample.system_watts,"monitor bar sample skips temperatures and System Info sensors");
-    s->calls.clear(); sample=read_sensors(ec,p,Detail::temperatures,Sensors{.gpu_temp=50}); require(s->calls.size()==12 && sample.cpu_temp && sample.gpu_temp==50 && !sample.system_watts,"Fans tab sample adds temperatures, reusing a shared reading");
+    s->calls.clear(); sample=read_sensors(ec,p,Detail::monitor); require(s->calls.size()==11 && sample.curve_enabled && !sample.cpu_temp && !sample.adapter_raw,"monitor bar sample skips temperatures and System Info sensors");
+    s->calls.clear(); sample=read_sensors(ec,p,Detail::temperatures,Sensors{.gpu_temp=50}); require(s->calls.size()==12 && sample.cpu_temp && sample.gpu_temp==50 && !sample.adapter_raw,"Fans tab sample adds temperatures, reusing a shared reading");
     s=machine(); ChannelFactory factory=[s](const std::wstring& path){require(path==LR"(\\.\ACPIDriver)","profile device path passed to EC owner");return std::make_unique<Fake>(s);};
     {
         EcSession session(factory,{},true,{},config::profiles_directory(),config::Identity{"YAOSHI Series-X6AR55xY","fixture","intel",uint8_t{26}});

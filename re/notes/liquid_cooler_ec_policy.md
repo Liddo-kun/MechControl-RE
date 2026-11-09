@@ -445,6 +445,21 @@ Full instruction evidence, GPIO sources, timer derivation, all LCSE callers and
 decision tables: `C:/Temp/tandem/amd-sustained-power-investigation/evidence.md`.
 Read-only logger/source/trace: `C:/Temp/tandem/cooler-ec-investigation/`.
 
+## Implementation status
+
+Both features now ship, gated per model/EC version. The **LCSE connection flag**
+is saved per profile slot (`liquidCoolerConnected`): EC init writes 0x7C7=0x0C,
+slot loads and runtime changes are bit-1-only WriteGuard writes with readback, and
+it is reapplied after resume and EC recovery. The **0x780=0xA2 bypass** is enabled for
+`IDY_7Y.json` (Intel EC 77.0) and `X6FR5xxY.json` (AMD EC 112.0), whose exact EC
+images were analysed and whose version-byte loaders (B1 851E Intel, B1 10611 AMD)
+were confirmed. At Jon's request `X6FR5xxY.json` also allows AMD EC 113.0-117.0,
+which have not been analysed; a 117.0 image is to be checked against 112.0. It is never saved and is cleared on every power transition, a
+thermal trip, EC reinit, exit and leftover-at-startup. Other models stay disabled
+until their EC image is checked the same way; a bare sanity read of 0x780 cannot
+establish the semantics on an unanalysed firmware. The value remains advertised as
+OEM-parity benchmark behaviour, not a proven input-current-limit bypass.
+
 ## Lifecycle and shared state
 
 B1 F665-F8D5 generates 7E6/7E7 fan/pump requests without requiring LCSE.

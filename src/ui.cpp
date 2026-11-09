@@ -29,10 +29,12 @@ using namespace mech;
 using namespace mech::config;
 constexpr wchar_t mainClass[]=L"MechControl.Native.Main";
 constexpr UINT trayMessage=WM_APP+2,fanEditMessage=WM_APP+4;
+// GUID_CONSOLE_DISPLAY_STATE and GUID_ACDC_POWER_SOURCE.
+constexpr GUID displayState{0x6FE69556,0x704A,0x47A0,{0x8F,0x24,0xC2,0x8D,0x93,0x6F,0xDA,0x47}},powerSource{0x5D3E9A59,0xE9D5,0x4B00,{0xA6,0xBD,0xFF,0x34,0xFF,0x51,0x65,0x48}};
 enum Id {
     tabsId=100,saveId=110,defaultsId,renameId,clearId,showId,exitId,readId,
     slotId=120,defaultId=140,
-    pl1Id=200,pl2Id,pl4Id,tempId,tgpId,dbId,nvId,msId,inputId,dbOnId,unlockId,dlppcId,powerApplyId,powerReadId,
+    pl1Id=200,pl2Id,pl4Id,tempId,tgpId,dbId,nvId,msId,inputId,dbOnId,unlockId,dlppcId,powerApplyId,powerReadId,advancedId,bypassId,coolerFlagId,
     boostId=300,switchId,switchMsId,switchApplyId,curveId,linkId,cpuChartId,gpuChartId,fanApplyId,fanReadId,debugCpuId,debugGpuId,boostApplyId,
     protectionId=400,thresholdId,reduceId,fanBoostId,showWindowId,protectionApplyId,resetId,testId,detailsId,
     batteryModeId=500,batteryApplyId,batteryTextId,
@@ -64,7 +66,7 @@ constexpr const wchar_t* liveCaptions[]{L"Setting",L"Now",L"Of limit",L"Controll
 constexpr const wchar_t* railTip=L"The current controller lowers its clock cap until neither rail's current would exceed its limit at that cap.";
 constexpr const wchar_t* liveTips[]{
     L"The active limit (for GPU power, the enforced limit: TGP + Dynamic Boost, or the driver's lower budget).",
-    L"The driver's latest reading (it updates every 20 ms); refreshed twice a second while this tab is shown.",
+    L"The driver's latest reading (it updates every 20 ms); refreshed every second while this tab is shown.",
     L"The reading as a share of its setting.",
     L"The highest clock the driver controller enforcing this limit allows (power or current controller); the lower cap applies. In brackets: how far the cap is above the actual clock. Board input has no controller: the GPU's inline power controller (IPC) slows the clock below the caps.",
     L"The graphics clock (NVML) against the driver's maximum.",
@@ -272,9 +274,13 @@ private:
         slider(0,nvId,L"NVVDD / Core current limit",0,1,0);slider(0,msId,L"MSVDD / Fabric current limit",0,1,0);slider(0,inputId,L"Board input current limit",0,1,0);
         SendMessageW(get(inputId),TBM_SETLINESIZE,0,100); // Board input moves in milliamps; arrow keys step 0.1 A.
         button(0,powerApplyId,L"&Apply");button(0,powerReadId,L"Read from EC");
+        row(0,advancedId,L"<a>Show advanced controls</a>",WC_LINK,WS_TABSTOP|LWS_TRANSPARENT);
+        check(0,bypassId,L"Bypass EC power throttling");check(0,coolerFlagId,L"Tell the EC a liquid cooler is connected");
         tooltip_=CreateWindowExW(WS_EX_TOPMOST,TOOLTIPS_CLASSW,nullptr,WS_POPUP|TTS_ALWAYSTIP|TTS_NOPREFIX,CW_USEDEFAULT,CW_USEDEFAULT,CW_USEDEFAULT,CW_USEDEFAULT,window_,nullptr,instance_,nullptr);
         for(UINT_PTR i=0;i<std::size(liveTips);++i) tip(i+1,liveTips[i]); // Rectangles follow the painted table.
         tip(reinterpret_cast<UINT_PTR>(get(dlppcId)),dlppcTip_=dlppcTip(nullptr),TTF_IDISHWND);
+        tip(reinterpret_cast<UINT_PTR>(get(bypassId)),L"Turns off on sleep, display off, AC loss, a failsafe trip and exit. Not saved.",TTF_IDISHWND);
+        tip(reinterpret_cast<UINT_PTR>(get(coolerFlagId)),L"The flag the OEM app sets when its cooler connects. Saved with the profile. Does not connect the cooler.",TTF_IDISHWND);
         for(int id:{nvId,msId,inputId}) tip(reinterpret_cast<UINT_PTR>(get(id)),(L"Applies live within the active ceiling. The unlock allows up to "+std::wstring(id==inputId?L"154":L"140")+L"% of the stock current; raising an older ceiling restarts the GPU."),TTF_IDISHWND);
         check(1,boostId,L"Enable Fan Boost");button(1,boostApplyId,L"Apply");check(1,switchId,L"Enable Fan Switch Speed");slider(1,switchMsId,L"Switch Speed",1,127,3);button(1,switchApplyId,L"Apply");
         check(1,curveId,L"Custom Fan Curve");check(1,linkId,L"Link Fans");
@@ -307,6 +313,8 @@ private:
         // Explorer is unelevated; allow its restart notification into this elevated window.
         if(taskbarMessage_ && !ChangeWindowMessageFilterEx(window_,taskbarMessage_,MSGFLT_ALLOW,nullptr)) log_.write("Could not allow TaskbarCreated notification");
         createIcons();tray(true);
+        powerNotifications_={RegisterPowerSettingNotification(window_,&displayState,DEVICE_NOTIFY_WINDOW_HANDLE),RegisterPowerSettingNotification(window_,&powerSource,DEVICE_NOTIFY_WINDOW_HANDLE)};
+        if(!powerNotifications_[0] || !powerNotifications_[1]) log_.write("Display or power-source notifications unavailable");
         log_.write("Native UI ready; DPI="+std::to_string(dpi_));
     }
     void applyDpi() {
@@ -369,12 +377,27 @@ private:
         auto check=[&](int id,bool shown,HFONT font){if(shown) y+=ref(6);put(get(id),shown,left,y,extent(font,text(get(id)))+ref(40),box);if(shown) y+=box;};
         open(L"CPU Power");auto c=columns({pl1Id,pl2Id,pl4Id,tempId},L"000 °C");
         for(int id:{pl1Id,pl2Id,pl4Id,tempId}) slide(id,cpu,c);
-        note(cpuNote_,errorColor,0,0);close();
-        open(L"GPU Power");c=columns({tgpId,dbId,nvId,msId,inputId},L"000.000 A");
-        slide(tgpId,gpu,c);check(unlockId,gpu,font_);check(dlppcId,gpu,font_);check(dbOnId,gpu,bold_);
-        for(int id:{dbId,nvId,msId,inputId}) slide(id,gpu,c);
+        note(cpuNote_,errorColor,0,0);note(cpuPreset_,GetSysColor(COLOR_GRAYTEXT),ref(4),0);close();
+        open(L"GPU Power");c=columns({tgpId,dbId},L"000 W");
+        slide(tgpId,gpu,c);check(dbOnId,gpu,bold_);slide(dbId,gpu,c);
         note(gpu?powerHint_:gpuNote_,gpu?GetSysColor(COLOR_GRAYTEXT):errorColor,0,0);close();
         y+=ref(6);put(get(powerApplyId),true,x,y,ref(110),ref(32));put(get(powerReadId),true,x+ref(120),y,ref(140),ref(32));y+=ref(44);
+        // Collapsed by default; the EC controls appear only where this model and EC firmware support them.
+        auto advanced=state_.value("advanced",Json::object());
+        bool bypass=advanced.value("ecBypass",Json::object()).value("available",false),flag=advanced.value("coolerFlag",Json::object()).value("available",false),any=gpu || bypass || flag;
+        put(get(advancedId),any,x+ref(3),y,extent(font_,L"Hide advanced controls")+ref(8),line);if(any) y+=line+ref(14);
+        bool expanded=advanced_ && any;
+        if(expanded) open(L"Advanced");
+        check(unlockId,expanded && gpu,font_);check(dlppcId,expanded && gpu,font_);
+        // Current limits apply with the Apply button above, like the other GPU settings.
+        if(expanded && gpu) y+=ref(6);c=columns({nvId,msId,inputId},L"000.000 A");
+        for(int id:{nvId,msId,inputId}) slide(id,expanded && gpu,c);
+        auto muted=GetSysColor(COLOR_GRAYTEXT);
+        check(bypassId,expanded && bypass,font_);
+        if(expanded && bypass) {note(L"Keeps your PL1/PL2/PL4 under heavy CPU+GPU load instead of the EC lowering them. Fans run at full speed.",muted,ref(2),0);note(bypassText_,bypassColor_,ref(2),0);}
+        check(coolerFlagId,expanded && flag,font_);
+        if(expanded && flag) note(L"Switches the EC to its liquid-cooler fan and GPU tables and changes some hardware signals whose purpose is unknown. Does not lift custom or adapter limits.",muted,ref(2),0);
+        if(expanded) close();
         int liveTop=-1;
         if(gpu) {
             open(L"GPU Limits (live)");liveTop=y;y+=8*(ref(6)+line);auto gray=GetSysColor(COLOR_GRAYTEXT);
@@ -608,7 +631,7 @@ private:
         // Temperature registers come from the model profile; the other readings use fixed registers.
         auto reg=[&](const char* key){wchar_t s[16]{};if(state_.contains(key)) swprintf_s(s,L" [0x%03X]",state_[key].get<int>());return std::wstring(s);};
         table(L"Temperatures",{{0,L"CPU Temperature"+reg("cpuTempRegister")+L":"},{1,L"GPU Temperature"+reg("gpuTempRegister")+L":"}});
-        std::vector<std::pair<int,std::wstring>> power{{2,L"Adapter Current [0x449]:"},{3,L"System Power [0x60C-0x60D]:"},{4,L"TGP Live / NPCF ACBT [0x788]:"},{5,L"DB Max Live / NPCF AMAT [0x7D5]:"}};
+        std::vector<std::pair<int,std::wstring>> power{{2,L"Adapter Current [0x449]:"},{3,L"Adapter Current, raw ADC [0x60C-0x60D]:"},{4,L"TGP Live / NPCF ACBT [0x788]:"},{5,L"DB Max Live / NPCF AMAT [0x7D5]:"}};
         // Source headings only when the NVIDIA driver is a second source.
         if(state_.value("enabled",std::set<std::string>{}).contains("gpuPower")) {power.emplace(power.begin(),-1,L"EC");power.insert(power.end(),{{-1,L"NVIDIA Driver"},{6,L"GPU Budget F7:"},{7,L"CPU+GPU Budget TPP:"}});}
         table(L"Power Delivery",power);
@@ -703,6 +726,9 @@ private:
         const Json& g=gpuTelemetry_;auto nvidia=g.is_object()?g.value("nvidia",Json(nullptr)):Json(nullptr);
         cpuNote_=state_.contains("cpu") && state_["cpu"].is_null()?L"CPU power controls disabled — register validation failed. See log for details."
             :state_.contains("cpuError")?L"CPU read failed: "+w(state_["cpuError"].get<std::string>()):L"";
+        auto preset=state_.contains("cpu") && state_["cpu"].is_object()?state_["cpu"].value("preset",std::string{}):std::string{};
+        if(!preset.empty()) preset[0]=char(std::toupper(static_cast<unsigned char>(preset[0])));
+        cpuPreset_=preset.empty()?L"":L"No custom limits are set in the EC, so it uses a built-in preset. Showing its "+w(preset)+L" preset; Apply sets these as custom limits.";
         gpuNote_=state_.contains("gpu") && state_["gpu"].is_null()?L"GPU power controls disabled — register validation failed. See log for details.":L"";
         powerHint_=gpuError_;
         if(gpuError_.empty() && g.is_object()) {
@@ -720,7 +746,8 @@ private:
         auto dlppc=dlppcTip(g.is_object()?g.value("dlppc",Json(nullptr)):Json(nullptr));
         if(dlppc!=dlppcTip_) {dlppcTip_=std::move(dlppc);tip(reinterpret_cast<UINT_PTR>(get(dlppcId)),dlppcTip_,TTF_IDISHWND,TTM_UPDATETIPTEXTW);}
         // Text that changes the layout relays out the page; live readings only repaint the table.
-        auto key=cpuNote_+L'\n'+gpuNote_+L'\n'+powerHint_+L'\n'+liveReason_+L'\n'+text(get(unlockId));
+        auto advanced=state_.value("advanced",Json::object());
+        auto key=cpuNote_+L'\n'+cpuPreset_+L'\n'+gpuNote_+L'\n'+powerHint_+L'\n'+liveReason_+L'\n'+text(get(unlockId))+L'\n'+bypassText_+std::to_wstring(int(advanced_)+2*advanced.value("ecBypass",Json::object()).value("available",false)+4*advanced.value("coolerFlag",Json::object()).value("available",false));
         if(key!=powerKey_) {powerKey_=std::move(key);layoutPage(pages_[0]);} else InvalidateRect(pages_[0].window,&liveTable_,FALSE);
     }
     // The reference MainForm: the profile bar, the tabs and the monitor bar fill the window edge to edge.
@@ -921,6 +948,12 @@ private:
             if(confirm(message,L"GPU BIOS Override")) request(GpuUnlock{on});else {updating_=true;SendMessageW(get(id),BM_SETCHECK,on?BST_UNCHECKED:BST_CHECKED,0);updating_=false;}break;
         }
         case dlppcId:request(DlppcApply{checked(id)});break;
+        case bypassId:case coolerFlagId: {
+            bool on=checked(id);updating_=true;SendMessageW(get(id),BM_SETCHECK,on?BST_UNCHECKED:BST_CHECKED,0);updating_=false; // The result rebinds it.
+            if(id==coolerFlagId) request(CoolerFlag{on});
+            else if(!on || confirm(L"Stop the EC from throttling your CPU power limits?\n\nPL1/PL2/PL4 apply under heavy load within about 24 s, the fans run at full speed and the battery covers what the adapter can't supply. It turns off on sleep, display off, AC loss, a failsafe trip and exit.",L"Bypass EC Power Throttling")) request(EcBypassApply{on});
+            break;
+        }
         case boostId:edited_.insert(id);hints();break;
         case boostApplyId:edited_.erase(boostId);request(FanBoost{checked(boostId)});break;
         case linkId: {auto s=fanIntent();s.curve=true;updating_=true;SendMessageW(get(curveId),BM_SETCHECK,BST_CHECKED,0);updating_=false;eraseEdits(curveId,gpuChartId);request(FanApply{s});break;}
@@ -1041,7 +1074,14 @@ private:
             if(cpu) for(auto [id,key]:{std::pair(pl1Id,"pl1"),std::pair(pl2Id,"pl2"),std::pair(pl4Id,"pl4"),std::pair(tempId,"tempLimit")}) {auto& v=state_["cpu"][key];value(id,v["value"],v["min"],v["max"]);}
             bool gpu=!gpuTelemetry_.is_null() && gpuError_.empty();for(int id:{tgpId,dbOnId}) enable(id,gpu);
             if(gpu) gpuLive(gpuTelemetry_,powerRead_);else for(int id:{nvId,msId,inputId,unlockId,dlppcId}) enable(id,false);
-            enable(dbId,gpu && checked(dbOnId));powerRead_=false;enable(powerApplyId,cpu || gpu);refreshPower();
+            enable(dbId,gpu && checked(dbOnId));powerRead_=false;enable(powerApplyId,cpu || gpu);
+            // The check boxes show the controller's state; clicks only request a change.
+            auto advanced=state_.value("advanced",Json::object());auto bypass=advanced.value("ecBypass",Json::object()),flag=advanced.value("coolerFlag",Json::object());
+            bool active=bypass.value("active",false),clearing=bypass.value("clearing",false);auto status=w(bypass.value("status",std::string{}));
+            checked(bypassId,active || clearing);enable(bypassId,bypass.value("available",false));checked(coolerFlagId,flag.value("connected",false));enable(coolerFlagId,flag.value("available",false));
+            // The status line only explains an automatic turn-off or a failure to clear.
+            bypassText_=clearing || (!active && status!=L"Off (turned off)")?status:L"";bypassColor_=clearing?errorColor:GetSysColor(COLOR_GRAYTEXT);
+            refreshPower();
         }
         if(page==1 && state_.contains("fan")) {
             auto f=state_["fan"].get<FanSettings>();bool fans=features.contains("fanControl"),supported=state_.value("curvesSupported",false),hasGpu=state_.value("hasGpuFan",false);
@@ -1079,7 +1119,7 @@ private:
         if(j.contains("gpuLive")) live_=j["gpuLive"];if(j.contains("gpuBudget")) gpuBudget_=j["gpuBudget"];
         if(IsWindowVisible(window_)) {
             int page=TabCtrl_GetCurSel(tabs_);
-            if(readPage>=0 || readPage==-1 || initial || page==1 || page==2 || j.contains("gpuError") || (page==6 && j.contains("gpuBudget"))) bindPage(page);
+            if(readPage>=0 || readPage==-1 || initial || page==1 || page==2 || j.contains("gpuError") || (page==6 && j.contains("gpuBudget")) || (page==0 && j.contains("advanced"))) bindPage(page);
             else if(ready_ && page==0 && j.contains("gpuLive")) refreshPower(); // Live readings repaint the table; the editor keeps its values.
         }
         int lost=state_.value("thermalLostAlerts",0);bool protectionLost=lost>lostAlerts_;lostAlerts_=lost;
@@ -1112,7 +1152,7 @@ private:
             auto& s=*lastSensors_;auto positive=[](std::optional<int> v,const wchar_t* unit,const wchar_t* zero=L"--"){return !v?std::wstring(L"--"):*v>0?std::to_wstring(*v)+unit:std::wstring(zero);};
             texts[0]=positive(s.cpu_temp,L"°C");texts[1]=positive(s.gpu_temp,L"°C");
             if(s.adapter_amps && *s.adapter_amps>0) texts[2]=decimal(*s.adapter_amps)+L" A ("+decimal(*s.adapter_amps*19.5,0)+L"W @ 19.5V)";
-            texts[3]=positive(s.system_watts,L" W");if(s.tgp_live) texts[4]=std::to_wstring(*s.tgp_live)+L" W";texts[5]=positive(s.db_live,L" W",L"off");
+            texts[3]=positive(s.adapter_raw,L"");if(s.tgp_live) texts[4]=std::to_wstring(*s.tgp_live)+L" W";texts[5]=positive(s.db_live,L" W",L"off");
         }
         if(const Json& b=gpuBudget_;b.is_object()) {
             if(b.contains("reason")) texts[6]=texts[7]=L"-- ("+w(b.at("reason").get<std::string>())+L")";
@@ -1126,7 +1166,7 @@ private:
     }
     // A reading's cell fits the reading and its widest usual value, so most changes only repaint the cell.
     int infoWidth(HDC dc,int i) const {
-        constexpr const wchar_t* usual[]{L"000°C",L"000°C",L"00.0 A (000W @ 19.5V)",L"0000 W",L"000 W",L"000 W",L"000 W",L"000 W"};
+        constexpr const wchar_t* usual[]{L"000°C",L"000°C",L"00.0 A (000W @ 19.5V)",L"0000",L"000 W",L"000 W",L"000 W",L"000 W"};
         SelectObject(dc,font_);SIZE a{},b{};GetTextExtentPoint32W(dc,usual[i],int(wcslen(usual[i])),&a);GetTextExtentPoint32W(dc,infoText_[i].c_str(),int(infoText_[i].size()),&b);
         return int(std::max(a.cx,b.cx));
     }
@@ -1270,6 +1310,8 @@ private:
         auto open=CreateWindowW(L"BUTTON",L"Open Failsafe Settings",WS_CHILD|WS_VISIBLE|WS_TABSTOP,scale(12),scale(118),scale(520),scale(30),alert_,reinterpret_cast<HMENU>(1),instance_,nullptr);
         for(auto child:{alertText_,open}) SendMessageW(child,WM_SETFONT,reinterpret_cast<WPARAM>(font_),TRUE);
     }
+    // Waits briefly so the EC bypass is cleared before Windows sleeps, turns the display off or ends the session.
+    void powerTransition(PowerTransition::Kind kind) {if(worker_ && ready_ && !closing_) worker_->request(PowerTransition{kind}).wait_for(std::chrono::seconds(2));}
     void show() {ShowWindow(window_,SW_RESTORE);SetForegroundWindow(window_);if(worker_) {worker_->request(Visibility{true});worker_->request(UiPage{TabCtrl_GetCurSel(tabs_)});}}
     void menu() {
         HMENU menu=CreatePopupMenu();AppendMenuW(menu,MF_STRING,showId,L"Show");AppendMenuW(menu,MF_SEPARATOR,0,nullptr);
@@ -1277,7 +1319,8 @@ private:
         AppendMenuW(menu,MF_SEPARATOR,0,nullptr);AppendMenuW(menu,MF_STRING,exitId,L"Exit");POINT p{};GetCursorPos(&p);SetForegroundWindow(window_);auto id=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_RIGHTBUTTON,p.x,p.y,0,window_,nullptr);DestroyMenu(menu);PostMessageW(window_,WM_NULL,0,0);if(id) command(id,0);
     }
     void shutdown() {
-        if(closing_) return;closing_=true;delivery_->close();
+        if(closing_) return;powerTransition(PowerTransition::shutdown);closing_=true;delivery_->close();
+        for(auto notify:powerNotifications_) if(notify) UnregisterPowerSettingNotification(notify);
 #ifdef MECHCONTROL_WITH_CLI
         cli_.reset();
 #endif
@@ -1301,6 +1344,7 @@ private:
         case WM_NOTIFY: {
             auto n=reinterpret_cast<NMHDR*>(lp);if(n->idFrom==tabsId && n->code==TCN_SELCHANGE) selectPage();
             if(n->idFrom==detailsId && (n->code==NM_CLICK || n->code==NM_RETURN)) {thermalDetails_=!thermalDetails_;layoutPage(pages_[2]);}
+            if(n->idFrom==advancedId && (n->code==NM_CLICK || n->code==NM_RETURN)) {advanced_=!advanced_;SetWindowTextW(get(advancedId),advanced_?L"<a>Hide advanced controls</a>":L"<a>Show advanced controls</a>");refreshPower();}
             return 0;
         }
         case WM_MOUSEWHEEL:scroll(pages_[TabCtrl_GetCurSel(tabs_)].window,message,wp);return 0;
@@ -1312,9 +1356,17 @@ private:
         case trayMessage:if(LOWORD(lp)==WM_CONTEXTMENU) menu();else if(LOWORD(lp)==NIN_SELECT || LOWORD(lp)==NIN_KEYSELECT) show();return 0;
         case WM_POWERBROADCAST:
             if(worker_ && wp==PBT_APMPOWERSTATUSCHANGE) {SYSTEM_POWER_STATUS s{};if(GetSystemPowerStatus(&s) && s.ACLineStatus!=255) worker_->request(AcEvent{s.ACLineStatus==1});}
-            if(worker_ && wp==PBT_APMRESUMEAUTOMATIC) worker_->request(Resume{});return TRUE;
+            if(worker_ && wp==PBT_APMRESUMEAUTOMATIC) worker_->request(Resume{});
+            if(wp==PBT_APMSUSPEND) powerTransition(PowerTransition::suspend);
+            if(worker_ && wp==PBT_POWERSETTINGCHANGE) {
+                auto s=reinterpret_cast<const POWERBROADCAST_SETTING*>(lp);if(s->DataLength<sizeof(DWORD)) return TRUE;DWORD value=*reinterpret_cast<const DWORD*>(s->Data);
+                // Modern Standby turns the display off before it sleeps: the earliest reliable warning.
+                if(s->PowerSetting==displayState && value==0) powerTransition(PowerTransition::display_off);
+                if(s->PowerSetting==powerSource) worker_->request(AcEvent{value==0});
+            }
+            return TRUE;
         case WM_CLOSE:ShowWindow(window_,SW_HIDE);return 0;
-        case WM_QUERYENDSESSION:return TRUE;
+        case WM_QUERYENDSESSION:powerTransition(PowerTransition::shutdown);return TRUE;
         case WM_ENDSESSION:if(wp) DestroyWindow(window_);return 0;
         case WM_DESTROY:shutdown();PostQuitMessage(0);return 0;
         }
@@ -1324,7 +1376,7 @@ private:
     HWND tooltip_=nullptr,hot_=nullptr;RECT bar_{},linkedBar_{},thermalLive_{};std::vector<Text> barText_;std::wstring status_,fanValidation_,fanKey_;std::array<std::wstring,7> thermalText_;bool thermalDetails_=false;
     std::array<std::wstring,6> monitor_{L"CPU Fan: --",L"GPU Fan: --",L"CPU Temp Limit: --",L"Battery: --",L"Fan Boost: --",L"Fan Curve: --"};HFONT font_=nullptr,bold_=nullptr,title_=nullptr,header_=nullptr,heading_=nullptr;UINT dpi_=96,taskbarMessage_=0;
     RECT liveTable_{0,-1,0,-1},coolerSwatch_{};std::array<RECT,3> swatches_{};std::wstring coolerStatus_=L"Disconnected",coolerFirmware_;std::array<RECT,8> infoCells_{};std::array<std::wstring,8> infoText_;std::map<int,int> detectedMa_;
-    std::wstring cpuNote_,gpuNote_,powerHint_,liveReason_,powerKey_,dlppcTip_;std::array<Page,7> pages_;std::map<int,HWND> controls_;std::set<int> edited_;
+    std::wstring cpuNote_,cpuPreset_,gpuNote_,powerHint_,liveReason_,powerKey_,dlppcTip_,bypassText_;COLORREF bypassColor_=0;bool advanced_=false;std::array<HPOWERNOTIFY,2> powerNotifications_{};std::array<Page,7> pages_;std::map<int,HWND> controls_;std::set<int> edited_;
     std::array<HICON,5> slotIcons_{};std::vector<HICON> animation_;size_t animationFrame_=0;int trayState_=-3,lostAlerts_=0;bool closing_=false,trayAdded_=false,updating_=false,busy_=false,ready_=false,tripped_=false,coolerConnected_=false,coolerAvailable_=false,fanEditQueued_=false,powerRead_=false;
     int target_=0;std::uint64_t sequence_=0,busySequence_=0;ULONGLONG lastError_=0;
     Json state_=Json::object(),peripheralState_=Json::object(),identity_,gpuTelemetry_,live_,gpuBudget_,devices_=Json::array();std::map<int,std::pair<Json,ChartOptions>> boundCharts_;std::array<bool,7> boundPages_{};

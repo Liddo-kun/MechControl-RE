@@ -104,11 +104,12 @@ public:
     virtual bool needs_restart(bool,const config::GpuSettings&);
     virtual void configure(bool,const config::GpuSettings&,bool allow_restart);
     virtual void apply(int watts,bool dynamic_boost);virtual bool at_most(int);virtual bool applied(int);
+    virtual bool restore_currents(); // Reapplies current limits a driver reload reset; true when it wrote.
 protected:
     Power()=default; // Injected controller fixtures provide the same narrow backend operations.
 private:
-    void verify(const Bytes&);void restore_budget(bool restore_f7=true);void restart();
-    std::unique_ptr<Api> api_;std::unique_ptr<Store> store_;Bios original_;
+    void verify(const Bytes&);void settle(const config::GpuSettings&);void restore_budget(bool restore_f7=true);void restart();
+    std::unique_ptr<Api> api_;std::unique_ptr<Store> store_;Bios original_;std::optional<Currents> expected_;
     bool board_verified_=false;
     std::optional<Budget> budget_original_,budget_applied_;
     std::optional<bool> budget_boost_;

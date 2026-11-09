@@ -11,14 +11,14 @@ int Controller::gpu_max() const {auto l=control_limit(session_.profile,"TGP");re
 std::string Controller::nvidia_unavailable() const {
     if(nvidia_busy_) return "NVIDIA operation in progress; try again in a few seconds";
     if(!nvidia_error_.empty()) return nvidia_error_;
-    return nvidia_available_?"NVIDIA not connected; turn on the unlock once in the Power tab to use current limits":"No NVIDIA GPU control on this machine";
+    return nvidia_available_?"NVIDIA not connected; to use current limits, turn on the GPU unlock under Show advanced controls":"No NVIDIA GPU control on this machine";
 }
 nv::Power& Controller::open_nvidia() {
     if(nvidia_busy_) throw std::runtime_error("NVIDIA operation in progress; try again in a few seconds");
     if(gpu_driver_uncertain_) throw std::runtime_error(nvidia_error_);
     if(nvidia_) return *nvidia_;if(!nvidia_available_) throw std::runtime_error(nvidia_error_.empty()?"No NVIDIA GPU control on this machine":nvidia_error_);
     dlppc_api_.reset(); // One NVAPI owner: Power replaces the DLPPC-only Api; a refusal reopens it on demand.
-    try {std::unique_ptr<nv::Power> opened;nvidia_work([&]{opened=std::make_unique<nv::Power>(control_limit(session_.profile,"TGP").min,diagnostic_);});nvidia_=std::move(opened);gpu_unlocked_=nvidia_->enabled;nvidia_min_watts_=nvidia_->minimum_watts();thermal_->invalidate();thermal_->enforce();return *nvidia_;}
+    try {std::unique_ptr<nv::Power> opened;nvidia_work([&]{opened=std::make_unique<nv::Power>(control_limit(session_.profile,"TGP").min,diagnostic_);});nvidia_=std::move(opened);writes_started_|=nvidia_->modified;gpu_unlocked_=nvidia_->enabled;nvidia_min_watts_=nvidia_->minimum_watts();thermal_->invalidate();thermal_->enforce();return *nvidia_;}
     catch(const std::exception& ex) {nvidia_available_=false;nvidia_error_=ex.what();diagnostic_("NVIDIA unavailable: "+nvidia_error_);throw;}
 }
 void Controller::nvidia_work(const std::function<void()>& work) {
@@ -77,7 +77,7 @@ void Controller::validate_currents(const GpuSettings& g) {
     nv::Currents c;nvidia_work([&]{c=nvidia_->currents();});bool unlock=nvidia_->enabled;
     auto validate=[&](std::optional<int> v,std::optional<nv::Rail> r,const char* name) {
         if(!v) return;if(!r) throw std::runtime_error(std::string("This GPU has no ")+name+" current limit");
-        if(*v<std::max(1000,int(r->min)) || *v>std::min(r->allowed(unlock),int(r->max))) throw std::runtime_error("Current outside active range; higher ceilings require manual unlock/GPU restart from the Power tab");
+        if(*v<std::max(1000,int(r->min)) || *v>std::min(r->allowed(unlock),int(r->max))) throw std::runtime_error("Current outside active range; higher ceilings need the GPU unlock (Power tab, advanced controls) or a GPU restart");
     };
     validate(g.nvvdd_ma,c.nv,"NVVDD");validate(g.msvdd_ma,c.ms,"MSVDD");validate(g.board_input_ma,c.input,"board input");
     bool restart=false;nvidia_work([&]{restart=nvidia_->needs_restart(unlock,g);});if(restart) throw std::runtime_error("Current limits need a GPU restart; apply manually from the Power tab");
@@ -100,6 +100,7 @@ void Controller::apply_gpu(GpuSettings g) {
 void Controller::check_gpu() {
     if(!nvidia_ || nvidia_busy_ || gpu_driver_uncertain_ || !nvidia_->awake()) return; // All delayed reads are sleep-gated too.
     if(dlppc_disabled_) try {nvidia_work([&]{auto d=nvidia_->dlppc();if(d && d->active) {diagnostic_("NVIDIA DLPPC was re-enabled (GPU restart); disabling it again");nvidia_->set_dlppc(false);}});} catch(const std::exception& ex){diagnostic_(std::string("NVIDIA DLPPC check failed: ")+ex.what());}
+    try {nvidia_work([&]{if(nvidia_->restore_currents()) diagnostic_("NVIDIA current limits were reset by the driver; reapplied");});} catch(const std::exception& ex){diagnostic_(std::string("NVIDIA current check failed: ")+ex.what());}
     bool applied=true;if(last_gpu_ && driver_watts_ && nvidia_->enabled) nvidia_work([&]{applied=nvidia_->applied(*driver_watts_);});
     if(!applied) {diagnostic_("NVIDIA driver request or laptop budget below "+std::to_string(*driver_watts_)+" W; reapplying");apply_gpu(*last_gpu_);return;}
     if(on_ac_) {

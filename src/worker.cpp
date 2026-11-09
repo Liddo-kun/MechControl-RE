@@ -49,7 +49,11 @@ std::future<ControlResult> ControlWorker::request(ControlCommand command,std::ui
     std::promise<ControlResult> promise;auto future=promise.get_future();
     std::lock_guard lock(mutex_);
     if(closing_ || options_.once || options_.read_only) promise.set_value({1,"Controller unavailable or stopping"});
-    else {commands_.push_back(Pending{std::move(command),std::move(promise),sequence});SetEvent(wake_.get());}
+    else {
+        // Clearing the EC bypass before sleep, display off or exit goes ahead of queued commands.
+        bool first=std::holds_alternative<PowerTransition>(command);Pending pending{std::move(command),std::move(promise),sequence};
+        if(first) commands_.push_front(std::move(pending));else commands_.push_back(std::move(pending));SetEvent(wake_.get());
+    }
     return future;
 }
 void ControlWorker::stop() {
@@ -68,13 +72,6 @@ void ControlWorker::run(std::stop_token stop) {
     unsigned dirty_pages=0x7f;
     std::optional<Counters> counters;
     unsigned published_state=0;
-    bool fast_timer=false;
-    ULONGLONG control_at=0;
-    auto cadence=[&] {
-        bool fast=controller && controller->gpu_presentation();if(fast==fast_timer) return;
-        fast_timer=fast;LARGE_INTEGER due{};due.QuadPart=-1;
-        if(!SetWaitableTimerEx(timer_.get(),&due,fast?500:1000,nullptr,nullptr,nullptr,100)) throw std::runtime_error("Cannot change presentation cadence");
-    };
     auto presentation=[&](bool live=false) {
         if(!controller) return;
         ControlResult r;r.peripherals=config::Json{{"ui",controller->presentation(false,live,controller->ui_page())}};
@@ -101,9 +98,6 @@ void ControlWorker::run(std::stop_token stop) {
     std::uint64_t samples=0;
     unsigned failures=0;
     auto sample=[&] {
-        auto now=GetTickCount64();
-        if(controller && fast_timer && now<control_at) {if(controller->gpu_presentation()) presentation(true);return;}
-        control_at=now+900;
         auto shared=controller?controller->tick():std::optional(session->sample(Detail::rpm));
         if(controller) if(auto battery=controller->take_battery()) {
             ControlResult result;result.peripherals=config::Json{{"battery",*battery}};
@@ -161,9 +155,9 @@ void ControlWorker::run(std::stop_token stop) {
                           {std::lock_guard lock(mutex_);
                            for(auto i=commands_.begin();i!=commands_.end();) {
                                auto& c=i->command;
-                                 if(std::holds_alternative<Visibility>(c) || std::holds_alternative<UiPage>(c) || std::holds_alternative<BatteryPage>(c) || std::holds_alternative<AcEvent>(c) || std::holds_alternative<Resume>(c)) {notifications.push_back(std::move(*i));i=commands_.erase(i);}else ++i;
+                                 if(std::holds_alternative<Visibility>(c) || std::holds_alternative<UiPage>(c) || std::holds_alternative<BatteryPage>(c) || std::holds_alternative<AcEvent>(c) || std::holds_alternative<Resume>(c) || std::holds_alternative<PowerTransition>(c)) {notifications.push_back(std::move(*i));i=commands_.erase(i);}else ++i;
                            }}
-                           for(auto& p:notifications) p.reply.set_value(controller->execute(p.command));cadence();
+                           for(auto& p:notifications) p.reply.set_value(controller->execute(p.command));
                       }
                      if(ready==WAIT_OBJECT_0+1 && controller) {
                           try {sample();}
@@ -222,17 +216,16 @@ void ControlWorker::run(std::stop_token stop) {
         auto pending=&*queued;
         auto result=controller?controller->execute(pending->command):ControlResult{1,"Controller unavailable"};
         pending->reply.set_value(result);
-        cadence();
         publish_state();
         // Status/watch is a query, not a UI refresh subscription. Writes,
         // including partial writes, still notify the application owner.
-        if(!std::holds_alternative<FanEdit>(pending->command) && !std::holds_alternative<Visibility>(pending->command) && !std::holds_alternative<UiPage>(pending->command) && !std::holds_alternative<BatteryPage>(pending->command) && !std::holds_alternative<Resume>(pending->command) &&
+        if(!std::holds_alternative<FanEdit>(pending->command) && !std::holds_alternative<Visibility>(pending->command) && !std::holds_alternative<UiPage>(pending->command) && !std::holds_alternative<BatteryPage>(pending->command) && !std::holds_alternative<Resume>(pending->command) && !std::holds_alternative<PowerTransition>(pending->command) &&
             (!std::holds_alternative<CliCommand>(pending->command) || result.applied || result.partial))
             delivery_->post({ResultKind::command,pending->sequence,config::wide(result.text),{},result});
         if(controller) {
             unsigned changed=std::visit([&](const auto& c)->unsigned {
                 using T=std::decay_t<decltype(c)>;
-                if constexpr(std::is_same_v<T,CpuApply> || std::is_same_v<T,GpuApply> || std::is_same_v<T,GpuUnlock> || std::is_same_v<T,DlppcApply>) return 1;
+                if constexpr(std::is_same_v<T,CpuApply> || std::is_same_v<T,GpuApply> || std::is_same_v<T,GpuUnlock> || std::is_same_v<T,DlppcApply> || std::is_same_v<T,EcBypassApply> || std::is_same_v<T,CoolerFlag>) return 1;
                 else if constexpr(std::is_same_v<T,FanApply> || std::is_same_v<T,FanMaster> || std::is_same_v<T,FanBoost> || std::is_same_v<T,SwitchApply>) return 2;
                 else if constexpr(std::is_same_v<T,ProtectionApply>) return 4;
                 else if constexpr(std::is_same_v<T,BatteryApply>) return 8;

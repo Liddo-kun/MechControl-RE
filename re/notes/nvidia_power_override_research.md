@@ -171,7 +171,15 @@ can add more affected fields; do not assume a universal one/two-DWORD patch.
 https://github.com/b00nz/mVolt/issues/80 documents the 621.01 change: current-policy
 MAX/CURRENT can be reconstructed from DEFAULT, so raising MAX alone is insufficient.
 He reports paired DEFAULT/MAX changes, restart when ranges change, and CURRENT-only
-changes without restart inside the available range. His supplied interface IDs:
+changes without restart inside the available range.
+
+Measured on Jon's RTX 5090 Laptop with driver 621.14 (2026-11-08): an override with
+NVVDD/MSVDD DEFAULT 210/60 A and MAX 294/84 A loads as 210/210 and 60/60 A; board
+input (11.053/17.021 A) is not collapsed. With DEFAULT = MAX = 294/84/17.021 A the
+driver reports that range and starts each rail at it. Public current SET (0xAFFC2279,
+existing 0x10A4C layout) works across the whole range without restart, and live
+values survive closing the NVAPI session. MechControl therefore stages DEFAULT = MAX =
+ceiling and sets the rails after each GPU start. His supplied interface IDs:
 
 | Operation | NVAPI QueryInterface ID | RM method |
 |---|---|---|

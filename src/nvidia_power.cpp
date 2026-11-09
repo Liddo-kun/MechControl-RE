@@ -16,6 +16,7 @@ Power::Power(int minimum,std::function<void(const std::string&)> log):log_(std::
         if(original_.nv.def>INT_MAX/2 || (original_.ms && original_.ms->def>INT_MAX/2) || (original_.input && original_.input->def>INT_MAX/2)) throw std::runtime_error("NVIDIA current ranges exceed supported slider units");
         verify(active);bool patched=active!=original_.image;if(staged!=patched) throw std::runtime_error("NVIDIA staged/active BIOS limits differ. Restart Windows, then reopen MechControl.");enabled=staged;
         limits=api_->power();if(int64_t(minimum)*1000<limits.min || int64_t(minimum)*1000>original_.power.max) throw std::runtime_error("NVIDIA driver cannot accept this model's minimum TGP");
+        settle({});
     } catch(...) {log_("NVIDIA GPU: "+gpu);throw;}
     log_("NVIDIA connected: "+gpu+"; "+(original_.ada?"RTX 40":"RTX 50")+" BIOS table; stock ceiling "+std::to_string(stock_watts())+" W, active "+std::to_string(limits.max/1000)
         +" W; stock currents NVVDD "+amps(original_.nv.def)+(original_.ms?", MSVDD "+amps(original_.ms->def):"")+"; board input "+(board_verified_ && original_.input?amps(original_.input->def):"unavailable")
@@ -23,7 +24,8 @@ Power::Power(int minimum,std::function<void(const std::string&)> log):log_(std::
 }
 void Power::verify(const Bytes& active) {
     auto b=Bios::parse(active);auto p=api_->power();auto c=api_->currents();
-    auto matches=[](Rail r,Field f){return r.min==f.min && r.def==f.def && r.max==f.max;};
+    // 621+ drivers load a current policy's default as its maximum, so a range whose maximum exceeds its default loads as default/default.
+    auto matches=[](Rail r,Field f){return r.min==f.min && r.def==f.def && (r.max==f.max || r.max==f.def);};
     if(p.min!=b.power.min || p.def!=b.power.def || p.max!=b.power.max || !matches(c.nv,b.nv) || c.ms.has_value()!=b.ms.has_value() || (c.ms && !matches(*c.ms,*b.ms))) {
         auto text=[](uint32_t min,uint32_t def,uint32_t max){return std::to_string(min)+"/"+std::to_string(def)+"/"+std::to_string(max);};
         auto ms=[&](auto& r){return r?text(r->min,r->def,r->max):std::string("none");};
@@ -31,6 +33,23 @@ void Power::verify(const Bytes& active) {
             +"; driver power "+text(p.min,p.def,p.max)+" NVVDD "+text(c.nv.min,c.nv.def,c.nv.max)+" MSVDD "+ms(c.ms)+")");
     }
     board_verified_=b.input && c.input && matches(*c.input,*b.input);if(b.input && !board_verified_) log_("NVIDIA board input unavailable: no driver policy matches BIOS");
+}
+// The driver starts each rail at its BIOS default, which the unlock raises to the ceiling.
+// Rails still at that ceiling return to stock unless the settings name a value.
+void Power::settle(const config::GpuSettings& g) {
+    auto c=currents();
+    auto pick=[](std::optional<int> value,const std::optional<Rail>& r)->std::optional<int> {if(!r) return {};if(value) return value;if(r->current==r->max && r->max>r->def) return int(r->def);return {};};
+    auto nv=pick(g.nvvdd_ma,c.nv),ms=pick(g.msvdd_ma,c.ms),input=pick(g.board_input_ma,c.input);
+    if(nv || ms || input) {modified=true;api_->set_currents(nv,ms,input);}
+    expected_=api_->currents();
+}
+// A driver reload (resume, GPU reset) starts the rails at their BIOS defaults again.
+bool Power::restore_currents() {
+    if(!expected_) return false;auto c=api_->currents();
+    auto lost=[](const std::optional<Rail>& now,const std::optional<Rail>& want)->std::optional<int> {if(!now || !want || now->current==want->current) return {};return int(want->current);};
+    auto nv=lost(c.nv,expected_->nv),ms=lost(c.ms,expected_->ms),input=board_verified_?lost(c.input,expected_->input):std::nullopt;
+    if(!nv && !ms && !input) return false;
+    modified=true;expected_=api_->set_currents(nv,ms,input);return true;
 }
 Currents Power::currents() {
     auto c=api_->currents();auto convert=[](Rail r,Field f){r.min=std::max(r.min,f.min);r.def=f.def;r.stock_max=f.max;return r;};c.nv=convert(c.nv,original_.nv);if(c.ms && original_.ms) c.ms=convert(*c.ms,*original_.ms);else c.ms={};
@@ -47,8 +66,9 @@ void Power::configure(bool unlock,const config::GpuSettings& g,bool allow_restar
     validate(g.nvvdd_ma,c.nv,"NVVDD");validate(g.msvdd_ma,c.ms,"MSVDD");validate(g.board_input_ma,c.input,"Board input");
     bool reset=needs_restart(unlock,g);if(reset && !allow_restart) throw std::runtime_error("These NVIDIA limits require a GPU restart. Apply manually first.");
     Override request;if(unlock) {
-        auto rail=[](std::optional<int> value,Rail r){auto max=static_cast<uint32_t>(r.allowed(true));return RailOverride{value?static_cast<uint32_t>(*value):std::min(r.current,max),max};};
-        request.power=original_.power.max+75000;request.nv=rail(g.nvvdd_ma,c.nv);if(c.ms) request.ms=rail(g.msvdd_ma,*c.ms);if(c.input) request.input=rail(g.board_input_ma,*c.input);
+        // Default and maximum both take the ceiling: 621+ drivers load the default as the maximum and the starting current.
+        auto rail=[](Rail r){auto max=static_cast<uint32_t>(r.allowed(true));return RailOverride{max,max};};
+        request.power=original_.power.max+75000;request.nv=rail(c.nv);if(c.ms) request.ms=rail(*c.ms);if(c.input) request.input=rail(*c.input);
     }
     auto records=original_.build(request);auto input=g.board_input_ma;
     if(reset) {
@@ -56,10 +76,12 @@ void Power::configure(bool unlock,const config::GpuSettings& g,bool allow_restar
         try {store_->stage(original_,records);} catch(...) {modified=uncertain=store_->modified;throw;}
         modified=uncertain=store_->modified;restart();auto active=api_->bios();if(active!=expected) throw std::runtime_error("NVIDIA did not consume staged BIOS limits. Restart Windows to activate them.");
         verify(active);enabled=unlock;uncertain=false;if(!board_verified_) input={};if(!unlock) store_->delete_recovery();
-    } else if(unlock && !store_->matches(records)) {
-        try {store_->stage(original_,records);modified=store_->modified;} catch(...) {modified=uncertain=store_->modified;throw;}
+        auto loaded=g;loaded.board_input_ma=input;settle(loaded);
+    } else {
+        // Overrides staged by earlier releases raised only the maximum; replace them for the next GPU start.
+        if(unlock && !store_->matches(records)) try {store_->stage(original_,records);modified=store_->modified;} catch(...) {modified=uncertain=store_->modified;throw;}
+        if(g.nvvdd_ma || g.msvdd_ma || input) {modified=true;expected_=api_->set_currents(g.nvvdd_ma,g.msvdd_ma,input);}
     }
-    if(g.nvvdd_ma || g.msvdd_ma || input) {modified=true;api_->set_currents(g.nvvdd_ma,g.msvdd_ma,input);}
     auto now=currents();auto rail=[&](const char* name,const std::optional<Rail>& r){return r?std::string("; ")+name+" "+amps(r->current)+" (ceiling "+amps(r->max)+")":"";};
     log_(std::string("NVIDIA limits configured; unlock ")+(enabled?"on":"off")+rail("NVVDD",now.nv)+rail("MSVDD",now.ms)+rail("board input",now.input)+"; GPU restart "+(reset?"yes":"no"));
 }

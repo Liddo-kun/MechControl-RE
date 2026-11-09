@@ -32,9 +32,25 @@ Reset requires a fresh valid below-trigger reading/mean. Hardware request readba
 is not proof of physical watts or cooling. Native recovery deliberately retains
 known actions in damaged records that the older reader can lose.
 
+The EC power-limit bypass (0x780=0xA2, benchmark mode) is offered only where the
+profile declares it and the live EC version is one the image was checked against.
+It is never saved, and the controller clears it on turn-off, sleep, display off,
+AC loss, a thermal trip, EC reinitialization, exit and a leftover value at startup;
+while a clear is pending, other EC writes are refused. The liquid cooler connection
+flag (0x7C7 bit 1) is saved in profile slots like the other live settings, written
+bit-only and reapplied after resume and EC recovery. `mcctl` changes neither
+persistently.
+
 `nvidia_*` owns NVAPI, ROM parsing and verified override records. Originals are
 shared at `%ProgramData%/MechControl/NvidiaOverrides/originals.txt`; they are not
 per-release settings and must not be replaced by an old backup during rollback.
+The unlock sets each current policy's default and maximum to its ceiling, because
+621+ drivers load the default as both the maximum and the starting current. After
+a GPU start, rails still at the ceiling go back to the slot's or stock values, and
+the delayed GPU check reapplies currents a driver reload reset. Overrides staged
+by older releases (maximum only) are replaced for the next GPU start. NVML is opened
+and closed around each reading, because its handles crash when used after a GPU reset
+(a driver reset on waking from Modern Standby, a GPU restart or a driver install).
 `peripherals.*`, `cooler.*` and `ble.*` own HID lighting and BLE operations. Queue
 acceptance is not completed cooler Apply or saved state. Unlocked GPU power writes
 qualify and maintain the live F7 laptop budget, which can fall below the VBIOS
