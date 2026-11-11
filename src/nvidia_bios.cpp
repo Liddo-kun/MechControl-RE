@@ -139,7 +139,8 @@ Bios Bios::parse(Bytes bytes) {
         return Field{static_cast<int>(p), min, def, max};
     };
     if (result.ada) {
-        // Identity byte at +0, channel at +1, limits at +2. Entries 7/8/11/12 differ from RTX 50 and are not checked; index 14 is not MSVDD.
+        // Identity byte at +0, channel at +1, limits at +2. Entries 7/8/11/12
+        // differ from RTX 50 and are not checked; index 14 is not MSVDD.
         auto field = [&](int i, bool identity) {
             auto e = entry(i);
             require(identity && b[e + 1] < 32, "policy identity");

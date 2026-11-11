@@ -276,7 +276,8 @@ CpuSettings Controller::minimum_cpu() {
     auto bounds = control_limit(p, "cpuTempLimit");
     if (t == 255 || limit < bounds.min)
         throw std::runtime_error("Current CPU temperature limit invalid; no fallback replacement");
-    // Firmware presets can sit above the ECSpec maximum (one Turbo preset sets 103 C against 95 C); lower those to the maximum.
+    // Firmware presets can sit above the ECSpec maximum (one Turbo
+    // preset sets 103 C against 95 C); lower those to the maximum.
     return {control_limit(p, "PL1").min, control_limit(p, "PL2").min, control_limit(p, "PL4").min,
             std::min(limit, bounds.max)};
 }
@@ -1038,7 +1039,8 @@ std::optional<Sensors> Controller::tick(ULONGLONG now) {
         try {
             battery_sample_ = battery_telemetry(session_.transport());
         } catch (const std::exception&) {
-        } // Source telemetry is best effort.
+            // Source telemetry is best effort.
+        }
     }
     if (monitor_stopped_ && !thermal_->monitoring() && !linked_) {
         if (now < restart_at_) return {};
@@ -1185,7 +1187,8 @@ ControlResult Controller::execute(const ControlCommand& command) {
                     auto g = c.settings;
                     if (nvidia_busy_) throw std::runtime_error("NVIDIA operation in progress");
                     if (c.power) gpu_plan(g);
-                    // Thermal sampling continues during NVIDIA work; a CPU hold latched there outranks the prepared writes.
+                    // Thermal sampling continues during NVIDIA work; a
+                    // CPU hold latched there outranks the prepared writes.
                     auto cpu_apply = [&] {
                         if (!cpu.empty() && !thermal_->holds(Cpu)) {
                             log_cpu(cpu);

@@ -170,7 +170,8 @@ struct Cooler::Impl {
                 available = radio && radio.State() == Windows::Devices::Radios::RadioState::On;
             }
         } catch (...) {
-        } // Transient OS errors remain retryable.
+            // Transient OS errors remain retryable.
+        }
         {
             std::lock_guard lock(queue->mutex);
             queue->bluetooth_available = available;
@@ -421,10 +422,11 @@ struct Cooler::Impl {
                     if (!command && ready == WAIT_TIMEOUT) {
                         retry_at = 0;
                         retrying = true;
+                        // Match the source's quiet radio-off retry gate.
                         if (!resolver && !bluetooth()) {
                             retry();
                             continue;
-                        } // Match the source's quiet radio-off retry gate.
+                        }
                         command = CoolerRequest{CoolerAction::connect, state().address};
                     }
                     if (!command) continue;

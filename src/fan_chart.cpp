@@ -7,10 +7,11 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+// gdiplus.h expects the min/max macros that NOMINMAX removes.
 namespace Gdiplus {
 using std::min;
 using std::max;
-} // gdiplus.h expects the min/max macros that NOMINMAX removes.
+}
 #include <gdiplus.h>
 
 namespace mech {

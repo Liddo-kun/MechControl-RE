@@ -64,7 +64,8 @@ Log::Log(const std::filesystem::path& path) {
                 MoveFileExW(temporary.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
         }
     } catch (const std::exception&) {
-    } // A retention failure must not prevent startup.
+        // A retention failure must not prevent startup.
+    }
     file_.open(path, std::ios::app);
     if (!file_) throw std::runtime_error("Cannot open the diagnostic log.");
     SYSTEMTIME time{};

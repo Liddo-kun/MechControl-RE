@@ -264,8 +264,8 @@ struct Text {
     RECT rect;
     std::wstring text;
     COLORREF color;
-    HFONT font = nullptr;
-}; // No font: the normal one.
+    HFONT font = nullptr; // No font: the normal one.
+};
 // The note of a control withheld on this model: what the issue it opens is about, what else to send, and why.
 struct Support {
     const wchar_t *subject = L"", *also = L"";
@@ -559,7 +559,8 @@ private:
             InvalidateRect(get(id), nullptr, TRUE);
         }
     }
-    // A new GitHub issue with the title, the note and this machine filled in; the user attaches the files and submits it.
+    // A new GitHub issue with the title, the note and this machine
+    // filled in; the user attaches the files and submits it.
     std::wstring issueUrl(const Support& s) const {
         auto model = w(state_.value("model", std::string{}));
         auto identity = identity_.is_object() ? identity_ : Json::object();
@@ -876,10 +877,11 @@ private:
             SetScrollInfo(p.window, SB_VERT, &si, TRUE);
             RECT shown{};
             GetClientRect(p.window, &shown);
+            // The scroll bar changed the width.
             if (shown.right != rc.right) {
                 layoutPage(p);
                 return;
-            } // The scroll bar changed the width.
+            }
             sections(p.scroll, true);
             RedrawWindow(p.window, nullptr, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN);
             return;
@@ -902,8 +904,9 @@ private:
                 place(r.control, m + label, y, width - label, scale(240));
             } else {
                 place(r.control, m, y, width, h);
+                // Its note takes the telemetry's place.
                 if (r.id == batteryTextId) place(get(batterySupportId), m, y, width, h);
-            } // Its note takes the telemetry's place.
+            }
         }
         RedrawWindow(p.window, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
     }
@@ -1103,9 +1106,8 @@ private:
             frames.back().first.bottom = y;
             y += ref(12);
         };
-        auto check = [&](int id) {
-            return extent(bold_, text(get(id))) + ref(38);
-        }; // The reference sizes check boxes to their bold text.
+        // The reference sizes check boxes to their bold text.
+        auto check = [&](int id) { return extent(bold_, text(get(id))) + ref(38); };
         // The CPU and GPU curves share the width, with a small gap between them.
         auto charts = [&](int cpu, int gpu, int from, int to, bool shown) {
             int half = (to - from) / 2;
@@ -2110,7 +2112,8 @@ private:
     void checked(int id, bool value) {
         if (!edited_.contains(id)) SendMessageW(get(id), BM_SETCHECK, value ? BST_CHECKED : BST_UNCHECKED, 0);
     }
-    // Power, fan switch, failsafe trigger, lighting brightness and cooler duty values are slider positions; the other sliders have an edit box.
+    // Power, fan switch, failsafe trigger, lighting brightness and cooler
+    // duty values are slider positions; the other sliders have an edit box.
     static bool positional(int id) {
         return (id >= pl1Id && id <= inputId) || id == switchMsId || id == thresholdId || id == coolerFanId ||
                id == coolerPumpId || (id >= zoneBaseId && id < zoneBaseId + 48 && (id - zoneBaseId) % 16 == 4);
