@@ -1,0 +1,18 @@
+BasedOnStyle: LLVM
+IndentWidth: 4
+ColumnLimit: 120
+AccessModifierOffset: -4
+PointerAlignment: Left
+AlignEscapedNewlines: Left
+FixNamespaceComments: false
+AllowShortFunctionsOnASingleLine: All
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortLoopsOnASingleLine: true
+AllowShortCaseLabelsOnASingleLine: true
+AllowShortLambdasOnASingleLine: All
+# Windows and WinRT headers depend on include order.
+SortIncludes: Never
+SortUsingDeclarations: Never
+# Keep messages whole so they can be searched for, and comments as written.
+BreakStringLiterals: false
+ReflowComments: false

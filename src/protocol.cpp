@@ -42,8 +42,11 @@ void transfer(HANDLE pipe, std::span<std::uint8_t> bytes, bool writing, Deadline
         BOOL ok = writing ? WriteFile(pipe, bytes.data(), length, &done, &io)
                           : ReadFile(pipe, bytes.data(), length, &done, &io);
         if (!ok && GetLastError() == ERROR_IO_PENDING) {
-            auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now()).count();
-            DWORD wait = WaitForSingleObject(event.get(), static_cast<DWORD>(std::clamp<std::int64_t>(remaining, 0, MAXDWORD - 1)));
+            auto remaining =
+                std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now())
+                    .count();
+            DWORD wait = WaitForSingleObject(event.get(),
+                                             static_cast<DWORD>(std::clamp<std::int64_t>(remaining, 0, MAXDWORD - 1)));
             if (wait != WAIT_OBJECT_0) {
                 CancelIoEx(pipe, &io);
                 GetOverlappedResult(pipe, &io, &done, TRUE); // Stack/event stay alive until cancellation completes.
@@ -62,11 +65,12 @@ Reply exchange(const std::vector<std::string>& args, const std::wstring& pipeNam
     auto connectDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
     Handle pipe;
     do {
-        pipe = Handle(CreateFileW(name.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr,
-            OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr));
+        pipe = Handle(CreateFileW(name.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
+                                  FILE_FLAG_OVERLAPPED, nullptr));
         if (pipe) break;
         auto error = GetLastError();
-        if (error == ERROR_ACCESS_DENIED) return {3, "Access denied: run mcctl from an elevated (administrator) shell."};
+        if (error == ERROR_ACCESS_DENIED)
+            return {3, "Access denied: run mcctl from an elevated (administrator) shell."};
         if (error != ERROR_PIPE_BUSY && error != ERROR_FILE_NOT_FOUND) return {3, "Cannot open the MechControl pipe."};
         std::this_thread::sleep_for(std::chrono::milliseconds(25));
     } while (std::chrono::steady_clock::now() < connectDeadline);

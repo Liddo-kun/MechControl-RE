@@ -6,8 +6,7 @@ namespace mech {
 Counters::Counters() {
     error_ = PerfStartProvider(&MechControlProviderGuid, nullptr, &provider_);
     if (error_ != ERROR_SUCCESS) return;
-    error_ = PerfSetCounterSetInfo(provider_, &MechControlCountersInfo.CounterSet,
-        sizeof(MechControlCountersInfo));
+    error_ = PerfSetCounterSetInfo(provider_, &MechControlCountersInfo.CounterSet, sizeof(MechControlCountersInfo));
     if (error_ != ERROR_SUCCESS) return;
     instance_ = PerfCreateInstance(provider_, &MechControlCountersGuid, L"", 0);
     if (!instance_) error_ = GetLastError();

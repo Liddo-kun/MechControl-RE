@@ -10,7 +10,10 @@
 namespace mech::cli {
 inline constexpr std::int32_t version = 1;
 inline constexpr std::uint32_t maxRequestBytes = 65536;
-struct Reply { int code; std::string text; };
+struct Reply {
+    int code;
+    std::string text;
+};
 using Deadline = std::chrono::steady_clock::time_point;
 std::array<std::uint8_t, 8> header(std::int32_t first, std::uint32_t length);
 std::int32_t integer(const std::uint8_t* bytes);

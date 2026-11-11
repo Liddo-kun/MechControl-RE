@@ -19,7 +19,7 @@ enum class ResultKind { sample, command, ble, battery, failure, presentation, se
 struct ModelSelection {
     std::vector<std::filesystem::path> paths;
     std::optional<std::filesystem::path> chosen;
-    Handle completed{CreateEventW(nullptr,TRUE,FALSE,nullptr)};
+    Handle completed{CreateEventW(nullptr, TRUE, FALSE, nullptr)};
 };
 struct Result {
     ResultKind kind;
@@ -36,6 +36,7 @@ public:
     void close();
     void post(Result result);
     std::vector<Result> take();
+
 private:
     std::mutex mutex_;
     HWND window_ = nullptr;
@@ -44,33 +45,38 @@ private:
     std::vector<Result> pending_;
 };
 struct WorkerOptions {
-    bool once=false;
+    bool once = false;
     std::filesystem::path report;
-    std::function<std::unique_ptr<EcChannel>(const std::wstring&,HANDLE)> channel_factory;
+    std::function<std::unique_ptr<EcChannel>(const std::wstring&, HANDLE)> channel_factory;
     std::optional<config::Identity> identity;
-    bool read_only=false; // Injected read-only session checks; one-shot diagnostics always force this.
-    std::filesystem::path state_directory=config::executable_directory();
+    bool read_only = false; // Injected read-only session checks; one-shot diagnostics always force this.
+    std::filesystem::path state_directory = config::executable_directory();
     std::function<void(unsigned)> wait;
-    bool nvidia_hardware=true; // Injected EC fixtures disable physical NVIDIA startup too.
-    bool peripheral_hardware=true;
+    bool nvidia_hardware = true; // Injected EC fixtures disable physical NVIDIA startup too.
+    bool peripheral_hardware = true;
     std::function<std::unique_ptr<nv::Power>()> nvidia_factory; // Controller/restart workflow fixtures only.
     Lighting::Send lighting_send; // Hardware-free delayed HID and controller recovery fixtures only.
 };
 class ControlWorker {
 public:
-    ControlWorker(std::shared_ptr<Delivery> delivery, Log& log,WorkerOptions options={});
+    ControlWorker(std::shared_ptr<Delivery> delivery, Log& log, WorkerOptions options = {});
     ~ControlWorker();
-    std::future<ControlResult> request(ControlCommand command,std::uint64_t sequence=0);
+    std::future<ControlResult> request(ControlCommand command, std::uint64_t sequence = 0);
     void stop();
     int wait();
+
 private:
     void run(std::stop_token stop);
     std::shared_ptr<Delivery> delivery_;
     Log& log_;
     WorkerOptions options_;
-    int outcome_=0;
+    int outcome_ = 0;
     std::mutex mutex_;
-    struct Pending { ControlCommand command; std::promise<ControlResult> reply; std::uint64_t sequence=0; };
+    struct Pending {
+        ControlCommand command;
+        std::promise<ControlResult> reply;
+        std::uint64_t sequence = 0;
+    };
     std::deque<Pending> commands_;
     bool closing_ = false;
     Handle wake_;
