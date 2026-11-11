@@ -119,12 +119,6 @@ enum Id {
     coolerRgbApplyId
 };
 std::wstring w(const std::string& value) { return wide(value); }
-std::string utf8(const std::wstring& value) {
-    int n = WideCharToMultiByte(CP_UTF8, 0, value.data(), int(value.size()), nullptr, 0, nullptr, nullptr);
-    std::string text(n, '\0');
-    WideCharToMultiByte(CP_UTF8, 0, value.data(), int(value.size()), text.data(), n, nullptr, nullptr);
-    return text;
-}
 std::wstring text(HWND window) {
     int n = GetWindowTextLengthW(window);
     std::wstring s(n + 1, L'\0');
@@ -132,19 +126,9 @@ std::wstring text(HWND window) {
     s.resize(n);
     return s;
 }
-std::wstring decimal(double value, int places = 1) {
-    std::wostringstream out;
-    out.imbue(std::locale::classic());
-    out << std::fixed << std::setprecision(places) << value;
-    return out.str();
-}
-// .NET "0.###": up to three decimals without trailing zeros.
-std::wstring compact(double value) {
-    auto s = decimal(value, 3);
-    s.erase(s.find_last_not_of(L'0') + 1);
-    if (s.back() == L'.') s.pop_back();
-    return s;
-}
+std::wstring decimal(double value, int places = 1) { return wide(decimal_text(value, places)); }
+// Up to three decimals, without trailing zeros.
+std::wstring compact(double value) { return wide(decimal_text(value, 3, true)); }
 // Percent-encodes a URL query value.
 std::wstring encode(const std::wstring& value) {
     std::wstring out;

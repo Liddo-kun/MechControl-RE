@@ -28,9 +28,11 @@ std::filesystem::path executable_directory() {
     return std::filesystem::path(name).parent_path();
 }
 void write_json(const std::filesystem::path& path, const Json& value, bool atomic) {
+    write_text(path, value.dump(2), atomic);
+}
+void write_text(const std::filesystem::path& path, std::string_view text, bool atomic) {
     auto target = path;
     if (atomic) target += L".tmp";
-    const auto text = value.dump(2);
     HANDLE file = CreateFileW(target.c_str(), GENERIC_WRITE, atomic ? 0 : FILE_SHARE_READ, nullptr, CREATE_ALWAYS,
                               FILE_ATTRIBUTE_NORMAL, nullptr);
     if (file == INVALID_HANDLE_VALUE)

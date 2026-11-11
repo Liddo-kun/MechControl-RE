@@ -1,4 +1,5 @@
 #include "controller.h"
+#include "config_text.h"
 #include <algorithm>
 #include <charconv>
 #include <iomanip>
@@ -259,9 +260,7 @@ Json Controller::gpu_status(bool presentation) {
         }
         if (power && gpu_unlocked_ && v.tgp <= limits_.tgp.min) {
             int floor = limits_.tgp.min;
-            int below = power->requested
-                            ? int(*power->requested / 1000) - (v.dynamic_boost_enabled ? v.dynamic_boost_watts : 0)
-                            : floor;
+            int below = power->requested ? int(*power->requested / 1000) - v.boost() : floor;
             g["tgp"]["value"] = std::clamp(below, gpu_min(), floor);
         }
         // The Power tab's live table compares readings with the limits the driver reports alongside them.
@@ -360,20 +359,11 @@ static int milliamps(std::string text) {
 }
 static std::string text_status(const Json& j) {
     std::ostringstream out;
-    auto decimal = [](int64_t value, int precision, bool trim) {
-        std::ostringstream s;
-        s.imbue(std::locale::classic());
-        s << std::fixed << std::setprecision(precision) << (value / 1000.0);
-        auto text = s.str();
-        if (trim) {
-            while (text.ends_with('0')) text.pop_back();
-            if (text.ends_with('.')) text.pop_back();
-        }
-        return text;
+    auto amps = [&](const Json& value) {
+        return value.is_null() ? "--" : decimal_text(value.get<int>() / 1000.0, 3, true) + " A";
     };
-    auto amps = [&](const Json& value) { return value.is_null() ? "--" : decimal(value.get<int>(), 3, true) + " A"; };
     auto watts = [&](const Json& value) {
-        return value.is_null() ? "--" : decimal(value.get<int64_t>(), 1, false) + " W";
+        return value.is_null() ? "--" : decimal_text(value.get<int64_t>() / 1000.0, 1) + " W";
     };
     auto mhz = [](const Json& value) { return value.is_null() ? "--" : std::to_string(value.get<int>()) + " MHz"; };
     auto setting_text = [](const Json& v, const char* unit) {
@@ -431,9 +421,9 @@ static std::string text_status(const Json& j) {
                     out << " current limit: not available on this GPU";
                     continue;
                 }
-                out << " limit " << amps(r.at("limitMa")) << " (" << decimal(r.at("minMa").get<int>(), 3, true) << '-'
-                    << amps(r.at("maxMa")) << ", stock " << amps(r.at("stockMa")) << "); measured "
-                    << amps(r.at("measuredMa"));
+                out << " limit " << amps(r.at("limitMa")) << " ("
+                    << decimal_text(r.at("minMa").get<int>() / 1000.0, 3, true) << '-' << amps(r.at("maxMa"))
+                    << ", stock " << amps(r.at("stockMa")) << "); measured " << amps(r.at("measuredMa"));
                 if (std::string_view(key) != "boardInput") out << "; at clock cap " << amps(r.at("atClockCapMa"));
             }
             out << "\r\n      Clock caps: current controller " << mhz(j.at("currentCapMhz")) << "; power controller "
@@ -572,7 +562,7 @@ std::string Controller::defaults(const std::string& key) {
         auto m = p.modes->at(key);
         if (features_.cpu_power()) {
             auto c = cpu();
-            auto cw = cpu_writes(p, m.pl1, m.pl2, m.pl4.value_or(c.pl4), m.tcc_offset.value_or(c.temp_limit));
+            auto cw = cpu_writes(p, {m.pl1, m.pl2, m.pl4.value_or(c.pl4), m.tcc_offset.value_or(c.temp_limit)});
             log_cpu(cw);
             append(cw);
         }

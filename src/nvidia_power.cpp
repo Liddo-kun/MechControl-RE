@@ -4,14 +4,7 @@
 #include <algorithm>
 
 namespace mech::nv {
-static std::string amps(uint32_t milliamps) {
-    char s[24];
-    sprintf_s(s, "%.3f", milliamps / 1000.0);
-    std::string t = s;
-    t.erase(t.find_last_not_of('0') + 1);
-    if (t.back() == '.') t.pop_back();
-    return t + " A";
-}
+static std::string amps(uint32_t milliamps) { return config::decimal_text(milliamps / 1000.0, 3, true) + " A"; }
 Power::Power(int minimum, std::function<void(const std::string&)> log) : log_(std::move(log)) {
     api_ = std::make_unique<Api>();
     auto& id = api_->identity;

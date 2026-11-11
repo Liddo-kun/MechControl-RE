@@ -12,11 +12,7 @@
 namespace mech {
 using namespace config;
 namespace {
-int rounded(double value) {
-    int i = static_cast<int>(value);
-    double f = value - i;
-    return i + (f > 0.5 || (f == 0.5 && (i & 1)));
-}
+int rounded(double value) { return static_cast<int>(std::nearbyint(value)); } // Midpoints go to the even number.
 struct Com {
     HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     ~Com() {

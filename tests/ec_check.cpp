@@ -121,13 +121,13 @@ void abi_and_guard() {
     refuses([&] { ec.spec(0); }, "SMAPC failure propagates without reconnect");
     require(s->reopens == 2, "SMAPC preserves reference retry policy");
     s->calls.clear();
-    g.apply(cpu_writes(p, 50, 80, 181, 95));
+    g.apply(cpu_writes(p, {50, 80, 181, 95}));
     require(writes(*s) ==
                 std::vector<std::pair<int32_t, int32_t>>{{0x783, 50}, {0x784, 80}, {0x785, 90}, {0x786, 0x8A}},
             "CPU group order, runtime doubled PL4 rounding and Intel offset");
     require(delays == std::vector<unsigned>{450}, "redirect waits and verifies payload with commit bit cleared");
     s->calls.clear();
-    refuses([&] { g.apply(cpu_writes(p, 50, 80, 180, 120)); }, "invalid last CPU value refuses complete group");
+    refuses([&] { g.apply(cpu_writes(p, {50, 80, 180, 120})); }, "invalid last CPU value refuses complete group");
     require(s->calls.empty(), "CPU bounds failure performs no I/O");
     std::array<EcWrite, 2> bad{{{0x783, 50}, {0x123456, 1}}};
     refuses([&] { g.apply(bad); }, "group allowlist preflight");
@@ -224,7 +224,7 @@ void snapshots_and_startup() {
     s->bytes[0x463] = 0xD5;
     p.limits["cpuTempLimit"] = {80, 100, "direct", {}, {}};
     WriteGuard amd(ec, p, false, [](unsigned) {});
-    amd.apply(cpu_writes(p, 50, 80, 180, 95));
+    amd.apply(cpu_writes(p, {50, 80, 180, 95}));
     require(s->bytes[0x786] == 0xDF && s->bytes[0x463] == 95,
             "AMD CPU group writes absolute temperature payload through redirect verification");
     s->bytes[0x463] = 0xD5;

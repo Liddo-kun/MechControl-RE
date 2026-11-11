@@ -10,6 +10,8 @@ struct GpuSettings {
     bool dynamic_boost_enabled = false;
     std::optional<bool> bios_override_enabled;
     std::optional<int> nvvdd_ma, msvdd_ma, board_input_ma;
+    int boost() const { return dynamic_boost_enabled ? dynamic_boost_watts : 0; }
+    int total() const { return tgp + boost(); }
 };
 struct ProtectionSettings {
     bool enabled = false;

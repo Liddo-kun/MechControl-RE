@@ -8,13 +8,6 @@
 
 namespace mech::config {
 using Microsoft::WRL::ComPtr;
-static std::string utf8(BSTR s) {
-    if (!s) return {};
-    int n = WideCharToMultiByte(CP_UTF8, 0, s, SysStringLen(s), nullptr, 0, nullptr, nullptr);
-    std::string out(n, '\0');
-    WideCharToMultiByte(CP_UTF8, 0, s, SysStringLen(s), out.data(), n, nullptr, nullptr);
-    return out;
-}
 static std::string query(IWbemServices* services, const wchar_t* sql, const wchar_t* key) {
     BSTR language = SysAllocString(L"WQL"), text = SysAllocString(sql);
     ComPtr<IEnumWbemClassObject> rows;
@@ -30,7 +23,7 @@ static std::string query(IWbemServices* services, const wchar_t* sql, const wcha
         VariantInit(&value);
         hr = row->Get(key, 0, &value, nullptr, nullptr);
         std::string result;
-        if (SUCCEEDED(hr) && value.vt == VT_BSTR) result = utf8(value.bstrVal);
+        if (SUCCEEDED(hr) && value.vt == VT_BSTR) result = utf8({value.bstrVal, SysStringLen(value.bstrVal)});
         VariantClear(&value);
         row.Reset();
         if (!blank(result)) return result;
