@@ -37,7 +37,7 @@ MechControl is a native C++ Windows app. It needs no .NET runtime and keeps its 
 
 On first run, MechControl sets a few OEM UEFI flags so the BIOS prepares the EC at boot the same way it does with the Control Center installed.
 
-**Upgrading from the C# version (v1.6.0 or earlier):** exit it from the tray, then extract the new release over its folder. Settings, profile slots and lighting and cooler state carry over. The old `.dll` files are no longer used and can be deleted.
+**Upgrading from the C# version (v1.6.0):** exit it from the tray, then extract the new release over its folder. Settings, profile slots and lighting and cooler state carry over. Files last saved by a release older than v1.6.0 may not: a slot with a failsafe trigger below 50 °C has to be saved again. The old `.dll` files are no longer used and can be deleted.
 
 ### Start with Windows
 
