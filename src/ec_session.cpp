@@ -212,7 +212,7 @@ config::Json EcSession::diagnostic_report() {
         {"pl4Doubled",profile.pl4_doubled()},{"batteryBit3",nullable(battery_bit3)},
         {"fans",{{"cpu",fans.cpu},{"gpu",fans.gpu},{"probe",fans.probe},{"enableRaw",fans.enable},{"modeRaw",fans.mode},
             {"valid",fans.valid()},{"activeEntries",fans.active_entries()},{"gpuPresent",gpu_present},
-            {"latchInterpretation","Raw only. X6FR XxFR5xxx_Pro_14.810 static evidence tests bit 2 and shares bits 6/7; no universal equality or Intel inference."}}},
+            {"latchInterpretation","Raw only. Profiles with fanCurveLatch test bit 2 alone: X6FR firmware shares bits 6/7, Intel X6AR EC 77.0 uses bit 6 as a power-button request. No universal equality."}}},
         {"sensors",{{"cpuRpm",s.cpu_rpm},{"gpuRpm",s.gpu_rpm},{"cpuTemp",nullable(s.cpu_temp)},
             {"gpuTemp",nullable(s.gpu_temp)},{"cpuTempLimit",nullable(s.cpu_limit)},
             {"cpuPercent",nullable(s.cpu_percent)},{"gpuPercent",nullable(s.gpu_percent)},

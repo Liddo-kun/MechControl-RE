@@ -46,7 +46,8 @@
     "batteryMode":     { "register": "0x7A6", "mask": "0x38" },
     "logoOnOff":       { "register": "0x7AB", "bit": 7 },
     "dynamicBoostEn":  { "register": "0x743", "mask": "0x07" },
-    "fanBoost":        { "register": "0x751", "bit": 6 }
+    "fanBoost":        { "register": "0x751", "bit": 6 },
+    "fanCurveLatch":   { "register": "0x7C6", "mask": "0x04" }
   },
   "batteryModes": [
     { "name": "High Capacity", "value": "0x08" },
