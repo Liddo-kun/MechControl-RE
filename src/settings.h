@@ -55,7 +55,6 @@ struct LightingState {
     int idle_seconds = 0;
 };
 struct UserProfile {
-    bool requires_save = false;
     std::optional<std::string> name = "", project_id = "";
     std::string saved_at = "0001-01-01T00:00:00";
     std::optional<CpuSettings> cpu = CpuSettings{};
@@ -65,9 +64,9 @@ struct UserProfile {
     std::optional<BatterySettings> battery = BatterySettings{};
     std::optional<LightingSettings> lighting = LightingSettings{};
     std::optional<CoolerSettings> cooler;
-    bool liquid_cooler_connected =
-        false; // EC 0x7C7 bit 1; slots written before it existed leave it off, as the EC init did.
-    // Structural/model preflight only. Load owns threshold validation/migration;
+    // EC 0x7C7 bit 1; slots written before it existed leave it off, as the EC init did.
+    bool liquid_cooler_connected = false;
+    // Structural/model preflight only. Load owns threshold validation;
     // enabled controllers must validate ranges/plans before writes.
     void preflight(const std::string& current_project_id) const;
 };
@@ -91,8 +90,7 @@ ThermalState recover(const std::optional<ThermalState>& committed, const std::op
 struct Settings {
     int last_slot = 0;
     std::vector<std::optional<std::string>> names = {"Profile 1", "Profile 2", "Profile 3", "Profile 4", "Profile 5"};
-    std::string legacy_reason;
-    int legacy_threshold = 50;
+
     bool disable_dlppc = false;
     ThermalState thermal;
 };

@@ -1,8 +1,8 @@
 # Build, package and measure
 
 Use Windows x64, Visual Studio 2022 Build Tools (v143 x64 C++, CMake tools) and the
-Windows SDK with C++/WinRT and `ctrpp`. The API baseline is build 19041 with system
-ICU. CMake selects C++20 and static `/MT` (`/MTd` for Debug) consistently. It fetches
+Windows SDK with C++/WinRT and `ctrpp`. The API baseline is build 19041.
+CMake selects C++20 and static `/MT` (`/MTd` for Debug) consistently. It fetches
 nlohmann/json 3.12.0 with a pinned SHA256; keep its notice. The app needs supported
 hardware, elevation and the OEM UWACPIDriver, not a bundled driver or .NET/VC runtime.
 
@@ -35,8 +35,6 @@ with every file's hash. CMake install rules choose the shipped files: the execut
 `docs/release.md` as `README.md`. Set the version in `CMakeLists.txt` and
 `resources/app.rc` before packaging.
 
-`tools/check-serialization.ps1` builds the C# app's serializers from tag `v1.6.0` and
-checks that both apps read each other's settings and slots. It needs the .NET 8 SDK.
 
 ## Measuring
 

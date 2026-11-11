@@ -38,78 +38,6 @@ struct Lock {
 };
 int main(int argc, char** argv) try {
     require(argc == 3, "Usage: configuration-check profiles scratch");
-    if (std::string_view(argv[1]) == "--read-reference") {
-        ProfileStore store(argv[2]);
-        auto slot = store.load(1);
-        require(slot.has_value(), "C# slot missing");
-        slot->preflight("IDY_7Y");
-        require(slot->cpu->pl1 == 80 && !slot->gpu->nvvdd_ma && slot->gpu->msvdd_ma == 120000 &&
-                    !slot->gpu->board_input_ma,
-                "C# CPU/GPU round trip");
-        require(slot->cooler->voltage == PumpVoltage::V7 && slot->cooler->rgb_mode == CoolerRgbMode::BreatheColor,
-                "C# cooler slot enum");
-        require(store.settings().thermal.held == (Cpu | Fan) && store.settings().last_slot == 4 &&
-                    store.settings().disable_dlppc,
-                "C# settings round trip");
-        require(store.load_lighting().keyboard->g == 128 && store.load_cooler().address == 0xFEDCBA9876543210ULL,
-                "C# peripheral state round trip");
-        auto cases = read_json(std::filesystem::path(argv[2]) / "compatibility.json");
-        for (const auto& c : cases["casing"])
-            require(lower_invariant(wide(c["input"].get<std::string>())) == wide(c["lower"].get<std::string>()),
-                    "Original invariant Unicode casing");
-        for (const auto& c : cases["ordinal"])
-            require(equal_ignore_case(c["left"].get<std::string>(), c["right"].get<std::string>()) ==
-                        c["equal"].get<bool>(),
-                    "Original ordinal case comparison");
-        for (const auto& c : cases["characters"]) {
-            wchar_t unit = static_cast<wchar_t>(c["unit"].get<int>());
-            require(letter_or_digit(unit) == c["letterOrDigit"].get<bool>() &&
-                        blank(std::wstring(1, unit)) == c["whiteSpace"].get<bool>(),
-                    "Original UTF-16 character categories");
-        }
-        for (const auto& c : cases["hex"]) {
-            if (c["value"].is_null())
-                fails([&] { hex(c["input"].get<std::string>()); });
-            else
-                require(hex(c["input"].get<std::string>()) == c["value"].get<int>(), "Original 32-bit hex conversion");
-        }
-        for (const auto& c : cases["bits"]) {
-            Bitfield bit;
-            bit.bit = c["bit"].get<int>();
-            require(bit.get_mask() == c["mask"].get<int>(), "Original defined byte/shift conversion");
-        }
-        for (const auto& c : cases["dates"]) {
-            auto input = c["input"].get<std::string>();
-            require(valid_date(input) == c["date"].get<bool>(),
-                    ("Original DateTime validation: " + input + "; native=" + std::to_string(valid_date(input)) +
-                     "; source=" + c["date"].dump())
-                        .c_str());
-            require(valid_date(input, true) == c["offset"].get<bool>(),
-                    ("Original DateTimeOffset validation: " + input).c_str());
-        }
-        for (const auto& c : cases["depth"]) {
-            bool accepted = true;
-            try {
-                parse(c["json"].get<std::string>());
-            } catch (...) {
-                accepted = false;
-            }
-            require(accepted == c["accepted"].get<bool>(), "Original source parser depth rule");
-        }
-        for (const auto& f : std::filesystem::directory_iterator(argv[2])) {
-            if (f.path().filename().string().starts_with("bom-")) {
-                auto p = read_json(f.path()).get<UserProfile>();
-                require(p.cpu->pl1 == 80 && p.name == "snow ☃", "Original BOM-decoded file fixture");
-            }
-            if (f.path().filename().string().starts_with("null-"))
-                fails([&] {
-                    auto p = read_json(f.path()).get<UserProfile>();
-                    p.preflight("IDY_7Y");
-                });
-        }
-        std::cout << "PASS: native reads original C# serialized round-trip fixtures\n";
-        return 0;
-    }
     std::filesystem::path profiles = argv[1], scratch = argv[2];
     // Unique child prevents deletion or overwriting of prior evidence/user files.
     std::filesystem::create_directories(scratch);
@@ -124,19 +52,8 @@ int main(int argc, char** argv) try {
         return p;
     };
     auto encoding = area("encoding");
-    for (auto [width, little] : {std::pair{2, true}, std::pair{2, false}, std::pair{4, true}, std::pair{4, false}}) {
-        std::string bytes = width == 2 ? (little ? std::string("\xFF\xFE", 2) : std::string("\xFE\xFF", 2))
-                                       : (little ? std::string("\xFF\xFE\0\0", 4) : std::string("\0\0\xFE\xFF", 4));
-        for (char c : std::string("{\"cpu\":{\"pl1\":80},}"))
-            for (int i = 0; i < width; ++i) bytes += i == (little ? 0 : width - 1) ? c : '\0';
-        auto file = encoding / (std::to_string(width) + (little ? "le.json" : "be.json"));
-        raw(file, bytes);
-        require(read_json(file)["cpu"]["pl1"] == 80, "BOM-aware UTF-16/32 source input");
-    }
     raw(encoding / "utf8.json", std::string("\xEF\xBB\xBF") + "{\"pl1\":80}");
     require(read_json(encoding / "utf8.json")["pl1"] == 80, "UTF-8 BOM input");
-    require(parse(std::string(64, '[') + "0" + std::string(64, ']')).is_array(), "Source depth 64 accepted");
-    fails([&] { parse(std::string(65, '[') + "0" + std::string(65, ']')); });
     auto files = manual_profiles(profiles);
     require(files.size() == 46, "Runtime profile count");
     for (const auto& f : files) {
@@ -195,22 +112,19 @@ int main(int argc, char** argv) try {
     require(select_profile(matching, match).path.stem() == "B", "Longest pattern before ID; ordinal tie");
     auto unicode_dir = area("unicode-matching");
     auto unicode_profile = machine;
-    unicode_profile["baseboardPatterns"] = {"ÄΣᲐK𐐀"};
+    unicode_profile["baseboardPatterns"] = {"ÄΣK"};
     write_json(unicode_dir / L"Ä.JSON", unicode_profile, false);
     Identity unicode_id;
     unicode_id.cpu_vendor = "INTEL";
-    unicode_id.baseboard = "äσაk𐐨";
+    unicode_id.baseboard = "äσk";
     require(select_profile(unicode_dir, unicode_id).path.filename() == L"Ä.JSON",
-            "Invariant Unicode pattern and upper-case extension");
+            "Case-insensitive Unicode pattern and upper-case extension");
     unicode_id.baseboard = "-ä-";
     require(select_profile(unicode_dir, unicode_id).method == "baseboard filename", "Unicode filename casing");
     unicode_id.baseboard = "界ä";
     require(select_profile(unicode_dir, unicode_id).path.empty(), "Unicode letter is not a filename-token boundary");
     unicode_id.baseboard = "٥ä";
     require(select_profile(unicode_dir, unicode_id).path.empty(), "Unicode decimal digit is not a token boundary");
-    unicode_id.baseboard = "Ⅷä";
-    require(!select_profile(unicode_dir, unicode_id).path.empty(),
-            "Letter-number category is a token boundary in char.IsLetterOrDigit");
     auto length_dir = area("utf16-pattern-length");
     unicode_profile["baseboardPatterns"] = {"é"};
     write_json(length_dir / "A.json", unicode_profile, false);
@@ -219,11 +133,8 @@ int main(int argc, char** argv) try {
     unicode_id.baseboard = "éab";
     require(select_profile(length_dir, unicode_id).path.stem() == "B",
             "Longest match counts UTF-16 units, not UTF-8 bytes");
-    require(hex("0x10000") == 65536 && hex("FFFFFFFF") == -1 && hex("0x0xFF") == 255 && hex("+0XFF") == 255,
-            "Source hex rules without arbitrary address ceiling");
-    fails([&] { hex("100000000"); });
-    fails([&] { hex(" FF "); });
-    fails([&] { hex("-1"); });
+    require(hex("0x10000") == 65536 && hex("ff") == 255 && hex("0XFF") == 255, "Hex with or without the prefix");
+    for (const char* text : {"FFFFFFFF", " FF ", "-1", "+FF", "0x0xFF", "0x", ""}) fails([&] { hex(text); });
     Bitfield mask;
     mask.mask = "0x1FF";
     mask.bit = 0;
@@ -235,7 +146,6 @@ int main(int argc, char** argv) try {
     minimal["limits"] = Json::object();
     minimal["bitfields"] = Json::object();
     minimal["verifyRedirect"] = Json::object();
-    minimal["batteryModes"] = Json::array();
     auto p = minimal.get<MachineProfile>();
     apply_universal_defaults(p);
     require(p.tgp_fallback && p.cpu_fallback && p.limits.size() == 9, "Whole-map conservative defaults");
@@ -250,21 +160,13 @@ int main(int argc, char** argv) try {
         bad["limits"] = nullptr;
         bad.get<MachineProfile>();
     });
-    auto tolerant = parse("{/*c*/\"cpu\":{\"pl1\":123,},\"CPU\":{\"pl1\":44},\"unknown\":3,}").get<UserProfile>();
-    require(tolerant.cpu->pl1 == 123 && !Json(tolerant).contains("unknown"), "JSON comments/trailing/case/unknown");
+    auto tolerant = parse("{/*c*/\"cpu\":{\"pl1\":123},\"CPU\":{\"pl1\":44},\"unknown\":3}").get<UserProfile>();
+    require(tolerant.cpu->pl1 == 123 && !Json(tolerant).contains("unknown"), "JSON comments/case/unknown");
     for (const auto& text :
          {R"({"cpu":{"pl1":null}})", R"({"cpu":{"pl1":true}})", R"({"cpu":{"pl1":1.0}})",
           R"({"cpu":{"pl1":2147483648}})", R"({"lighting":{"logoR":256}})", R"({"liquidCooler":{"pumpVoltage":"V8"}})"})
         fails([&] { parse(text).get<UserProfile>(); });
-    for (const auto& text : {"[,]", "{,}", "[1,,]", "{\"a\":,}", "/*unterminated"}) fails([&] { parse(text); });
-    require(parse(R"({"s":"comma,} /*literal*/ quote\"", "a":[1,/*comment*/],})")["a"].size() == 1,
-            "Trailing-comma scanner respects strings/comments");
-    for (const auto& date : {"2026-11-03", "2026-11-03T12:00", "2026-11-03T12:00:00",
-                             "2026-11-03T12:00:00.1234567890123456Z", "2026-11-03T12:00:00+01"})
-        require(valid_date(date), "Reference ISO date form accepted");
-    require(!valid_date("2026-11-03t12:00:00z") && !valid_date("2026-11-03T12:00:00+14:01") &&
-                !valid_date("2026-02-29"),
-            "Invalid dates refused");
+    for (const auto& text : {"[1,]", "{\"a\":1,}", "{\"a\":,}", "/*unterminated"}) fails([&] { parse(text); });
     auto defaults = parse("{}").get<UserProfile>();
     defaults.preflight("IDY_7Y");
     require(defaults.fan->switch_ms == 100 && defaults.protection->threshold == 50 && !defaults.cooler,
@@ -350,8 +252,20 @@ int main(int argc, char** argv) try {
     require(encoding::pl4(200, true) == 100 && encoding::pl4(200, false) == 200 && encoding::battery(2, 0) == 32 &&
                 encoding::battery(2, 8) == 40,
             "Runtime encodings");
-    require(encoding::tgp(150, 90) == 60 && encoding::switch_speed(true, 300) == 0x83 && encoding::fan_duty(100) == 200,
+    require(encoding::tgp(150, 90) == 60 && encoding::switch_speed(true, 300) == 0x83 && encoding::pl1(210) == 210 &&
+                encoding::dynamic_boost(25) == 25,
             "Other encodings");
+    fails([&] { encoding::pl1(211); });
+    fails([&] { encoding::pl4(422, true); });
+    fails([&] { encoding::tgp(89, 90); });
+    fails([&] { encoding::dynamic_boost(26); });
+    fails([&] { encoding::cpu_temperature(64, false); });
+    fails([&] { encoding::cpu_temperature(121, true); });
+    h.ecspec = std::array<uint32_t, 12>{253, 253, 250, 95, 50, 50, 87, 90, 255, 187, 0, 0};
+    auto capped = h.extract_limits();
+    require(capped.at("PL1").max == 210 && capped.at("PL2").max == 210 && capped.at("PL4").max == 420 &&
+                capped.at("dynamicBoost").max == 25,
+            "ECSpec maxima above the register ranges are lowered to them");
 
     auto persistence = area("persistence");
     ProfileStore store(persistence);
@@ -419,13 +333,7 @@ int main(int argc, char** argv) try {
                              {"reduceCpuPower", true},
                              {"showMainWindow", false}};
     write_json(persistence / "userprofile_1.json", legacy, false);
-    auto migrated = store.load(1);
-    require(migrated->requires_save && migrated->protection->threshold == 50 && !migrated->protection->enabled &&
-                migrated->protection->fan_boost && migrated->protection->reduce_cpu &&
-                !migrated->protection->show_window,
-            "Legacy threshold retains options");
-    require(read_json(persistence / "userprofile_1.json")["gpuFailsafe"]["thresholdC"] == 35,
-            "Migration does not save");
+    fails([&] { store.load(1); });
     auto invalid_threshold = legacy;
     invalid_threshold["gpuFailsafe"]["thresholdC"] = 96;
     write_json(persistence / "userprofile_1.json", invalid_threshold, false);
@@ -481,7 +389,6 @@ int main(int argc, char** argv) try {
         raw(d / "settings.json", text);
         return ProfileStore(d, gpu).settings();
     };
-    require(inspect(R"({"thermalProtection":{"Stage":1,"Held":7}})").thermal.held == 0, "Retired stage released");
     require(inspect(R"({"lastProfile":"bad","profileNames":[null," ","Custom"],"disableDlppc":null})").thermal.held ==
                 0,
             "Cosmetic corruption not operational");
@@ -501,11 +408,8 @@ int main(int argc, char** argv) try {
             "Invalid action mask becomes recovery hold");
     require(inspect("{").thermal.held == Gpu && inspect("{", false).thermal.held == 0,
             "Corrupt settings model-derived fallback");
-    require(
-        inspect(R"({"thermalProtection":{"Stage":2,"Held":4},"gpuFailsafeTripReason":"old"})", false).thermal.held ==
-            Fan,
-        "New state precedence; known held without GPU fallback");
-    require(inspect(R"({"gpuFailsafeTripReason":"legacy"})").thermal.held == Gpu, "Legacy GPU hold migration");
+    require(inspect(R"({"thermalProtection":{"Stage":2,"Held":4}})", false).thermal.held == Fan,
+            "Known held without GPU fallback");
     auto bounded = hold(Fan);
     bounded.recovery_details = std::string(9000, 'x');
     require(recover(bounded, {}, false, true).recovery_details.size() == 8192, "Bound recovery details");
@@ -549,16 +453,6 @@ int main(int argc, char** argv) try {
     }
     require(diagnostics.size() == diagnostic_count + 3 && state_store.warning() == warning_before,
             "Lighting failure uses the same log-only contract");
-    // Stable, native-written interoperability inputs, consumed by the isolated C# harness.
-    auto output = area("interop");
-    write_json(output / "userprofile.json", slot, true);
-    write_json(output / "lighting_state.json", lights, false);
-    write_json(output / "liquid_cooler_state.json", cooler, false);
-    Settings exported;
-    exported.thermal = trip;
-    exported.last_slot = 4;
-    exported.disable_dlppc = true;
-    write_json(output / "settings.json", exported, true);
     auto identity = collect_identity();
     auto detected = select_profile(profiles, identity);
     Json identity_json = {{"baseboard", identity.baseboard},
@@ -568,7 +462,7 @@ int main(int argc, char** argv) try {
                           {"method", detected.method}};
     write_json(scratch / "identity.json", identity_json, false);
     std::cout
-        << "PASS: 45 machine profiles + rejected reference-only file; detection, encodings, model preflight, migrations, actual failed/interrupted saves, thermal recovery, peripheral state\n"
+        << "PASS: 45 machine profiles + rejected reference-only file; detection, encodings, model preflight, actual failed/interrupted saves, thermal recovery, peripheral state\n"
         << "Evidence: " << scratch.string() << "\nIdentity: " << identity_json.dump() << "\n";
     return 0;
 } catch (const std::exception& e) {

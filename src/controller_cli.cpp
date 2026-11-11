@@ -620,7 +620,7 @@ std::string Controller::defaults(const std::string& key) {
                                     latch_mask_));
             full_curves = true;
         }
-        if (!p.battery_modes.empty() && session_.battery_bit3)
+        if (session_.battery_bit3)
             append({{p.reg("batteryMode"), encoding::battery(0, *session_.battery_bit3),
                      p.bitfields.at("batteryMode").get_mask()}});
     }

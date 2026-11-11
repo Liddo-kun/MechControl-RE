@@ -31,11 +31,8 @@ std::optional<bool> FanSnapshot::gpu_present() const {
 }
 FanSnapshot read_fans(EcTransport& ec, const config::FanTable& ft) {
     FanSnapshot s;
-    // Count/address calculations must fit the driver's signed int32 ABI, not a generic hex ceiling.
     auto array = [&](const std::string& base) {
         int32_t a = config::hex(base);
-        if (ft.entries < 0 || static_cast<int64_t>(a) + ft.entries > static_cast<int64_t>(INT32_MAX) + 1)
-            throw std::out_of_range("Fan table does not fit EC address representation");
         std::vector<int> values;
         for (int i = 0; i < ft.entries; ++i) values.push_back(ec.read(a + i));
         return values;

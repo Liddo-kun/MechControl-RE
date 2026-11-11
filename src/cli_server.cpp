@@ -1,4 +1,5 @@
 #include "cli_server.h"
+#include "config_text.h"
 #include <sddl.h>
 
 namespace mech {
@@ -77,17 +78,8 @@ void CliServer::run() {
                     size_t start = 0;
                     for (size_t i = 0; i <= bytes.size(); ++i)
                         if (i == bytes.size() || bytes[i] == 0) {
-                            // Encoding.UTF8 in the reference replaces malformed sequences.
-                            auto data = reinterpret_cast<const char*>(bytes.data() + start);
-                            auto byte_count = static_cast<int>(i - start);
-                            int count = MultiByteToWideChar(CP_UTF8, 0, data, byte_count, nullptr, 0);
-                            std::wstring wide(count, L'\0');
-                            MultiByteToWideChar(CP_UTF8, 0, data, byte_count, wide.data(), count);
-                            count = WideCharToMultiByte(CP_UTF8, 0, wide.data(), static_cast<int>(wide.size()), nullptr,
-                                                        0, nullptr, nullptr);
-                            std::string text(count, '\0');
-                            WideCharToMultiByte(CP_UTF8, 0, wide.data(), static_cast<int>(wide.size()), text.data(),
-                                                count, nullptr, nullptr);
+                            std::string text(reinterpret_cast<const char*>(bytes.data() + start), i - start);
+                            config::wide(text); // Refuses malformed UTF-8, which a JSON reply could not carry.
                             args.push_back(std::move(text));
                             start = i + 1;
                         }

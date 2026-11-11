@@ -106,8 +106,8 @@ Controller::Controller(EcSession& session, std::filesystem::path directory,
             p.limits.contains("PL4")) {
             auto m = minimum_cpu();
             auto w = cpu_writes(p, m.pl1, m.pl2, m.pl4, m.temp_limit);
-            cpu_minimum_ = m.pl1 > 0 && m.pl2 > 0 && m.pl4 > 0 &&
-                           encoding::decode_pl4(encoding::pl4(m.pl4, p.pl4_doubled()), p.pl4_doubled()) == m.pl4;
+            // The minimum must be written exactly; a doubled PL4 register cannot hold an odd one.
+            cpu_minimum_ = m.pl1 > 0 && m.pl2 > 0 && m.pl4 > 0 && (!p.pl4_doubled() || m.pl4 % 2 == 0);
             for (auto x : w) session_.guard->admit(x.address);
             for (size_t i = 0; i < 3; ++i)
                 if (session_.transport().read(w[i].address) == 255) cpu_minimum_ = false;
@@ -249,7 +249,6 @@ GpuSettings Controller::gpu(bool driver_read) {
     GpuSettings g;
     auto ctrl = read("tgpDbCtrl");
     g.tgp = read("tgp") + session_.profile.tgp_offset();
-    read("dbTotalPower");
     g.dynamic_boost_watts = read("dbMaxTgp");
     g.dynamic_boost_enabled = (ctrl & 2) != 0;
     // Passive reads never contact NVIDIA, even at the EC floor. Retain our
@@ -673,7 +672,7 @@ void Controller::apply_slot(const UserProfile& profile, const nv::ProfilePlan& g
     }
     application_completed_ = true;
     active_slot_ = slot;
-    if (!profile.requires_save) saved_profile_ = profile;
+    saved_profile_ = profile;
     if (deliberate) store_.select(slot); // Hardware can be applied even when this save fails.
     diagnostic_("Slot " + std::to_string(slot) +
                 " applied; peripheral failures are logged independently; BLE completion is asynchronous");
