@@ -1277,6 +1277,9 @@ ControlResult Controller::execute(const ControlCommand& command) {
                     result.applied = true;
                 } else if constexpr (std::is_same_v<T, LightingApply>) {
                     if (!lighting_) throw std::runtime_error("Lighting owner unavailable");
+                    if (c.zone == 3 && !features_.lighting())
+                        throw std::runtime_error("Logo control is disabled: " +
+                                                 session_.validation.disabled.at("lighting"));
                     if (!lighting_->available(c.zone)) throw std::runtime_error("HID lighting zone unavailable");
                     writes_started_ = true;
                     lighting_->change(c.zone, c.settings, c.flash, c.color_only);
@@ -1295,11 +1298,11 @@ ControlResult Controller::execute(const ControlCommand& command) {
                     if (lighting_) {
                         j["lightingIntent"] = lighting_->intent();
                         j["zones"] = {lighting_->available(0), lighting_->available(2), lighting_->available(3)};
-                        try {
-                            j["logo"] = lighting_->logo();
-                        } catch (const std::exception& e) {
-                            j["logoError"] = e.what();
-                        }
+                        if (features_.lighting()) try {
+                                j["logo"] = lighting_->logo();
+                            } catch (const std::exception& e) {
+                                j["logoError"] = e.what();
+                            }
                     }
                     if (peripheral_hardware_ && !dimming_available_)
                         peripheral_io([&] { dimming_available_ = local_dimming_available(); });

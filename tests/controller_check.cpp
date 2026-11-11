@@ -304,6 +304,27 @@ void peripheral_regressions(const std::filesystem::path& root) {
     check(result.code == 0 && result.text.find("logo defaults restored") == std::string::npos,
           "mode defaults do not claim logo restoration");
 }
+void logo_validation(const std::filesystem::path& root) {
+    auto path = root / "logo-validation";
+    Rig r(path, true, {}, {}, [](int, const HidReport&) {});
+    r.session->validation.disabled["lighting"] = "fixture";
+    auto read = r.controller->execute(PeripheralRead{});
+    auto applied = r.controller->execute(LightingApply{3, {true, 255, 128, 0, 75}});
+    auto p = profile();
+    p.lighting->logo = {true, 12, 34, 56, 80};
+    write_json(path / "userprofile_1.json", p, true);
+    auto loaded = r.controller->execute(SlotLoad{1});
+    auto saved = r.controller->execute(SlotSave{1});
+    check(read.peripherals->at("zones") == Json::array({true, true, false}) && !read.peripherals->contains("logo") &&
+              applied.code == 1 && applied.text.find("fixture") != std::string::npos && loaded.code == 0 &&
+              saved.saved && read_json(path / "userprofile_1.json")["lighting"]["logoR"] == 12 &&
+              std::none_of(r.state->writes.begin(), r.state->writes.end(),
+                           [](auto w) {
+                               return w.first == 0x767 || (w.first >= 0x769 && w.first <= 0x76B) || w.first == 0x7AB ||
+                                      w.first == 0x78C;
+                           }),
+          "a logo that startup validation rejected is not read, written by Apply or a slot, or captured");
+}
 void startup_degradation(const std::filesystem::path& root) {
     auto start = [&](const char* name, const std::function<void(State&)>& setup, bool& cpu,
                      std::vector<std::string>& errors) {
@@ -1786,6 +1807,7 @@ int main(int argc, char** argv) {
         startup_and_eligibility(root);
         capture_preservation(root);
         peripheral_intent(root);
+        logo_validation(root);
         peripheral_regressions(root);
         ec_bypass(root);
         monitor(root);
