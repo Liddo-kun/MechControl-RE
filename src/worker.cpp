@@ -146,8 +146,6 @@ void ControlWorker::run(std::stop_token stop) {
                      *shared});
             if (controller && controller->visible()) presentation(controller->gpu_presentation());
         };
-        if (!options_.once && !options_.read_only && options_.peripheral_hardware)
-            ensure_uefi_flags([this](const std::string& text) { log_.write(text); });
         ChannelFactory factory = [this](const std::wstring& path) {
             return options_.channel_factory ? options_.channel_factory(path, stopping_.get())
                                             : open_ec_channel(path, stopping_.get());
@@ -182,6 +180,8 @@ void ControlWorker::run(std::stop_token stop) {
         if (options_.once) return;
         counters.emplace();
         if (!options_.read_only) {
+            // Only once the OEM EC driver has opened and the model is identified.
+            if (options_.peripheral_hardware) ensure_uefi_flags([this](const std::string& text) { log_.write(text); });
             auto run_blocking = [&](std::function<void()> work) {
                 Handle completed(CreateEventW(nullptr, TRUE, FALSE, nullptr));
                 if (!completed) throw std::runtime_error("Cannot create device-operation completion event");
