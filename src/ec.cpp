@@ -100,11 +100,8 @@ void WriteGuard::write(int32_t address, uint8_t value) {
         write_verify(address, value);
     } catch (const VerifyError&) {
         if (recovering_ || !recover) throw;
-        struct Scope {
-            bool& value;
-            Scope(bool& v) : value(v) { value = true; }
-            ~Scope() { value = false; }
-        } scope(recovering_);
+        Raised scope(recovering_);
+
         if (!recover()) throw;
         write_verify(address, value); // Exactly one recovery and no recursive catch.
     }
@@ -138,21 +135,21 @@ ControlLimits control_limits(const config::MachineProfile& p) {
     return {control_limit(p, "PL1"),          control_limit(p, "PL2"), control_limit(p, "PL4"),
             control_limit(p, "cpuTempLimit"), control_limit(p, "TGP"), control_limit(p, "dynamicBoost")};
 }
-std::vector<EcWrite> cpu_writes(const config::MachineProfile& p, int pl1, int pl2, int pl4, int temperature) {
+std::vector<EcWrite> cpu_writes(const config::MachineProfile& p, const config::CpuSettings& c) {
     using namespace config::encoding;
-    within(p, "PL1", pl1);
-    within(p, "PL2", pl2);
-    within(p, "PL4", pl4);
-    within(p, "cpuTempLimit", temperature);
+    within(p, "PL1", c.pl1);
+    within(p, "PL2", c.pl2);
+    within(p, "PL4", c.pl4);
+    within(p, "cpuTempLimit", c.temp_limit);
     if (control_limit(p, "PL1").encoding != "direct" || control_limit(p, "PL2").encoding != "direct" ||
         (control_limit(p, "PL4").encoding != "direct" && control_limit(p, "PL4").encoding != "double"))
         throw std::out_of_range("CPU request cannot be represented by model encoding");
-    auto raw_pl4 = config::encoding::pl4(pl4, p.pl4_doubled());
+    auto raw_pl4 = pl4(c.pl4, p.pl4_doubled());
     within(p, "PL4", decode_pl4(raw_pl4, p.pl4_doubled())); // A doubled register rounds an odd request down.
-    return {{p.reg("PL1"), config::encoding::pl1(pl1)},
-            {p.reg("PL2"), config::encoding::pl1(pl2)},
+    return {{p.reg("PL1"), pl1(c.pl1)},
+            {p.reg("PL2"), pl1(c.pl2)},
             {p.reg("PL4"), raw_pl4},
-            {p.reg("cpuTempLimitWrite"), cpu_temperature(temperature, p.cpu_direct(), p.tj_max())}};
+            {p.reg("cpuTempLimitWrite"), cpu_temperature(c.temp_limit, p.cpu_direct(), p.tj_max())}};
 }
 std::vector<EcWrite> gpu_writes(const config::MachineProfile& p, int tgp, bool dynamic_boost, int db,
                                 std::optional<int> maximum) {

@@ -13,11 +13,7 @@ static int ramp_start(int t) {
     return static_cast<int>(std::upper_bound(std::begin(fixed_temps), std::end(fixed_temps), t + 4) -
                             std::begin(fixed_temps));
 }
-static int round_even(float n) { // C# Math.Round(float promoted to double), midpoint-to-even.
-    int v = static_cast<int>(std::floor(n));
-    float f = n - v;
-    return v + (f > 0.5f || (f == 0.5f && (v & 1)));
-}
+static int nearest(float value) { return static_cast<int>(std::nearbyint(value)); } // Midpoints go to the even number.
 Curve active_curve(const Curve& input, int entries) {
     Curve c;
     int previous = -1;
@@ -54,9 +50,9 @@ int curve_duty(const Curve& c, int t) {
     if (t <= c.temp_up.front()) return c.duty.front() / 2;
     for (size_t i = 1; i < c.temp_up.size(); ++i)
         if (t <= c.temp_up[i])
-            return round_even(c.duty[i - 1] / 2 + static_cast<float>(t - c.temp_up[i - 1]) /
-                                                      (c.temp_up[i] - c.temp_up[i - 1]) *
-                                                      (c.duty[i] / 2 - c.duty[i - 1] / 2));
+            return nearest(c.duty[i - 1] / 2 + static_cast<float>(t - c.temp_up[i - 1]) /
+                                                   (c.temp_up[i] - c.temp_up[i - 1]) *
+                                                   (c.duty[i] / 2 - c.duty[i - 1] / 2));
     return c.duty.back() / 2;
 }
 Curve linked_curve(int duty, int ramp) {
@@ -70,7 +66,7 @@ Curve linked_curve(int duty, int ramp) {
                     : i == 9 ? 100
                     : i < ramp || count <= 0
                         ? duty
-                        : round_even(duty + static_cast<float>(i - ramp) / (count - 1) * (100 - duty));
+                        : nearest(duty + static_cast<float>(i - ramp) / (count - 1) * (100 - duty));
         c.duty.push_back(value * 2);
     }
     return c;
@@ -105,7 +101,7 @@ Controller::Controller(EcSession& session, std::filesystem::path directory,
         if (features_.cpu_power() && !p.cpu_fallback && p.limits.contains("PL1") && p.limits.contains("PL2") &&
             p.limits.contains("PL4")) {
             auto m = minimum_cpu();
-            auto w = cpu_writes(p, m.pl1, m.pl2, m.pl4, m.temp_limit);
+            auto w = cpu_writes(p, m);
             // The minimum must be written exactly; a doubled PL4 register cannot hold an odd one.
             cpu_minimum_ = m.pl1 > 0 && m.pl2 > 0 && m.pl4 > 0 && (!p.pl4_doubled() || m.pl4 % 2 == 0);
             for (auto x : w) session_.guard->admit(x.address);
@@ -253,16 +249,14 @@ GpuSettings Controller::gpu(bool driver_read) {
     // Passive reads never contact NVIDIA, even at the EC floor. Retain our
     // lower request while asleep; only report it when the EC still matches it.
     if (g.tgp == limits_.tgp.min && gpu_unlocked_ && driver_watts_) {
-        int below = *driver_watts_ - (g.dynamic_boost_enabled ? g.dynamic_boost_watts : 0);
+        int below = *driver_watts_ - g.boost();
         if (below < g.tgp) g.tgp = std::max(below, gpu_min());
     }
     if (driver_read && gpu_unlocked_ && g.tgp <= limits_.tgp.min) {
         nv::PowerLimits power;
         nvidia_work([&] { power = nvidia_->limits(); });
         int floor = limits_.tgp.min;
-        int below = power.requested
-                        ? int(*power.requested / 1000) - (g.dynamic_boost_enabled ? g.dynamic_boost_watts : 0)
-                        : floor;
+        int below = power.requested ? int(*power.requested / 1000) - g.boost() : floor;
         g.tgp = std::clamp(below, gpu_min(), floor);
     }
     return g;
@@ -323,11 +317,8 @@ void Controller::emergency(int action) {
     auto& p = session_.profile;
     clear_bypass("thermal failsafe trip");
     // Emergency reductions proceed even while a failed bypass clear refuses normal writes.
-    struct Scope {
-        bool& value;
-        Scope(bool& v) : value(v) { value = true; }
-        ~Scope() { value = false; }
-    } scope(emergency_);
+    Raised scope(emergency_);
+
     if (action == Gpu) {
         if (!gpu_minimum_) throw std::runtime_error("Model-specific GPU minimum unavailable");
         GpuSettings g;
@@ -337,7 +328,7 @@ void Controller::emergency(int action) {
     if (action == Cpu) {
         if (!cpu_minimum_) throw std::runtime_error("Model-specific CPU minimum unavailable");
         auto c = minimum_cpu();
-        batch(cpu_writes(p, c.pl1, c.pl2, c.pl4, c.temp_limit));
+        batch(cpu_writes(p, c));
     }
     if (action == Fan) {
         if (!fan_boost_) throw std::runtime_error("Fan boost unavailable");
@@ -355,7 +346,7 @@ bool Controller::matches(int action) {
     if (action == Cpu) {
         if (!cpu_minimum_) return false;
         auto c = minimum_cpu();
-        w = cpu_writes(p, c.pl1, c.pl2, c.pl4, c.temp_limit);
+        w = cpu_writes(p, c);
         w.pop_back();
     }
     if (action == Fan) {
@@ -582,7 +573,7 @@ nv::ProfilePlan Controller::plan(const UserProfile& profile, bool automatic) {
     auto append = [&](std::vector<EcWrite> w) { writes.insert(writes.end(), w.begin(), w.end()); };
     if (features_.cpu_power()) {
         auto c = *profile.cpu;
-        append(cpu_writes(p, c.pl1, c.pl2, c.pl4, c.temp_limit));
+        append(cpu_writes(p, c));
     }
     if (features_.gpu_power()) {
         gpu_value = plan_gpu(*profile.gpu, automatic);
@@ -620,7 +611,7 @@ void Controller::apply_profile(const UserProfile& profile, const nv::ProfilePlan
         if (thermal_->holds(Cpu)) {
             if (!thermal_->verified(Cpu) || !matches(Cpu)) emergency(Cpu);
         } else {
-            auto w = cpu_writes(p, c.pl1, c.pl2, c.pl4, c.temp_limit);
+            auto w = cpu_writes(p, c);
             log_cpu(w);
             batch(w);
         }
@@ -902,10 +893,9 @@ UserProfile Controller::capture(int slot) {
         if (c.input) g.board_input_ma = c.input->current;
         const auto& l = limits_.tgp;
         g.bios_override_enabled =
-            gpu_unlocked_ && (g.tgp < l.min || g.tgp > l.max ||
-                              g.tgp + (g.dynamic_boost_enabled ? g.dynamic_boost_watts : 0) > nvidia_->stock_watts() ||
-                              c.nv.current > c.nv.stock_max || (c.ms && c.ms->current > c.ms->stock_max) ||
-                              (c.input && c.input->current > c.input->stock_max));
+            gpu_unlocked_ &&
+            (g.tgp < l.min || g.tgp > l.max || g.total() > nvidia_->stock_watts() || c.nv.current > c.nv.stock_max ||
+             (c.ms && c.ms->current > c.ms->stock_max) || (c.input && c.input->current > c.input->stock_max));
     }
     profile.protection = thermal_->settings();
     profile.fan = features_.fan_control() ? fan_intent_ : FanSettings{};
@@ -1167,7 +1157,7 @@ ControlResult Controller::execute(const ControlCommand& command) {
                 if constexpr (std::is_same_v<T, CpuApply>) {
                     if (!features_.cpu_power()) throw std::runtime_error("CPU control unavailable");
                     auto s = c.settings;
-                    auto w = cpu_writes(p, s.pl1, s.pl2, s.pl4, s.temp_limit);
+                    auto w = cpu_writes(p, s);
                     explicit_apply([&] {
                         log_cpu(w);
                         batch(w);
@@ -1179,7 +1169,7 @@ ControlResult Controller::execute(const ControlCommand& command) {
                     if (c.cpu) {
                         if (!features_.cpu_power()) throw std::runtime_error("CPU control unavailable");
                         auto v = *c.cpu;
-                        cpu = cpu_writes(p, v.pl1, v.pl2, v.pl4, v.temp_limit);
+                        cpu = cpu_writes(p, v);
                     }
                     auto g = c.settings;
                     if (nvidia_busy_) throw std::runtime_error("NVIDIA operation in progress");
@@ -1212,7 +1202,7 @@ ControlResult Controller::execute(const ControlCommand& command) {
                 } else if constexpr (std::is_same_v<T, UiPreflight>) {
                     if (c.cpu && features_.cpu_power()) {
                         auto v = *c.cpu;
-                        cpu_writes(p, v.pl1, v.pl2, v.pl4, v.temp_limit);
+                        cpu_writes(p, v);
                     }
                     std::optional<UserProfile> profile;
                     if (c.slot) {

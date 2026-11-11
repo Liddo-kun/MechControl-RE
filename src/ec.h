@@ -1,5 +1,5 @@
 #pragma once
-#include "profiles.h"
+#include "settings.h"
 #include "win_handle.h"
 #include <span>
 
@@ -57,13 +57,19 @@ private:
     std::function<void(unsigned)> wait_;
 };
 // Complete, model-range-checked EC groups. NVIDIA/thermal policy is the caller's responsibility.
+// Raises a flag for the enclosing scope.
+struct Raised {
+    bool& flag;
+    explicit Raised(bool& f) : flag(f) { flag = true; }
+    ~Raised() { flag = false; }
+};
 config::Limit control_limit(const config::MachineProfile&, const std::string& key);
 // Every control's limit, resolved once for the controller.
 struct ControlLimits {
     config::Limit pl1, pl2, pl4, cpu_temperature, tgp, dynamic_boost;
 };
 ControlLimits control_limits(const config::MachineProfile&);
-std::vector<EcWrite> cpu_writes(const config::MachineProfile&, int pl1, int pl2, int pl4, int temperature);
+std::vector<EcWrite> cpu_writes(const config::MachineProfile&, const config::CpuSettings&);
 std::vector<EcWrite> gpu_writes(const config::MachineProfile&, int tgp, bool dynamic_boost, int db,
                                 std::optional<int> maximum = {});
 EcWrite fan_boost_write(const config::MachineProfile&, bool enabled);

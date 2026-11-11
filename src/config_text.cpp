@@ -21,6 +21,14 @@ std::wstring wide(std::string_view text) {
     MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), static_cast<int>(text.size()), out.data(), count);
     return out;
 }
+std::string utf8(std::wstring_view text) {
+    if (text.empty()) return {};
+    int count =
+        WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0, nullptr, nullptr);
+    std::string out(count, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), out.data(), count, nullptr, nullptr);
+    return out;
+}
 std::wstring lower_invariant(std::wstring_view text) {
     // The invariant locale, so that a Turkish system still lowers "I" to "i".
     std::wstring out(text);
@@ -43,5 +51,15 @@ std::string hex_text(unsigned value, int digits) {
     char s[16];
     snprintf(s, sizeof s, "0x%0*X", digits, value);
     return s;
+}
+std::string decimal_text(double value, int places, bool trim) {
+    char s[32];
+    snprintf(s, sizeof s, "%.*f", places, value);
+    std::string text = s;
+    if (trim && text.find('.') != std::string::npos) {
+        text.erase(text.find_last_not_of('0') + 1);
+        if (text.back() == '.') text.pop_back();
+    }
+    return text;
 }
 }

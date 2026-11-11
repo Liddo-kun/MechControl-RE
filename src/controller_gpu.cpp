@@ -187,7 +187,7 @@ void Controller::apply_gpu(GpuSettings g) {
         int watts = 0;
         nvidia_work([&] {
             auto power = nvidia_->limits();
-            watts = std::min(int(power.max / 1000), g.tgp + (g.dynamic_boost_enabled ? g.dynamic_boost_watts : 0));
+            watts = std::min(int(power.max / 1000), g.total());
             nvidia_->apply(watts, g.dynamic_boost_enabled);
         });
         driver_watts_ = watts;
@@ -231,7 +231,7 @@ void Controller::check_gpu() {
         auto g = gpu();
         nv::Budget budget;
         nvidia_work([&] { budget = nvidia_->budget(); });
-        auto expected = g.tgp + (g.dynamic_boost_enabled ? g.dynamic_boost_watts : 0);
+        auto expected = g.total();
         if (budget.f7 / 1000 < uint32_t(expected))
             diagnostic_(
                 "NVIDIA laptop budget " + std::to_string(budget.f7 / 1000) + " W is below the EC request " +

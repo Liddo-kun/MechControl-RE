@@ -12,13 +12,6 @@
 #include <knownfolders.h>
 
 namespace mech::nv {
-static std::string utf8(std::wstring_view s) {
-    if (s.empty()) return {};
-    int n = WideCharToMultiByte(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), nullptr, 0, nullptr, nullptr);
-    std::string out(n, 0);
-    WideCharToMultiByte(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), out.data(), n, nullptr, nullptr);
-    return out;
-}
 static std::string lower(std::string s) {
     for (char& c : s)
         if (c >= 'A' && c <= 'Z') c += 32;
@@ -63,7 +56,7 @@ Store::Store(const Identity& id) : path_(recovery_path()) {
     wchar_t prefix[128];
     swprintf_s(prefix, L"PCI\\VEN_10DE&DEV_%04X&SUBSYS_%08X", id.device, id.subsystem);
     bool found = adapters([&](HDEVINFO set, SP_DEVINFO_DATA info, const std::wstring& hardware) {
-        auto hw = utf8(hardware), p = utf8(prefix);
+        auto hw = config::utf8(hardware), p = config::utf8(prefix);
         if (!config::equal_ignore_case(hw, p) &&
             !(hw.size() > p.size() && hw[p.size()] == '&' && config::equal_ignore_case(hw.substr(0, p.size()), p)))
             return false;
@@ -127,7 +120,7 @@ std::map<std::string, Bytes> Store::records() {
         auto status = RegEnumValueW(key_, i, name, &count, nullptr, &type, nullptr, &size);
         if (status == ERROR_NO_MORE_ITEMS) break;
         wincheck(status);
-        auto name_lower = lower(utf8(name));
+        auto name_lower = lower(config::utf8(name));
         if (name_lower == "vbios") external();
         if (!name_lower.starts_with("romoverride")) continue;
         if (name_lower.size() != 13 || !isxdigit(static_cast<unsigned char>(name_lower[11])) ||
@@ -234,21 +227,7 @@ void Store::stage(const Bios& original, const std::vector<Record>& desired) {
             std::ostringstream text;
             text << complete.version;
             for (auto [p, v] : complete.originals) text << '\n' << p << '=' << v;
-            auto bytes = text.str();
-            auto pending = path_;
-            pending += L".tmp";
-            HANDLE file =
-                CreateFileW(pending.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-            if (file == INVALID_HANDLE_VALUE)
-                throw std::system_error(GetLastError(), std::system_category(), "NVIDIA originals create");
-            DWORD written = 0;
-            BOOL ok = WriteFile(file, bytes.data(), static_cast<DWORD>(bytes.size()), &written, nullptr);
-            DWORD error = !ok ? GetLastError() : written != bytes.size() ? ERROR_WRITE_FAULT : ERROR_SUCCESS;
-            if (!error && !FlushFileBuffers(file)) error = GetLastError();
-            CloseHandle(file);
-            if (error) throw std::system_error(error, std::system_category(), "NVIDIA originals flush");
-            if (!MoveFileExW(pending.c_str(), path_.c_str(), MOVEFILE_REPLACE_EXISTING))
-                throw std::system_error(GetLastError(), std::system_category(), "NVIDIA originals replace");
+            config::write_text(path_, text.str(), true);
         }
     }
     for (auto& [name, b] : current)

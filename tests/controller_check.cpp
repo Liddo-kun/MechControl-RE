@@ -627,7 +627,7 @@ void integration(const std::filesystem::path& root) {
           "zero-valued CPU group fails before any write");
     auto partial_limits = r.session->profile;
     partial_limits.limits.erase("PL1");
-    check(cpu_writes(partial_limits, 15, 150, 200, 95).front().value == 15 && !partial_limits.limits.contains("PL1"),
+    check(cpu_writes(partial_limits, {15, 150, 200, 95}).front().value == 15 && !partial_limits.limits.contains("PL1"),
           "per-key controller fallback does not change whole-map default semantics");
     write_json(root / "integrated/userprofile_1.json", {{"cpu", nullptr}}, false);
     check(c.execute(SlotLoad{1}).code == 1 && s->writes.empty(), "null required persisted group fails before writes");

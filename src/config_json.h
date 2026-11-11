@@ -16,6 +16,8 @@ Json parse(std::string_view text);
 std::string read_text(const std::filesystem::path& path);
 Json read_json(const std::filesystem::path& path);
 std::filesystem::path executable_directory();
+// Atomic: written and flushed beside the target, then moved over it.
+void write_text(const std::filesystem::path& path, std::string_view text, bool atomic);
 void write_json(const std::filesystem::path& path, const Json& value, bool atomic);
 void object(const Json& j);
 
