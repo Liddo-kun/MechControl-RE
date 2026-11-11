@@ -4,8 +4,9 @@
 namespace mech {
 class CliServer {
 public:
-    CliServer(ControlWorker&,Log&,std::wstring name=L"MechControl");
+    CliServer(ControlWorker&, Log&, std::wstring name = L"MechControl");
     ~CliServer();
+
 private:
     void run();
     ControlWorker& worker_;

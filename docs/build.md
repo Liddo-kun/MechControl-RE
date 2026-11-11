@@ -18,6 +18,9 @@ prove physical behavior. `ui-pages-check.exe --ui-check <fresh existing director
 renders the real pages with fake hardware at 100, 150 and 200% DPI; run it on an
 interactive desktop and inspect the captures.
 
+Format `src` and `tests` with the `clang-format` from the Build Tools (`VC/Tools/Llvm/x64/bin`); the
+style is `.clang-format`. Wrap comments by hand, because it leaves them as written.
+
 ## Release packages
 
 ```powershell

@@ -12,6 +12,7 @@ public:
     Counters& operator=(const Counters&) = delete;
     ULONG error() const { return error_; }
     void publish(std::uint64_t cpu, std::uint64_t gpu);
+
 private:
     HANDLE provider_ = nullptr;
     PPERF_COUNTERSET_INSTANCE instance_ = nullptr;
