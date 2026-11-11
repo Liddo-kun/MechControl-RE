@@ -281,8 +281,8 @@ Selection select_profile(
             }
             candidates.push_back({f, std::move(j)});
         } catch (const std::exception& ex) {
-            note("Skipping malformed " + f.filename().string() + ": " + ex.what());
-        } // Matching continues.
+            note("Skipping malformed " + f.filename().string() + ": " + ex.what()); // Matching continues.
+        }
     auto board = lower_invariant(wide(id.baseboard));
     Selection best;
     size_t length = 0;

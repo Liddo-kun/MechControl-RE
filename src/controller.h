@@ -17,27 +17,31 @@ struct GpuApply {
     bool restart_confirmed = false;
     std::optional<config::CpuSettings> cpu;
 };
+// Deliberate, confirmed UI action; never exposed by CLI.
 struct GpuUnlock {
     bool enabled;
-}; // Deliberate, confirmed UI action; never exposed by CLI.
+};
 struct DlppcApply {
     bool disabled;
 };
 struct AcEvent {
     bool on_ac;
 };
+// Curves/master/link; boost and switch have separate commands.
 struct FanApply {
     config::FanSettings settings;
-}; // Curves/master/link; boost and switch have separate commands.
+};
 struct FanBoost {
     bool enabled;
 };
+// Unsupported table formats still expose the existing master bit.
 struct FanMaster {
     bool enabled;
-}; // Unsupported table formats still expose the existing master bit.
+};
+// Linked editor updates only; the shared tick decides whether to write.
 struct FanEdit {
     config::FanSettings settings;
-}; // Linked editor updates only; the shared tick decides whether to write.
+};
 struct FanRead {};
 struct BatteryApply {
     int mode;
@@ -56,20 +60,23 @@ struct DimmingApply {
 struct PeripheralRead {
     bool battery = false;
 };
+// Bind the existing visible-page two-second telemetry subscription.
 struct BatteryPage {
     bool active;
-}; // Bind the existing visible-page two-second telemetry subscription.
+};
+// -2: initial metadata; -1: changed catalog; 0..6: explicit page read.
 struct UiRead {
     int page = -2;
-}; // -2: initial metadata; -1: changed catalog; 0..6: explicit page read.
+};
 struct UiPreflight {
     std::optional<config::GpuSettings> gpu;
     int slot = 0;
     std::optional<config::CpuSettings> cpu;
 };
+// The visible tab: Power=0 polls GPU telemetry, System Info=6 every EC sensor.
 struct UiPage {
     int page;
-}; // The visible tab: Power=0 polls GPU telemetry, System Info=6 every EC sensor.
+};
 struct SwitchApply {
     bool enabled;
     int milliseconds;
@@ -93,9 +100,10 @@ struct SlotRename {
 struct SlotClear {
     int slot;
 };
+// Empty means firmware defaults.
 struct DefaultsApply {
     std::string mode;
-}; // Empty means firmware defaults.
+};
 struct ThermalReset {};
 struct ThermalTest {
     std::optional<config::ProtectionSettings> expected;
@@ -108,12 +116,14 @@ struct Resume {};
 struct PowerTransition {
     enum Kind { display_off, suspend, shutdown } kind;
 };
+// Never saved; see Controller::bypass.
 struct EcBypassApply {
     bool enabled;
-}; // Never saved; see Controller::bypass.
+};
+// EC 0x7C7 bit 1; live until the slot is saved.
 struct CoolerFlag {
     bool connected;
-}; // EC 0x7C7 bit 1; live until the slot is saved.
+};
 struct CliCommand {
     std::vector<std::string> arguments;
 };
@@ -162,9 +172,9 @@ public:
     bool fan_review_required() const { return fan_review_required_; }
     config::Json presentation(bool read = false, bool gpu_live = false, int page = -1);
     int ui_page() const { return ui_page_; }
-    bool gpu_presentation() const {
-        return visible_ && ui_page_ == 0 && enabled("gpuPower");
-    } // The Power tab's live table.
+    // The Power tab's live table.
+    bool gpu_presentation() const { return visible_ && ui_page_ == 0 && enabled("gpuPower"); }
+
 private:
     bool enabled(const char*) const;
     uint8_t read(const char*);

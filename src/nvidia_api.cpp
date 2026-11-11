@@ -107,7 +107,8 @@ struct Api::Native {
         require(device != nullptr, "NVML adapter does not match NVAPI PCI identity");
         return device;
     }
-    // NVML handles crash when used after a GPU reset (a driver reset on waking, a GPU restart), so each use opens NVML afresh.
+    // NVML handles crash when used after a GPU reset (a driver reset
+    // on waking, a GPU restart), so each use opens NVML afresh.
     template <class F> void session(F use, Identity* found = nullptr) {
         check(symbol<int(__cdecl*)()>("nvmlInit_v2")(), "NVML Init");
         auto shutdown = symbol<int(__cdecl*)()>("nvmlShutdown");
@@ -377,7 +378,8 @@ Api::Rails Api::rails() {
             ++inputs;
             continue;
         }
-        // RTX 40 drivers report NVVDD (only) as policy type 13, as mVolt binds it; Power still matches its range to the BIOS.
+        // RTX 40 drivers report NVVDD (only) as policy type 13, as
+        // mVolt binds it; Power still matches its range to the BIOS.
         if (u32(m, q + 12) != 6) continue;
         auto id = u32(m, q + 16) & 255;
         if ((id != 1 && id != 16) || (type == 13 && id != 1)) continue;
@@ -569,7 +571,8 @@ Telemetry Api::telemetry() {
                uint64_t(at(i, 0x60)) == uint64_t(at(i, 0x134)) + at(i, 0xb84) &&
                uint64_t(at(i, 0x15d0)) == uint64_t(at(i, 0x1690)) + at(i, 0x1e70);
     };
-    // Without an MSVDD rail (RTX 40) the current controller's layout is unconfirmed; its cap and predictions stay empty.
+    // Without an MSVDD rail (RTX 40) the current controller's
+    // layout is unconfirmed; its cap and predictions stay empty.
     auto current =
         unique(mask, [&](int i) { return t.ms && controller(i) && at(i, 0x134) == t.nv && at(i, 0xb84) == *t.ms; });
     auto board_power = unique(mask, [&](int i) {

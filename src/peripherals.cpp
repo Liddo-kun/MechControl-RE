@@ -71,10 +71,8 @@ Lighting::Lighting(EcSession& s, ProfileStore& store, std::function<void(const s
                    std::function<void(const std::vector<EcWrite>&)> batch)
     : session_(s), store_(store), log_(std::move(log)), hardware_(hardware), output_(std::move(send)),
       run_io_(std::move(run_io)), batch_(std::move(batch)), state_(store.load_lighting()) {
-    if (!batch_)
-        batch_ = [this](const auto& writes) {
-            session_.guard->apply(writes);
-        }; // Standalone packet fixture/live probe only.
+    // Standalone packet fixture/live probe only.
+    if (!batch_) batch_ = [this](const auto& writes) { session_.guard->apply(writes); };
     if (hardware_) open();
     for (auto* zone : {&state_.logo, &state_.keyboard, &state_.light_bar})
         if (!*zone) log_("Lighting intent contains an explicit-null zone; it is unavailable, not an all-off default");

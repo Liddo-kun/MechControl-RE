@@ -41,8 +41,8 @@ struct Mode {
 using EcVersion = std::pair<int, int>; // Major, minor.
 struct EcBypass {
     std::string value;
-    std::vector<std::pair<EcVersion, EcVersion>> ec_versions;
-}; // Inclusive ranges from "M.m" or "M.m-M.m".
+    std::vector<std::pair<EcVersion, EcVersion>> ec_versions; // Inclusive ranges from "M.m" or "M.m-M.m".
+};
 struct FanTable {
     std::string format = "RamFan1", cpu_up, cpu_down, cpu_duty, gpu_up, gpu_down, gpu_duty;
     int entries = 16, active = 10, padding_temp = 255;

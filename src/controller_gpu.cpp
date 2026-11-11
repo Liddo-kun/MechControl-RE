@@ -296,7 +296,8 @@ void Controller::dlppc(bool disabled) {
     if (!nvidia_ && nvidia_available_) try {
             open_nvidia();
         } catch (const std::exception&) {
-        } // Logged by open_nvidia.
+            // Logged by open_nvidia.
+        }
     open_dlppc();
     bool write = false;
     try {

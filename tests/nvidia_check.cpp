@@ -113,7 +113,8 @@ struct Fixture {
             b[p + size - 1] = uint8_t(-int(sum));
         }
     }
-    // RTX 40 table with the 4060/4070 Laptop ROM values. Entry 7 is populated and 14 looks like an RTX 50 MSVDD record; both must be ignored.
+    // RTX 40 table with the 4060/4070 Laptop ROM values. Entry 7 is populated
+    // and 14 looks like an RTX 50 MSVDD record; both must be ignored.
     void ada() {
         std::fill_n(b.begin() + table, 56 + 20 * 102, uint8_t(0));
         b[table] = 0x30;

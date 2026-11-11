@@ -55,7 +55,8 @@ void Power::verify(const Bytes& active) {
     auto b = Bios::parse(active);
     auto p = api_->power();
     auto c = api_->currents();
-    // 621+ drivers load a current policy's default as its maximum, so a range whose maximum exceeds its default loads as default/default.
+    // 621+ drivers load a current policy's default as its maximum, so a
+    // range whose maximum exceeds its default loads as default/default.
     auto matches = [](Rail r, Field f) {
         return r.min == f.min && r.def == f.def && (r.max == f.max || r.max == f.def);
     };
@@ -159,7 +160,8 @@ void Power::configure(bool unlock, const config::GpuSettings& g, bool allow_rest
         throw std::runtime_error("These NVIDIA limits require a GPU restart. Apply manually first.");
     Override request;
     if (unlock) {
-        // Default and maximum both take the ceiling: 621+ drivers load the default as the maximum and the starting current.
+        // Default and maximum both take the ceiling: 621+ drivers
+        // load the default as the maximum and the starting current.
         auto rail = [](Rail r) {
             auto max = static_cast<uint32_t>(r.allowed(true));
             return RailOverride{max, max};
