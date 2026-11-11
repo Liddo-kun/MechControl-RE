@@ -562,7 +562,7 @@ EC version, system ID, live sensor temps, BIOS info, fan RPM, silent mode.
 | `0x466` | R | ADDR_EC_BIOS_INFO5 | BIOS info register 5 |
 | `0x46B` | R | ADDR_EC_SECOND_FAN_RPM_BYTE2 | **Not the GPU RPM low byte** despite the OEM name: reads a constant 0xC3 on IDY_7Y whether the fan is stopped or at 4,600 RPM (measured 2026-10-29). Written from a power-control value in X6FR firmware. |
 | `0x46C` | R | ADDR_EC_SECOND_FAN_RPM_BYTE1 | GPU fan RPM high byte. RPM = `(0x46C << 8) \| 0x46D` (verified on IDY_7Y and in X6FR firmware) |
-| `0x46D` | R | — | GPU fan RPM low byte (pair with 0x46C) |
+| `0x46D` | R | — | GPU fan RPM low byte (pair with 0x46C). Every profile reads this pair; it is confirmed only on IDY_7Y and X6FR. The other models share the OEM table entry (0x46B) that was wrong on both. |
 | `0x476` | R | BIOSFuncReg | BIOS function register. Bit 1 = lid closed on Intel EC 77.0. |
 | `0x47D` | R | ecOEM_SUB_VER2 | EC sub-version 2 |
 | `0x47E` | R | — | Cause of the last power-down on Intel EC 77.0 (`CC` normal, `CD` power button held, `FC` forced by the EC, `EC` EC cold start). Survives the next boot. Never write. See 11.9.3. |

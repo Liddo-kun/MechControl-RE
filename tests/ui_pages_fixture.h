@@ -12,7 +12,7 @@ struct UiPageState {
         for (auto [a, v] : std::initializer_list<std::pair<int, int>>{
                  {0x740, 26},  {0x741, 1},    {0x727, 128}, {0x7D2, 1},  {0x783, 100}, {0x784, 150},  {0x785, 100},
                  {0x463, 10},  {0x743, 7},    {0x744, 45},  {0x746, 15}, {0x745, 255}, {0x7A6, 32},   {0x751, 144},
-                 {0x7C5, 224}, {0x7C6, 4},    {0x43E, 40},  {0x44F, 40}, {0x464, 4},   {0x465, 42},   {0x46B, 20},
+                 {0x7C5, 224}, {0x7C6, 4},    {0x43E, 40},  {0x44F, 40}, {0x464, 4},   {0x465, 42},   {0x46D, 20},
                  {0x46C, 4},   {0x454, 0x4D}, {0x47D, 0},   {0x6E6, 1},  {0x490, 1},   {0x7A4, 0x80}, {0x7C7, 0x0C}})
             bytes[a] = uint8_t(v); // EC version 77.0 and cooler support: the advanced EC controls.
         for (int i = 0; i < 16; ++i)
