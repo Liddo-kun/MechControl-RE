@@ -84,7 +84,7 @@ Enrichment enrich(MachineProfile&,const Hardware&);
 struct Validation { std::set<std::string> enabled; std::map<std::string,std::string> disabled; };
 Validation validate_startup(const MachineProfile&,const ReadByte&,uint8_t gpu_module=255,
     const Enrichment& enrichment={},const std::optional<std::string>& vendor={});
-bool gpu_recovery_supported(const MachineProfile&,uint8_t gpu_module);
+std::string gpu_recovery_unavailable(const MachineProfile&,uint8_t gpu_module); // Empty when a thermal trip can lower GPU power.
 
 namespace encoding {
 uint8_t pl1(int watts); uint8_t pl4(int watts,bool doubled); int decode_pl4(uint8_t,bool doubled);

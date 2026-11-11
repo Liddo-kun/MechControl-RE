@@ -35,7 +35,10 @@ actions in damaged records that the C# app's reader can lose.
 
 The EC power-limit bypass (0x780=0xA2, benchmark mode) is offered only where the
 profile declares it and the live EC version is one the image was checked against.
-It is never saved, and the controller clears it on turn-off, sleep, display off,
+Controls withheld because a model or its firmware is unverified (this bypass, the
+NVIDIA unlock, features disabled by startup validation) stay visible but greyed, with
+the reason and a link that opens a GitHub issue prefilled with it and the model.
+The bypass is never saved, and the controller clears it on turn-off, sleep, display off,
 AC loss, a thermal trip, EC reinitialization, exit and a leftover value at startup;
 while a clear is pending, other EC writes are refused. The liquid cooler connection
 flag (0x7C7 bit 1) is saved in profile slots like the other live settings, written

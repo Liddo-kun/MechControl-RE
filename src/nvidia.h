@@ -93,6 +93,7 @@ public:
     bool enabled=false;
     bool uncertain=false; // Owned overrides may have changed without active-image verification.
     bool modified=false; // The current configure operation reached a possible hardware write.
+    bool input_unmatched=false; // The BIOS has a board input limit that no driver policy matches.
     virtual int stock_watts() const {return static_cast<int>(original_.power.max/1000);}
     virtual int minimum_watts() const {return static_cast<int>((original_.power.min+999)/1000);}
     virtual bool awake() const {return store_->awake();}

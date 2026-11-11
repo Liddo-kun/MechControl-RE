@@ -146,7 +146,7 @@ private:
     std::optional<config::GpuSettings> last_gpu_;
     ULONGLONG gpu_check_at_=0;
     bool bypass_supported_=false,bypass_active_=false,bypass_clearing_=false,emergency_=false,cooler_flag_=false;
-    std::string bypass_status_,bypass_reason_;
+    std::string bypass_unavailable_,bypass_status_,bypass_reason_,gpu_unprotected_;
     unsigned advanced_revision_=0,presented_advanced_=~0u;
     std::function<void(std::function<void()>)> run_blocking_; // Existing joined wait path; never moves EC work.
     EcSession& session_;
