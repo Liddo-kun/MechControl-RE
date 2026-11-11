@@ -173,7 +173,6 @@ void from_json(const Json& j, UserProfile& v) {
     F("name", name);
     F("projectId", project_id);
     F("savedAt", saved_at);
-    if (!valid_date(v.saved_at)) throw std::runtime_error("Invalid savedAt");
     F("cpu", cpu);
     F("gpu", gpu);
     F("gpuFailsafe", protection);
@@ -200,7 +199,6 @@ void to_json(Json& j, const UserProfile& v) {
 void from_json(const Json& j, Trip& v) {
     object(j);
     F("Time", time);
-    if (v.time && !valid_date(*v.time, true)) throw std::runtime_error("Invalid trip time");
     F("Reason", reason);
     F("TemperatureC", temperature);
     F("ThresholdC", threshold);
@@ -233,11 +231,7 @@ void to_json(Json& j, const ThermalState& v) {
     OPT("LastTrip", last_trip);
 }
 void to_json(Json& j, const Settings& v) {
-    j = {{"lastProfile", v.last_slot},
-         {"disableDlppc", v.disable_dlppc},
-         {"gpuFailsafeTripReason", v.legacy_reason},
-         {"gpuFailsafeTripThresholdC", v.legacy_threshold},
-         {"thermalProtection", v.thermal}};
+    j = {{"lastProfile", v.last_slot}, {"disableDlppc", v.disable_dlppc}, {"thermalProtection", v.thermal}};
     j["profileNames"] = Json::array();
     for (const auto& n : v.names) j["profileNames"].push_back(nullable(n));
 }
@@ -254,14 +248,7 @@ ThermalState recover(const std::optional<ThermalState>& committed, const std::op
                      bool unreadable, bool gpu_supported) {
     std::vector<ThermalState> records;
     for (const auto& s : {committed, pending})
-        if (s) {
-            if (s->stage == 1) {
-                ThermalState migrated;
-                migrated.last_trip = s->last_trip;
-                records.push_back(migrated);
-            } else
-                records.push_back(*s);
-        }
+        if (s) records.push_back(*s);
     ThermalState r = records.empty() ? ThermalState{} : records.front();
     bool invalid = false, held = false;
     int actions = 0, known = 0;
@@ -292,17 +279,12 @@ ThermalState recover(const std::optional<ThermalState>& committed, const std::op
                 ? "\nSaved protection state uncertain - configuration-recovery hold, not a measured thermal event. Reset clears it."
                 : "\nSaved protection state uncertain - no supported GPU fallback; review configuration.";
     }
-    // UTF-8 text must not be cut inside a code point. C# bounds UTF-16 characters.
-    size_t pos = 0, units = 0;
-    while (pos < r.recovery_details.size()) {
-        auto c = static_cast<unsigned char>(r.recovery_details[pos]);
-        size_t len = c < 128 ? 1 : c < 224 ? 2 : c < 240 ? 3 : 4;
-        size_t u = len == 4 ? 2 : 1;
-        if (units + u > 8192) break;
-        pos += len;
-        units += u;
+    // Each uncertain start appends to the details. Bound them without cutting a UTF-8 sequence,
+    // which could not be saved.
+    if (size_t cut = 8192; r.recovery_details.size() > cut) {
+        while (cut && (static_cast<unsigned char>(r.recovery_details[cut]) & 0xC0) == 0x80) --cut;
+        r.recovery_details.resize(cut);
     }
-    r.recovery_details.resize(pos);
     return r;
 }
 ProfileStore::ProfileStore(std::filesystem::path directory, bool gpu_supported, Warning log)
@@ -365,10 +347,6 @@ void ProfileStore::load_settings() {
                     else {
                         Trip h;
                         read_field(*trip, "Time", h.time);
-                        if (h.time && !valid_date(*h.time, true)) {
-                            h.time.reset();
-                            warn("Invalid optional trip time");
-                        }
                         read_field(*trip, "Reason", h.reason);
                         read_field(*trip, "TemperatureC", h.temperature);
                         read_field(*trip, "ThresholdC", h.threshold);
@@ -378,19 +356,6 @@ void ProfileStore::load_settings() {
                         read_field(*trip, "Results", h.results);
                         t.last_trip = h;
                     }
-                }
-            } else {
-                read_field(root, "gpuFailsafeTripReason", s.legacy_reason, root.contains("gpuFailsafeTripReason"));
-                if (!s.legacy_reason.empty()) {
-                    read_field(root, "gpuFailsafeTripThresholdC", s.legacy_threshold);
-                    s.thermal.stage = Tripped;
-                    s.thermal.held = Gpu;
-                    Trip t;
-                    t.reason = s.legacy_reason;
-                    t.threshold = s.legacy_threshold;
-                    t.actions = Gpu;
-                    t.description = "Recovered legacy GPU-only protection.";
-                    s.thermal.last_trip = t;
                 }
             }
             return s;
@@ -473,14 +438,8 @@ std::optional<UserProfile> ProfileStore::load(int slot) {
     if (!std::filesystem::exists(path)) return {};
     auto profile = read_json(path).get<UserProfile>();
     if (!profile.protection) throw std::runtime_error("Protection settings are null");
-    int& t = profile.protection->threshold;
-    if (t >= 30 && t < 50) {
-        t = 50;
-        profile.requires_save = true;
-        warn("Slot " + std::to_string(slot) +
-             ": legacy threshold migrated to 50 C in memory; enabled/options unchanged.");
-    }
-    if (t < 50 || t > 95) throw std::runtime_error("Protection threshold must be 50-95 C");
+    if (int t = profile.protection->threshold; t < 50 || t > 95)
+        throw std::runtime_error("Protection threshold must be 50-95 C");
     return profile;
 }
 void ProfileStore::save(int slot, const UserProfile& profile) {
@@ -496,7 +455,6 @@ void ProfileStore::save(int slot, const UserProfile& profile) {
 void ProfileStore::save_thermal(const ThermalState& state) {
     auto old = settings_.thermal;
     settings_.thermal = state;
-    settings_.legacy_reason.clear();
     try {
         save_settings();
     } catch (...) {

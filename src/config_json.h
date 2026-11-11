@@ -19,7 +19,7 @@ std::filesystem::path executable_directory();
 void write_json(const std::filesystem::path& path, const Json& value, bool atomic);
 void object(const Json& j);
 
-// System.Text.Json does not coerce bool/float/string to an integer, or null to zero.
+// Strict: no bool, float or string becomes an integer, and null does not become zero.
 template <class T> void decode(const Json& j, T& value) {
     if constexpr (std::is_integral_v<T> && !std::is_same_v<T, bool>) {
         if (!j.is_number_integer()) throw std::runtime_error("Expected integer");
@@ -73,6 +73,4 @@ template <class T> void field(const Json& j, const char* key, T& value) {
     if (auto i = j.find(key); i != j.end()) decode(*i, value);
 }
 template <class T> Json nullable(const std::optional<T>& value) { return value ? Json(*value) : Json(nullptr); }
-// Date text remains text, retaining timezone/unknown values without inventing a time.
-bool valid_date(std::string_view value, bool date_time_offset = false);
 }

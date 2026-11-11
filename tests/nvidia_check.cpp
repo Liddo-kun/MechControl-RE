@@ -397,40 +397,14 @@ void bios_and_recovery(const std::filesystem::path& root) {
         check(staged && !discarded && recovered.image == fixture.b,
               "owned originals restore the exact unmodified image");
         auto canonical = config::read_text(path);
-        std::istringstream lines(canonical);
-        std::string version, line, compatible;
-        std::getline(lines, version);
-        compatible = version + "\r\n";
-        while (std::getline(lines, line)) {
-            auto equal = line.find('=');
-            compatible += " \t+" + line.substr(0, equal) + " = +" + line.substr(equal + 1) + " \t\r\n";
+        {
+            auto crlf = canonical;
+            for (size_t i = 0; (i = crlf.find('\n', i)) != std::string::npos; i += 2) crlf.insert(i, 1, '\r');
+            std::ofstream out(path, std::ios::binary);
+            out << crlf;
         }
-        for (int encoding = 0; encoding < 5; ++encoding) {
-            auto input = compatible;
-            if (encoding == 2 || encoding == 4) input.erase(std::remove(input.begin(), input.end(), '\n'), input.end());
-            auto wide = config::wide(input);
-            std::string bytes;
-            if (encoding == 0)
-                bytes = "\xef\xbb\xbf" + compatible;
-            else {
-                bool little = encoding % 2 != 0;
-                int width = encoding <= 2 ? 2 : 4;
-                if (width == 2)
-                    bytes = little ? std::string("\xff\xfe", 2) : std::string("\xfe\xff", 2);
-                else
-                    bytes = little ? std::string("\xff\xfe\0\0", 4) : std::string("\0\0\xfe\xff", 4);
-                for (auto c : wide)
-                    for (int j = 0; j < width; ++j)
-                        bytes.push_back(static_cast<char>((uint32_t(c) >> (8 * (little ? j : width - 1 - j))) & 255));
-            }
-            {
-                std::ofstream out(path, std::ios::binary);
-                out.write(bytes.data(), bytes.size());
-            }
-            check(
-                store.open(active, staged, discarded).image == fixture.b,
-                "BOM-detected recovery text accepts decimal whitespace/plus and CR/LF lines without changing ownership");
-        }
+        check(store.open(active, staged, discarded).image == fixture.b,
+              "recovery text with CRLF line ends keeps ownership");
         {
             std::ofstream out(path, std::ios::binary);
             out << canonical;

@@ -140,35 +140,33 @@ std::vector<EcWrite> cpu_writes(const config::MachineProfile& p, int pl1, int pl
     within(p, "PL2", pl2);
     within(p, "PL4", pl4);
     within(p, "cpuTempLimit", temperature);
-    auto a = config::encoding::pl1(pl1), b = config::encoding::pl1(pl2),
-         c = config::encoding::pl4(pl4, p.pl4_doubled());
-    auto t = cpu_temperature(temperature, p.cpu_encoding() == "direct", p.tj_max());
-    int effective = decode_pl4(c, p.pl4_doubled());
-    within(p, "PL4", effective);
     if (control_limit(p, "PL1").encoding != "direct" || control_limit(p, "PL2").encoding != "direct" ||
-        (control_limit(p, "PL4").encoding != "direct" && control_limit(p, "PL4").encoding != "double") || a != pl1 ||
-        b != pl2 || effective != (p.pl4_doubled() ? pl4 / 2 * 2 : pl4) ||
-        decode_cpu_temperature(t, p.cpu_encoding() == "direct", p.tj_max()) != temperature)
+        (control_limit(p, "PL4").encoding != "direct" && control_limit(p, "PL4").encoding != "double"))
         throw std::out_of_range("CPU request cannot be represented by model encoding");
-    return {{p.reg("PL1"), a}, {p.reg("PL2"), b}, {p.reg("PL4"), c}, {p.reg("cpuTempLimitWrite"), t}};
+    auto raw_pl4 = config::encoding::pl4(pl4, p.pl4_doubled());
+    within(p, "PL4", decode_pl4(raw_pl4, p.pl4_doubled())); // A doubled register rounds an odd request down.
+    return {{p.reg("PL1"), config::encoding::pl1(pl1)},
+            {p.reg("PL2"), config::encoding::pl1(pl2)},
+            {p.reg("PL4"), raw_pl4},
+            {p.reg("cpuTempLimitWrite"), cpu_temperature(temperature, p.cpu_encoding() == "direct", p.tj_max())}};
 }
 std::vector<EcWrite> gpu_writes(const config::MachineProfile& p, int tgp, bool dynamic_boost, int db,
                                 std::optional<int> maximum) {
     auto l = control_limit(p, "TGP");
     if (tgp < l.min || tgp > maximum.value_or(l.max)) throw std::out_of_range("GPU TGP exceeds model range");
-    auto t = config::encoding::tgp(tgp, p.tgp_offset());
-    if (control_limit(p, "TGP").encoding != "offset" || t + p.tgp_offset() != tgp)
-        throw std::out_of_range("GPU request cannot be encoded");
+    if (l.encoding != "offset") throw std::out_of_range("GPU request cannot be encoded");
+    uint8_t boost = 0;
     if (dynamic_boost) {
         within(p, "dynamicBoost", db);
-        if (control_limit(p, "dynamicBoost").encoding != "direct" || config::encoding::dynamic_boost(db) != db)
+        if (control_limit(p, "dynamicBoost").encoding != "direct")
             throw std::out_of_range("DB request cannot be encoded");
+        boost = config::encoding::dynamic_boost(db);
     }
     return {
         {p.reg("tgpDbCtrl"), static_cast<uint8_t>(dynamic_boost ? 7 : 5), p.bitfields.at("dynamicBoostEn").get_mask()},
-        {p.reg("tgp"), t},
+        {p.reg("tgp"), config::encoding::tgp(tgp, p.tgp_offset())},
         {p.reg("dbTotalPower"), static_cast<uint8_t>(dynamic_boost ? 255 : 0)},
-        {p.reg("dbMaxTgp"), static_cast<uint8_t>(dynamic_boost ? db : 0)}};
+        {p.reg("dbMaxTgp"), boost}};
 }
 EcWrite fan_boost_write(const config::MachineProfile& p, bool enabled) {
     auto mask = p.bitfields.at("fanBoost").get_mask();
@@ -195,9 +193,7 @@ std::vector<EcWrite> fan_curve_writes(const config::MachineProfile& p, const con
         }
         if (ft.padding_temp < 0 || ft.padding_temp > 255) throw std::out_of_range("Fan padding must fit a byte");
         auto append = [&](const std::string& base, int index, int value) {
-            auto address = static_cast<int64_t>(config::hex(base)) + index;
-            if (address > INT32_MAX) throw std::out_of_range("Fan write address exceeds int32 representation");
-            writes.push_back({static_cast<int32_t>(address), static_cast<uint8_t>(value)});
+            writes.push_back({config::hex(base) + index, static_cast<uint8_t>(value)});
         };
         int active = static_cast<int>(n);
         for (int i = 0; i < ft.entries; ++i) append(up, i, i < active ? c.temp_up[i] : ft.padding_temp);

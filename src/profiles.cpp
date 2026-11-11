@@ -4,7 +4,6 @@
 #include <algorithm>
 #include <charconv>
 #include <tuple>
-#include <bit>
 
 namespace mech::config {
 #define F(key, member) field(j, key, v.member)
@@ -39,11 +38,6 @@ void from_json(const Json& j, Redirect& v) {
     F("readAddr", read_addr);
     F("transform", transform);
     F("tjMax", tj_max);
-}
-void from_json(const Json& j, BatteryMode& v) {
-    object(j);
-    F("name", name);
-    F("value", value);
 }
 void from_json(const Json& j, Logo& v) {
     object(j);
@@ -111,7 +105,6 @@ void from_json(const Json& j, MachineProfile& v) {
     F("fanTable", fan_table);
     F("limits", limits);
     F("bitfields", bitfields);
-    F("batteryModes", battery_modes);
     F("baseboardPatterns", baseboard_patterns);
     F("cpuVendor", cpu_vendor);
     F("skipVerify", skip_verify);
@@ -125,17 +118,13 @@ void from_json(const Json& j, MachineProfile& v) {
 }
 #undef F
 int hex(const std::string& text) {
-    // Match Replace("0x", "") then Convert.ToInt32(..., 16), including the
-    // signed interpretation of all 32 bits. Address policy belongs to the driver/guard.
-    std::string clean = text;
-    for (size_t i = 0; (i = clean.find("0x", i)) != std::string::npos;) clean.erase(i, 2);
-    std::string_view s = clean;
-    if (s.starts_with('+')) s.remove_prefix(1);
+    std::string_view s = text;
     if (s.starts_with("0x") || s.starts_with("0X")) s.remove_prefix(2);
     uint32_t v = 0;
     auto [p, e] = std::from_chars(s.data(), s.data() + s.size(), v, 16);
-    if (e != std::errc{} || p != s.data() + s.size()) throw std::runtime_error("Invalid hex integer: " + text);
-    return std::bit_cast<int>(v);
+    if (e != std::errc{} || p != s.data() + s.size() || v > INT_MAX)
+        throw std::runtime_error("Invalid hex integer: " + text);
+    return static_cast<int>(v);
 }
 uint8_t Bitfield::get_mask() const {
     if (mask) return static_cast<uint8_t>(hex(*mask));
@@ -172,8 +161,7 @@ static void expand(std::set<int>& out, const std::vector<std::string>& entries) 
         if (dash == std::string::npos)
             out.insert(hex(e));
         else {
-            int a = hex(e.substr(0, dash)), b = hex(e.substr(dash + 1));
-            for (int64_t n = a; n <= b; ++n) out.insert(static_cast<int>(n));
+            for (int n = hex(e.substr(0, dash)), last = hex(e.substr(dash + 1)); n <= last; ++n) out.insert(n);
         }
     }
 }
@@ -229,8 +217,6 @@ void apply_universal_defaults(MachineProfile& p) {
         if (bypass) p.allowlist.push_back(p.registers.at("ecBypass"));
     }
     if (p.redirects.empty()) p.redirects["0x786"] = {"0x463", "inverted_offset", 105};
-    if (p.battery_modes.empty())
-        p.battery_modes = {{"High Capacity", "0x08"}, {"Balanced", "0x18"}, {"Stationary", "0x28"}};
 }
 std::filesystem::path profiles_directory(const std::filesystem::path& start) {
     auto dir = start;
@@ -368,17 +354,21 @@ std::map<std::string, Limit> Hardware::extract_limits() const {
     if (!decoded()) return r;
     std::array<int, 9> b{};
     for (int i = 0; i < 9; ++i) b[i] = (*ecspec)[i] & 255;
-    if (b[0] >= 15 && b[0] <= 253) r["PL1"] = {10, b[0], "direct", {}, {}};
-    if (b[1] >= 15 && b[1] <= 253) r["PL2"] = {10, b[1], "direct", {}, {}};
-    if (auto d = pl4_doubled(); d && b[2] >= 15 && b[2] <= 250)
-        r["PL4"] = {20, *d ? b[2] * 2 : b[2], *d ? "double" : "direct", {}, {}};
+    // A maximum above what the register is known to hold is lowered to it, so that every offered value can be written.
+    using namespace encoding;
+    if (b[0] >= 15 && b[0] <= 253) r["PL1"] = {10, std::min(b[0], power_max), "direct", {}, {}};
+    if (b[1] >= 15 && b[1] <= 253) r["PL2"] = {10, std::min(b[1], power_max), "direct", {}, {}};
+    if (auto d = pl4_doubled(); d && b[2] >= 15 && b[2] <= 250) {
+        int raw = std::min(b[2], power_max);
+        r["PL4"] = {20, *d ? raw * 2 : raw, *d ? "double" : "direct", {}, {}};
+    }
     if (b[3] <= 40)
         r["cpuTempLimit"] = {80, 105 - b[3], "inverted_offset", 105, {}};
     else if (b[3] >= 80 && b[3] <= 120)
         r["cpuTempLimit"] = {80, b[3], "direct", {}, {}};
     if (b[7] >= 50 && b[7] <= 200 && b[4] != 255 && b[4] + b[7] <= 300)
         r["TGP"] = {b[7], b[4] + b[7], "offset", {}, b[7]};
-    if (b[5] <= 50) r["dynamicBoost"] = {5, b[5], "direct", {}, {}};
+    if (b[5] <= 50) r["dynamicBoost"] = {5, std::min(b[5], dynamic_boost_max), "direct", {}, {}};
     return r;
 }
 std::optional<std::map<std::string, Mode>> Hardware::extract_modes(bool absolute) const {
@@ -502,16 +492,20 @@ Validation validate_startup(const MachineProfile& p, const ReadByte& read, uint8
     return r;
 }
 namespace encoding {
-uint8_t pl1(int w) { return static_cast<uint8_t>(std::clamp(w, 10, 210)); }
-uint8_t pl4(int w, bool d) { return static_cast<uint8_t>(std::clamp(d ? w / 2 : w, 5, 210)); }
+static uint8_t checked(int value, int min, int max, const char* what) {
+    if (value < min || value > max) throw std::out_of_range(std::string(what) + " cannot be encoded");
+    return static_cast<uint8_t>(value);
+}
+uint8_t pl1(int w) { return checked(w, 10, power_max, "CPU power limit"); }
+uint8_t pl4(int w, bool d) { return checked(d ? w / 2 : w, 5, power_max, "CPU PL4"); }
 int decode_pl4(uint8_t v, bool d) { return d ? v * 2 : v; }
-uint8_t tgp(int w, int offset) { return static_cast<uint8_t>(std::clamp(w - offset, 0, 254)); }
-uint8_t dynamic_boost(int w) { return static_cast<uint8_t>(std::clamp(w, 5, 25)); }
+uint8_t tgp(int w, int offset) { return checked(w - offset, 0, 254, "GPU TGP"); }
+uint8_t dynamic_boost(int w) { return checked(w, 5, dynamic_boost_max, "Dynamic Boost"); }
 uint8_t cpu_temperature(int c, bool direct, int tj) {
-    return static_cast<uint8_t>(0x80 | (direct ? std::clamp(c, 80, 120) : tj - std::clamp(c, tj - 40, tj)));
+    const char* what = "CPU temperature limit";
+    return static_cast<uint8_t>(0x80 | (direct ? checked(c, 80, 120, what) : checked(tj - c, 0, 40, what)));
 }
 int decode_cpu_temperature(uint8_t v, bool direct, int tj) { return direct ? v & 127 : tj - (v & 127); }
-uint8_t fan_duty(int p) { return static_cast<uint8_t>(std::clamp(p, 0, 100) * 2); }
 int decode_fan_duty(uint8_t v) { return v / 2; }
 uint8_t switch_speed(bool enabled, int ms) {
     return enabled ? static_cast<uint8_t>(128 | std::clamp(ms / 100, 1, 127)) : 0;

@@ -143,43 +143,30 @@ std::map<std::string, Bytes> Store::records() {
 }
 std::optional<Store::Recovery> Store::recovery() {
     if (!std::filesystem::exists(path_)) return {};
-    auto text = config::read_text(path_);
-    size_t length = 0;
-    // File.ReadAllLines recognizes CR, LF and CRLF. Normalize in place after
-    // the shared BOM decoder, without accepting blank/malformed records.
-    for (size_t i = 0; i < text.size(); ++i) {
-        char c = text[i];
-        text[length++] = c == '\r' ? '\n' : c;
-        if (c == '\r' && i + 1 < text.size() && text[i + 1] == '\n') ++i;
-    }
-    text.resize(length);
-    std::istringstream file(std::move(text));
+    // The version line, then "offset=value" lines. CRLF line ends are accepted.
+    std::istringstream file(config::read_text(path_));
     Recovery r;
     std::string line;
-    if (!std::getline(file, r.version)) throw std::runtime_error("Empty NVIDIA originals");
-    if (!r.version.empty() && r.version.back() == '\r') r.version.pop_back();
-    while (std::getline(file, line)) {
-        if (!line.empty() && line.back() == '\r') line.pop_back();
+    auto next = [&] {
+        if (!std::getline(file, line)) return false;
+        if (line.ends_with('\r')) line.pop_back();
+        return true;
+    };
+    if (!next()) throw std::runtime_error("Empty NVIDIA originals");
+    r.version = line;
+    auto number = [](std::string_view text) {
+        uint32_t n = 0;
+        auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), n);
+        if (error != std::errc{} || end != text.data() + text.size())
+            throw std::runtime_error("Malformed NVIDIA originals");
+        return n;
+    };
+    while (next()) {
         auto equal = line.find('=');
-        uint32_t value = 0;
         if (equal == std::string::npos) throw std::runtime_error("Malformed NVIDIA originals");
-        auto number = [](std::string_view text) -> uint32_t {
-            auto first = text.find_first_not_of(" \t\r\n\v\f"), last = text.find_last_not_of(" \t\r\n\v\f");
-            if (first == std::string_view::npos) throw std::runtime_error("Malformed NVIDIA originals");
-            text = text.substr(first, last - first + 1);
-            if (text.starts_with('+'))
-                text.remove_prefix(1);
-            else if (text.starts_with('-') && text.substr(1).find_first_not_of('0') == std::string_view::npos)
-                text.remove_prefix(1);
-            uint32_t n = 0;
-            auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), n);
-            if (error != std::errc{} || end != text.data() + text.size())
-                throw std::runtime_error("Malformed NVIDIA originals");
-            return n;
-        };
-        auto p = number(std::string_view(line).substr(0, equal));
-        value = number(std::string_view(line).substr(equal + 1));
-        if (p > INT_MAX || !r.originals.emplace(static_cast<int>(p), value).second)
+        auto offset = number(std::string_view(line).substr(0, equal));
+        auto value = number(std::string_view(line).substr(equal + 1));
+        if (offset > INT_MAX || !r.originals.emplace(static_cast<int>(offset), value).second)
             throw std::runtime_error("Malformed NVIDIA originals");
     }
     return r;

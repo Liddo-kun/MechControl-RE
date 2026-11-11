@@ -26,9 +26,6 @@ struct Redirect {
     std::string read_addr, transform;
     std::optional<int> tj_max;
 };
-struct BatteryMode {
-    std::string name, value;
-};
 struct Logo {
     uint8_t r = 0, g = 0, b = 0, on_off = 0;
 };
@@ -58,7 +55,6 @@ struct MachineProfile {
     std::map<std::string, Limit> limits;
     std::map<std::string, Bitfield> bitfields;
     std::map<std::string, Redirect> redirects;
-    std::vector<BatteryMode> battery_modes;
     FanTable fan_table;
     std::optional<FanDefaults> default_fan;
     std::optional<Logo> default_logo;
@@ -81,7 +77,6 @@ void from_json(const Json&, FanDefaults&);
 void from_json(const Json&, Limit&);
 void from_json(const Json&, Bitfield&);
 void from_json(const Json&, Redirect&);
-void from_json(const Json&, BatteryMode&);
 void from_json(const Json&, Logo&);
 void from_json(const Json&, Mode&);
 void from_json(const Json&, EcBypass&);
@@ -144,7 +139,9 @@ Validation validate_startup(const MachineProfile&, const ReadByte&, uint8_t gpu_
 std::string gpu_recovery_unavailable(const MachineProfile&,
                                      uint8_t gpu_module); // Empty when a thermal trip can lower GPU power.
 
+// Register encodings from re/register_reference.md. The first five refuse a value outside the register's known range.
 namespace encoding {
+inline constexpr int power_max = 210, dynamic_boost_max = 25; // PL1, PL2 and raw PL4; Dynamic Boost watts.
 uint8_t pl1(int watts);
 uint8_t pl4(int watts, bool doubled);
 int decode_pl4(uint8_t, bool doubled);
@@ -152,7 +149,6 @@ uint8_t tgp(int watts, int offset = 95);
 uint8_t dynamic_boost(int watts);
 uint8_t cpu_temperature(int c, bool direct, int tj_max = 105);
 int decode_cpu_temperature(uint8_t, bool direct, int tj_max = 105);
-uint8_t fan_duty(int percent);
 int decode_fan_duty(uint8_t);
 uint8_t switch_speed(bool enabled, int ms);
 std::pair<bool, int> decode_switch_speed(uint8_t);

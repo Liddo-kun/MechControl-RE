@@ -5,11 +5,11 @@ namespace mech {
 using namespace config;
 int Controller::gpu_unlock_min() const {
     auto l = control_limit(session_.profile, "TGP");
-    return std::max(nvidia_min_watts_, int((int64_t(l.min) * 60 + 99) / 100));
+    return std::max(nvidia_min_watts_, (l.min * 60 + 99) / 100);
 }
 int Controller::gpu_unlock_max() const {
     auto l = control_limit(session_.profile, "TGP");
-    return int(std::min({int64_t(l.max) + 75, int64_t(session_.profile.tgp_offset()) + 254, int64_t(INT_MAX)}));
+    return std::min(l.max + 75, session_.profile.tgp_offset() + 254);
 }
 bool Controller::gpu_extend() const {
     auto& p = session_.profile;
