@@ -65,6 +65,8 @@ struct MachineProfile {
     int tj_max() const;
     int tgp_offset() const;
     std::string cpu_encoding() const;
+    // The CPU temperature limit is written in C, not as an offset below TjMax.
+    bool cpu_direct() const { return cpu_encoding() == "direct"; }
     bool pl4_doubled() const;
     std::set<int> expanded_allowlist() const;
     std::set<int> expanded_skip_verify() const;
@@ -130,9 +132,15 @@ struct Enrichment {
     bool cpu_encoding_confirmed = false, pl4_unknown = false;
 };
 Enrichment enrich(MachineProfile&, const Hardware&);
+// A feature is available unless startup validation recorded why it is not.
 struct Validation {
-    std::set<std::string> enabled;
-    std::map<std::string, std::string> disabled;
+    std::map<std::string, std::string> disabled; // The reason, by the feature's name in the UI state and the log.
+    bool cpu_power() const { return !disabled.contains("cpuPower"); }
+    bool gpu_power() const { return !disabled.contains("gpuPower"); }
+    bool fan_control() const { return !disabled.contains("fanControl"); }
+    bool battery() const { return !disabled.contains("battery"); }
+    bool lighting() const { return !disabled.contains("lighting"); }
+    std::set<std::string> enabled() const;
 };
 Validation validate_startup(const MachineProfile&, const ReadByte&, uint8_t gpu_module = 255,
                             const Enrichment& enrichment = {}, const std::optional<std::string>& vendor = {});

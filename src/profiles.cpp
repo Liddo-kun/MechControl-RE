@@ -414,7 +414,7 @@ Enrichment enrich(MachineProfile& p, const Hardware& h) {
     } else
         e.pl4_unknown = true;
     if (!p.modes) {
-        p.modes = h.extract_modes(p.cpu_encoding() == "direct");
+        p.modes = h.extract_modes(p.cpu_direct());
         if (p.modes && p.mode_presets)
             std::erase_if(*p.modes, [&](const auto& m) {
                 return std::ranges::find(*p.mode_presets, m.first) == p.mode_presets->end();
@@ -474,21 +474,20 @@ Validation validate_startup(const MachineProfile& p, const ReadByte& read, uint8
     check("PL2", "cpuPower", 5, 300, [](uint8_t v) { return v; });
     check("PL4", "cpuPower", 10, 600, [&](uint8_t v) { return encoding::decode_pl4(v, p.pl4_doubled()); });
     check("cpuTempLimitRead", "cpuPower", 60, 105,
-          [&](uint8_t v) { return encoding::decode_cpu_temperature(v, p.cpu_encoding() == "direct", p.tj_max()); });
+          [&](uint8_t v) { return encoding::decode_cpu_temperature(v, p.cpu_direct(), p.tj_max()); });
     check("tgp", "gpuPower", 50, 250, [&](uint8_t v) { return v + p.tgp_offset(); });
     check("dbMaxTgp", "gpuPower", 0, 50, [](uint8_t v) { return v; });
     if (gpu_module == 0) disable("gpuPower", "GPU module not detected");
     for (const auto* reg : {"logoR", "logoG", "logoB"}) check(reg, "lighting", 0, 60, [](uint8_t v) { return v; });
-    for (const auto* f : {"cpuPower", "gpuPower", "fanControl", "battery", "lighting"})
-        if (!r.disabled.contains(f)) r.enabled.insert(f);
-    if (!e.cpu_encoding_confirmed && vendor && p.cpu_encoding() != (*vendor == "amd" ? "direct" : "inverted_offset")) {
-        r.enabled.erase("cpuPower");
+    if (!e.cpu_encoding_confirmed && vendor && p.cpu_encoding() != (*vendor == "amd" ? "direct" : "inverted_offset"))
         r.disabled["cpuPower"] = "CPU temperature encoding contradicts CPU vendor without ECSpec confirmation";
-    }
-    if (e.pl4_unknown) {
-        r.enabled.erase("cpuPower");
-        r.disabled["cpuPower"] = "PL4 encoding unknown (0x727 read failed)";
-    }
+    if (e.pl4_unknown) r.disabled["cpuPower"] = "PL4 encoding unknown (0x727 read failed)";
+    return r;
+}
+std::set<std::string> Validation::enabled() const {
+    std::set<std::string> r;
+    for (const auto* f : {"cpuPower", "gpuPower", "fanControl", "battery", "lighting"})
+        if (!disabled.contains(f)) r.insert(f);
     return r;
 }
 namespace encoding {

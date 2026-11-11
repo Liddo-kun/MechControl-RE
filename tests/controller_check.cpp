@@ -314,7 +314,7 @@ void startup_degradation(const std::filesystem::path& root) {
         EcSession session([&](const std::wstring&) { return std::make_unique<Fake>(s); }, [](const std::string&) {},
                           false, [](unsigned) {}, profiles_directory(),
                           Identity{"X6AR55xY", "fixture", "intel", uint8_t{26}});
-        cpu = session.validation.enabled.contains("cpuPower");
+        cpu = session.validation.cpu_power();
         Controller c(session, path, [](const std::string&) {}, [](unsigned) {}, {}, false, {}, false);
         errors = c.start();
     };
@@ -1084,9 +1084,8 @@ void capture_preservation(const std::filesystem::path& root) {
     write_json(path / "userprofile_2.json", {{"lighting", nullptr}, {"liquidCooler", nullptr}}, false);
     check(r.controller->execute(SlotSave{2}).saved && read_json(path / "userprofile_2.json")["lighting"].is_null(),
           "core-only capture preserves explicit-null peripheral intent rather than replacing it");
-    r.session->validation.enabled.erase("cpuPower");
-    r.session->validation.enabled.erase("gpuPower");
-    r.session->validation.enabled.erase("fanControl");
+    for (const char* feature : {"cpuPower", "gpuPower", "fanControl"})
+        r.session->validation.disabled[feature] = "fixture";
     saved = r.controller->execute(SlotSave{3});
     after = read_json(path / "userprofile_3.json");
     check(saved.saved && after["cpu"] == Json(CpuSettings{45, 65, 90, 95}) && after["gpu"]["tgp"] == 115 &&

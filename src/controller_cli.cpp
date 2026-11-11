@@ -33,7 +33,7 @@ Json Controller::presentation(bool read, bool gpu_live, int page) {
     }
     if (read && page == -2) {
         j["model"] = p.project_id;
-        j["enabled"] = session_.validation.enabled;
+        j["enabled"] = session_.validation.enabled();
         j["disabled"] = session_.validation.disabled;
         j["curvesSupported"] = curves_supported();
         j["fanFormat"] = p.fan_table.format;
@@ -41,13 +41,13 @@ Json Controller::presentation(bool read, bool gpu_live, int page) {
         j["linkAvailable"] = curves_supported() && p.fan_table.has_gpu && p.fan_table.entries >= 10;
         j["thermalActions"] = thermal_->supported_actions();
         j["thermalReason"] = gpu_unprotected_;
-        j["actionLimits"] = {{"gpu", enabled("gpuPower") ? control_limit(p, "TGP").min : 0},
-                             {"pl1", cpu_minimum_ ? control_limit(p, "PL1").min : 0},
-                             {"pl2", cpu_minimum_ ? control_limit(p, "PL2").min : 0},
-                             {"pl4", cpu_minimum_ ? control_limit(p, "PL4").min : 0}};
+        j["actionLimits"] = {{"gpu", features_.gpu_power() ? limits_.tgp.min : 0},
+                             {"pl1", cpu_minimum_ ? limits_.pl1.min : 0},
+                             {"pl2", cpu_minimum_ ? limits_.pl2.min : 0},
+                             {"pl4", cpu_minimum_ ? limits_.pl4.min : 0}};
         j["dutyBaseCpu"] = hex(p.fan_table.cpu_duty);
         j["dutyBaseGpu"] = hex(p.fan_table.gpu_duty);
-        if (enabled("battery")) j["batteryRegister"] = p.reg("batteryMode");
+        if (features_.battery()) j["batteryRegister"] = p.reg("batteryMode");
         for (std::string key : {"cpuTemp", "gpuTemp"})
             if (p.registers.contains(key)) j[key + "Register"] = p.reg(key);
         j["modes"] = Json::array();
@@ -86,7 +86,7 @@ Json Controller::presentation(bool read, bool gpu_live, int page) {
             j["gpuError"] = e.what();
         }
     }
-    if (read && page == 1 && enabled("fanControl")) try {
+    if (read && page == 1 && features_.fan_control()) try {
             j["boost"] = (this->read("fanControlMode") & p.bitfields.at("fanBoost").get_mask()) != 0;
             auto speed = encoding::decode_switch_speed(this->read("fanSwitchSpeed"));
             j["switchEnabled"] = speed.first;
@@ -94,7 +94,7 @@ Json Controller::presentation(bool read, bool gpu_live, int page) {
         } catch (const std::exception& e) {
             j["fanError"] = e.what();
         }
-    if (read && page == 3 && enabled("battery")) try {
+    if (read && page == 3 && features_.battery()) try {
             j["batteryMode"] = encoding::decode_battery(this->read("batteryMode"));
         } catch (const std::exception& e) {
             j["batteryError"] = e.what();
@@ -120,7 +120,7 @@ static void live_fields(Json& g, const nv::Telemetry& t) {
 }
 // The live refresh reads driver telemetry only, like the source: no EC, limit, budget or DLPPC reads.
 Json Controller::gpu_telemetry() {
-    if (!enabled("gpuPower")) return nullptr;
+    if (!features_.gpu_power()) return nullptr;
     Json g = {{"nvidia", nvidia_unavailable()}};
     if (nvidia_busy_) {
         g["nvidia"] = "NVIDIA operation in progress";
@@ -153,7 +153,7 @@ Json Controller::gpu_telemetry() {
 }
 // System Info's driver budgets, at most every 5 s while that tab is shown, like the source.
 Json Controller::gpu_budget() {
-    if (!enabled("gpuPower")) return nullptr;
+    if (!features_.gpu_power()) return nullptr;
     auto reason = [](const std::string& text) { return Json{{"reason", text}}; };
     if (nvidia_busy_) return reason("NVIDIA operation in progress");
     if (gpu_driver_uncertain_) return reason(nvidia_error_);
@@ -171,27 +171,26 @@ Json Controller::gpu_budget() {
     return j;
 }
 Json Controller::cpu_status() {
-    if (!enabled("cpuPower")) return nullptr;
-    auto& p = session_.profile;
+    if (!features_.cpu_power()) return nullptr;
     std::string preset;
     auto v = cpu(&preset);
-    Json j = {{"pl1", setting(v.pl1, control_limit(p, "PL1"))},
-              {"pl2", setting(v.pl2, control_limit(p, "PL2"))},
-              {"pl4", setting(v.pl4, control_limit(p, "PL4"))},
-              {"tempLimit", setting(v.temp_limit, control_limit(p, "cpuTempLimit"))}};
+    Json j = {{"pl1", setting(v.pl1, limits_.pl1)},
+              {"pl2", setting(v.pl2, limits_.pl2)},
+              {"pl4", setting(v.pl4, limits_.pl4)},
+              {"tempLimit", setting(v.temp_limit, limits_.cpu_temperature)}};
     if (!preset.empty()) j["preset"] = preset; // No custom limits set; see cpu().
     return j;
 }
 Json Controller::gpu_status(bool presentation) {
-    if (!enabled("gpuPower")) return nullptr;
+    if (!features_.gpu_power()) return nullptr;
     auto& p = session_.profile;
     auto v = gpu();
-    auto l = control_limit(p, "TGP");
+    auto l = limits_.tgp;
     l.min = gpu_min();
     l.max = gpu_max();
     Json g = {{"tgp", setting(v.tgp, l)},
               {"dynamicBoost", v.dynamic_boost_enabled},
-              {"dynamicBoostWatts", setting(v.dynamic_boost_watts, control_limit(p, "dynamicBoost"))},
+              {"dynamicBoostWatts", setting(v.dynamic_boost_watts, limits_.dynamic_boost)},
               {"unlocked", gpu_unlocked_},
               {"unlockAvailable", gpu_extend() && nvidia_available_},
               {"nvidia", nvidia_unavailable()}};
@@ -258,8 +257,8 @@ Json Controller::gpu_status(bool presentation) {
             g["enforcedWatts"] = power->enforced / 1000;
             if (power->requested) g["requestedWatts"] = *power->requested / 1000;
         }
-        if (power && gpu_unlocked_ && v.tgp <= control_limit(p, "TGP").min) {
-            int floor = control_limit(p, "TGP").min;
+        if (power && gpu_unlocked_ && v.tgp <= limits_.tgp.min) {
+            int floor = limits_.tgp.min;
             int below = power->requested
                             ? int(*power->requested / 1000) - (v.dynamic_boost_enabled ? v.dynamic_boost_watts : 0)
                             : floor;
@@ -296,7 +295,7 @@ Json Controller::fans_status() {
     auto& p = session_.profile;
     auto s = session_.sample(Detail::temperatures);
     Json boost_value = nullptr;
-    if (enabled("fanControl")) boost_value = (read("fanControlMode") & p.bitfields.at("fanBoost").get_mask()) != 0;
+    if (features_.fan_control()) boost_value = (read("fanControlMode") & p.bitfields.at("fanBoost").get_mask()) != 0;
     return {{"boost", boost_value},
             {"cpuRpm", s.cpu_rpm},
             {"gpuRpm", s.gpu_rpm},
@@ -504,7 +503,7 @@ cli::Reply Controller::cli(const std::vector<std::string>& arguments) {
             }
             // Match source availability/read/usage ordering, but preflight all values before writes.
             if (is_cpu) {
-                if (!enabled("cpuPower")) return {1, "CPU control unavailable"};
+                if (!features_.cpu_power()) return {1, "CPU control unavailable"};
                 auto c = cpu();
                 for (const auto& [key, value] : options) {
                     int n = whole(value);
@@ -520,7 +519,7 @@ cli::Reply Controller::cli(const std::vector<std::string>& arguments) {
                 command = CpuApply{c};
                 group = "cpu";
             } else {
-                if (!enabled("gpuPower")) return {1, "GPU control unavailable"};
+                if (!features_.gpu_power()) return {1, "GPU control unavailable"};
                 auto g = gpu(true); // Intentional Apply reads the current F8 request; passive status does not.
                 if (auto it = options.find("--tgp"); it != options.end()) g.tgp = whole(it->second);
                 if (auto it = options.find("--db"); it != options.end()) {
@@ -571,13 +570,13 @@ std::string Controller::defaults(const std::string& key) {
         if (!p.modes || !p.modes->contains(key))
             throw std::runtime_error("Requested defaults unavailable for this model");
         auto m = p.modes->at(key);
-        if (enabled("cpuPower")) {
+        if (features_.cpu_power()) {
             auto c = cpu();
             auto cw = cpu_writes(p, m.pl1, m.pl2, m.pl4.value_or(c.pl4), m.tcc_offset.value_or(c.temp_limit));
             log_cpu(cw);
             append(cw);
         }
-        if (enabled("gpuPower") && m.ctgp) {
+        if (features_.gpu_power() && m.ctgp) {
             GpuSettings g;
             g.tgp = *m.ctgp;
             g.dynamic_boost_enabled = m.dynamic_boost.value_or(0) > 0;
@@ -598,13 +597,13 @@ std::string Controller::defaults(const std::string& key) {
             full_curves = !p.fan_table.has_gpu || g.has_value();
         }
     } else {
-        if (enabled("cpuPower")) {
-            int temp = control_limit(p, "cpuTempLimit").max;
+        if (features_.cpu_power()) {
+            int temp = limits_.cpu_temperature.max;
             w = {{p.reg("PL1"), 0},
                  {p.reg("PL2"), 0},
                  {p.reg("PL4"), 0},
                  {p.reg("cpuTempLimitWrite"),
-                  encoding::cpu_temperature(temp, p.cpu_encoding() == "direct", p.tj_max())}};
+                  encoding::cpu_temperature(temp, session_.profile.cpu_direct(), p.tj_max())}};
         }
         auto mask = p.bitfields.at("dynamicBoostEn").get_mask();
         append({{p.reg("tgpDbCtrl"), 0, mask}, {p.reg("tgp"), 0}, {p.reg("dbTotalPower"), 0}, {p.reg("dbMaxTgp"), 0}});

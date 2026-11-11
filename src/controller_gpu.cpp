@@ -3,28 +3,16 @@
 
 namespace mech {
 using namespace config;
-int Controller::gpu_unlock_min() const {
-    auto l = control_limit(session_.profile, "TGP");
-    return std::max(nvidia_min_watts_, (l.min * 60 + 99) / 100);
-}
-int Controller::gpu_unlock_max() const {
-    auto l = control_limit(session_.profile, "TGP");
-    return std::min(l.max + 75, session_.profile.tgp_offset() + 254);
-}
+int Controller::gpu_unlock_min() const { return std::max(nvidia_min_watts_, (limits_.tgp.min * 60 + 99) / 100); }
+int Controller::gpu_unlock_max() const { return std::min(limits_.tgp.max + 75, session_.profile.tgp_offset() + 254); }
 bool Controller::gpu_extend() const {
     auto& p = session_.profile;
-    auto l = control_limit(p, "TGP");
+    const auto& l = limits_.tgp;
     return !p.tgp_fallback && p.limits.contains("TGP") && l.encoding == "offset" && l.offset &&
            gpu_unlock_max() > l.max;
 }
-int Controller::gpu_min() const {
-    auto l = control_limit(session_.profile, "TGP");
-    return gpu_unlocked_ && gpu_extend() ? gpu_unlock_min() : l.min;
-}
-int Controller::gpu_max() const {
-    auto l = control_limit(session_.profile, "TGP");
-    return gpu_unlocked_ && gpu_extend() ? gpu_unlock_max() : l.max;
-}
+int Controller::gpu_min() const { return gpu_unlocked_ && gpu_extend() ? gpu_unlock_min() : limits_.tgp.min; }
+int Controller::gpu_max() const { return gpu_unlocked_ && gpu_extend() ? gpu_unlock_max() : limits_.tgp.max; }
 std::string Controller::nvidia_unavailable() const {
     if (nvidia_busy_) return "NVIDIA operation in progress; try again in a few seconds";
     if (!nvidia_error_.empty()) return nvidia_error_;
@@ -42,8 +30,7 @@ nv::Power& Controller::open_nvidia() {
     dlppc_api_.reset(); // One NVAPI owner: Power replaces the DLPPC-only Api; a refusal reopens it on demand.
     try {
         std::unique_ptr<nv::Power> opened;
-        nvidia_work(
-            [&] { opened = std::make_unique<nv::Power>(control_limit(session_.profile, "TGP").min, diagnostic_); });
+        nvidia_work([&] { opened = std::make_unique<nv::Power>(limits_.tgp.min, diagnostic_); });
         nvidia_ = std::move(opened);
         writes_started_ |= nvidia_->modified;
         gpu_unlocked_ = nvidia_->enabled;
@@ -87,13 +74,13 @@ std::vector<EcWrite> Controller::gpu_plan(const GpuSettings& g) {
     if (g.tgp < gpu_min() || g.tgp > gpu_max())
         throw std::runtime_error("GPU TGP exceeds active model range; enable/apply the unlock manually first");
     auto& p = session_.profile;
-    auto l = control_limit(p, "TGP");
+    const auto& l = limits_.tgp;
     return gpu_writes(p, std::max(g.tgp, l.min), g.dynamic_boost_enabled, g.dynamic_boost_watts, gpu_max());
 }
 nv::ProfilePlan Controller::plan_gpu(const GpuSettings& settings, bool automatic) {
     if (gpu_driver_uncertain_) throw std::runtime_error(nvidia_error_);
     if (nvidia_busy_) throw std::runtime_error("NVIDIA operation in progress");
-    auto l = control_limit(session_.profile, "TGP");
+    const auto& l = limits_.tgp;
     int lo = gpu_unlock_min(), hi = gpu_unlock_max();
     bool unlocked = nvidia_ && nvidia_->enabled;
     bool wants = (settings.bios_override_enabled == true || settings.tgp < l.min || settings.tgp > l.max) &&
@@ -179,7 +166,7 @@ void Controller::validate_currents(const GpuSettings& g) {
 }
 void Controller::apply_gpu(GpuSettings g) {
     auto requested = g;
-    auto min = control_limit(session_.profile, "TGP").min;
+    auto min = limits_.tgp.min;
     auto held = [&] {
         if (thermal_->holds(Gpu)) {
             if (!gpu_minimum_) throw std::runtime_error("Model-specific GPU minimum unavailable");

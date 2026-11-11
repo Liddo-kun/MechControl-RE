@@ -258,8 +258,7 @@ void snapshots_and_startup() {
                 "runtime flags and snapshot enrich effective model before guard");
         require(session.profile.limits.at("TGP").max == 150 && session.profile.limits.at("PL1").max == 200,
                 "real transport callbacks feed ECSpec enrichment");
-        require(session.validation.enabled.contains("gpuPower"),
-                "GPU capability uses module ID 0x7D2, not LED-support byte");
+        require(session.validation.gpu_power(), "GPU capability uses module ID 0x7D2, not LED-support byte");
         require(session.diagnostic_report()["readOnly"] == true && writes(*s).empty(),
                 "diagnostic workflow never activates or writes EC");
     }
