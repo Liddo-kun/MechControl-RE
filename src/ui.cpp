@@ -2815,6 +2815,7 @@ private:
     }
     void presentation(const Json& j, bool initial) {
         int readPage = j.value("readPage", -3), old = state_.value("activeSlot", -1);
+        bool advanced = j.contains("advanced") && j["advanced"] != state_.value("advanced", Json());
         if (j.contains("fan") && state_.contains("fan") && j["fan"] != state_["fan"] &&
             !std::any_of(edited_.begin(), edited_.end(), [](int id) { return id >= curveId && id <= gpuChartId; }))
             boundPages_[1] = false;
@@ -2853,7 +2854,7 @@ private:
         if (IsWindowVisible(window_)) {
             int page = TabCtrl_GetCurSel(tabs_);
             if (readPage >= 0 || readPage == -1 || initial || page == 1 || page == 2 || j.contains("gpuError") ||
-                (page == 6 && j.contains("gpuBudget")) || (page == 0 && j.contains("advanced")))
+                (page == 6 && j.contains("gpuBudget")) || (page == 0 && advanced))
                 bindPage(page);
             else if (ready_ && page == 0 && j.contains("gpuLive"))
                 refreshPower(); // Live readings repaint the table; the editor keeps its values.

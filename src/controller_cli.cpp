@@ -59,21 +59,15 @@ Json Controller::presentation(bool read, bool gpu_live, int page) {
             }
         j["identity"] = {{"baseboard", session_.identity.baseboard}, {"cpu", session_.identity.cpu_name}};
     }
-    if ((read && (page == 1 || page == -2)) || fan_revision_ != presented_fan_) {
-        j["fan"] = fan_intent_;
-        presented_fan_ = fan_revision_;
-    }
-    if ((read && (page == 0 || page == -2)) || advanced_revision_ != presented_advanced_) {
-        j["advanced"] = advanced_status();
-        presented_advanced_ = advanced_revision_;
-    }
+    // Owned state goes out whole every time: the worker's mailbox keeps only the newest presentation.
+    j["fan"] = fan_intent_;
+    j["advanced"] = advanced_status();
     if (read && (page == 2 || page == -2)) j["thermal"] = thermal_->state();
-    if (page == 1 && linked_ && (read || written_revision_ != presented_written_)) {
+    if (page == 1 && linked_) {
         j["writtenCpu"] = nullable(written_cpu_);
         j["writtenGpu"] = nullable(written_gpu_);
-        presented_written_ = written_revision_;
+        j["linkedStatus"] = linked_status_;
     }
-    if (page == 1 && linked_) j["linkedStatus"] = linked_status_;
     // Independent groups never erase a successful sibling read or manufacture zero intent.
     if (read && page == 0) {
         try {
@@ -621,7 +615,6 @@ std::string Controller::defaults(const std::string& key) {
             last_duty_ = -1;
             fan_intent_ = *fan;
             fan_application_ = FanApplication::unapplied;
-            ++fan_revision_;
         }
         try {
             batch(w);

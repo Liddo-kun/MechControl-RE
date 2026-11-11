@@ -400,6 +400,8 @@ void gpu_integration(const std::filesystem::path& root) {
     auto again = c.presentation(false, false, 6);
     check(info["gpuBudget"]["laptopWatts"] == 250 && !again.contains("gpuBudget") && driver->reads == before + 1,
           "System Info reads driver budgets at most every five seconds");
+    check(again.at("fan") == info.at("fan") && again.at("advanced") == info.at("advanced"),
+          "a presentation the UI never received loses nothing: the next one carries the same owned state");
     c.execute(UiPage{0});
     c.execute(Visibility{false});
     before = driver->sets;
