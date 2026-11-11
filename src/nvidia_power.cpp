@@ -32,7 +32,7 @@ void Power::verify(const Bytes& active) {
         throw std::runtime_error("NVIDIA driver limits do not match parsed BIOS policies (BIOS power "+text(b.power.min,b.power.def,b.power.max)+" NVVDD "+text(b.nv.min,b.nv.def,b.nv.max)+" MSVDD "+ms(b.ms)
             +"; driver power "+text(p.min,p.def,p.max)+" NVVDD "+text(c.nv.min,c.nv.def,c.nv.max)+" MSVDD "+ms(c.ms)+")");
     }
-    board_verified_=b.input && c.input && matches(*c.input,*b.input);if(b.input && !board_verified_) log_("NVIDIA board input unavailable: no driver policy matches BIOS");
+    board_verified_=b.input && c.input && matches(*c.input,*b.input);input_unmatched=b.input && !board_verified_;if(input_unmatched) log_("NVIDIA board input unavailable: no driver policy matches BIOS");
 }
 // The driver starts each rail at its BIOS default, which the unlock raises to the ceiling.
 // Rails still at that ceiling return to stock unless the settings name a value.

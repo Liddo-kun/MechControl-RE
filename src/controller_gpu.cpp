@@ -11,7 +11,8 @@ int Controller::gpu_max() const {auto l=control_limit(session_.profile,"TGP");re
 std::string Controller::nvidia_unavailable() const {
     if(nvidia_busy_) return "NVIDIA operation in progress; try again in a few seconds";
     if(!nvidia_error_.empty()) return nvidia_error_;
-    return nvidia_available_?"NVIDIA not connected; to use current limits, turn on the GPU unlock under Show advanced controls":"No NVIDIA GPU control on this machine";
+    if(!nvidia_available_) return "No NVIDIA GPU control on this machine";
+    return gpu_extend()?"NVIDIA not connected; to use current limits, turn on the GPU unlock under Show advanced controls":"NVIDIA not connected; current limits need the GPU unlock, which is unavailable on this model";
 }
 nv::Power& Controller::open_nvidia() {
     if(nvidia_busy_) throw std::runtime_error("NVIDIA operation in progress; try again in a few seconds");

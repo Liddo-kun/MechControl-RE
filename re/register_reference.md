@@ -793,7 +793,8 @@ MechControl exposes this only when the active profile declares `ecBypass` and th
 live EC version falls in one of its `ecVersions` entries (`"M.m"` or an inclusive
 `"M.m-M.m"` range). `X6FR5xxY.json` allows 112.0-117.0 at Jon's request: only 112.0 was
 analysed; 113.0-117.0 are assumed to keep the same 0x780 handling until a 117.0 image is
-checked. It writes 0xA2 through WriteGuard only when
+checked. Elsewhere the Power tab shows the checkbox greyed with the reason and asks for
+the log and the model's BIOS/EC update package. It writes 0xA2 through WriteGuard only when
 AC is present (`0x490` bit 0), the EC is running (`0x6E6`=1), `0x781`=0 and `0x780`=0,
 and custom CPU control is active (`0x741` bit 0, `0x727` bit 6). It clears 0x780 to 0
 on turn-off, sleep, display off, AC loss, a thermal failsafe trip, EC

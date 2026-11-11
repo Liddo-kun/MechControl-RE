@@ -222,7 +222,11 @@ Enrichment enrich(MachineProfile& p,const Hardware& h) {
     }
     return e;
 }
-bool gpu_recovery_supported(const MachineProfile& p,uint8_t module) { return module>0 && module<255 && !p.tgp_fallback && p.registers.contains("gpuTemp") && p.registers.contains("tgp"); }
+std::string gpu_recovery_unavailable(const MachineProfile& p,uint8_t module) {
+    if(module==0 || module==255) return "the EC reports no GPU module";
+    if(p.tgp_fallback) return "this model's GPU power range is unknown";
+    return p.registers.contains("gpuTemp") && p.registers.contains("tgp")?"":"the profile lacks a GPU temperature or power register";
+}
 Validation validate_startup(const MachineProfile& p,const ReadByte& read,uint8_t gpu_module,const Enrichment& e,const std::optional<std::string>& vendor) {
     Validation r;
     auto enriched=[&](std::string_view f) {

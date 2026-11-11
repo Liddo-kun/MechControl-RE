@@ -21,10 +21,10 @@ Json Controller::presentation(bool read,bool gpu_live,int page) {
         j["slots"]=Json::array();for(int i=1;i<=5;++i) j["slots"].push_back(store_.exists(i));
     }
     if(read && page==-2) {
-        j["model"]=p.project_id;j["enabled"]=session_.validation.enabled;
+        j["model"]=p.project_id;j["enabled"]=session_.validation.enabled;j["disabled"]=session_.validation.disabled;
         j["curvesSupported"]=curves_supported();j["fanFormat"]=p.fan_table.format;j["hasGpuFan"]=p.fan_table.has_gpu;
         j["linkAvailable"]=curves_supported() && p.fan_table.has_gpu && p.fan_table.entries>=10;
-        j["thermalActions"]=thermal_->supported_actions();
+        j["thermalActions"]=thermal_->supported_actions();j["thermalReason"]=gpu_unprotected_;
         j["actionLimits"]={{"gpu",enabled("gpuPower")?control_limit(p,"TGP").min:0},
             {"pl1",cpu_minimum_?control_limit(p,"PL1").min:0},{"pl2",cpu_minimum_?control_limit(p,"PL2").min:0},{"pl4",cpu_minimum_?control_limit(p,"PL4").min:0}};
         j["dutyBaseCpu"]=hex(p.fan_table.cpu_duty);j["dutyBaseGpu"]=hex(p.fan_table.gpu_duty);
@@ -105,7 +105,12 @@ Json Controller::gpu_status(bool presentation) {
     Json g={{"tgp",setting(v.tgp,l)},{"dynamicBoost",v.dynamic_boost_enabled},
             {"dynamicBoostWatts",setting(v.dynamic_boost_watts,control_limit(p,"dynamicBoost"))},{"unlocked",gpu_unlocked_},{"unlockAvailable",gpu_extend() && nvidia_available_},
              {"nvidia",nvidia_unavailable()}};
-    if(presentation) {g["stockWatts"]=nvidia_?nvidia_->stock_watts():0;g["unlockMin"]=gpu_unlock_min();g["unlockMax"]=gpu_unlock_max();g["dlppcAvailable"]=dlppc_available_;}
+    if(presentation) {
+        g["stockWatts"]=nvidia_?nvidia_->stock_watts():0;g["unlockMin"]=gpu_unlock_min();g["unlockMax"]=gpu_unlock_max();g["dlppcAvailable"]=dlppc_available_;
+        // Withheld by this model's EC data, not by the NVIDIA driver, whose own failures arrive in "nvidia".
+        if(nvidia_available_ && !gpu_extend()) g["unlockReason"]=p.tgp_fallback?"this model's GPU power range is unknown":"this model's GPU power register format is unsupported";
+        if(nvidia_ && nvidia_->input_unmatched) g["boardInputUnmatched"]=true;
+    }
         for(const char* key:{"ceilingWatts","enforcedWatts","requestedWatts","nvvdd","msvdd","boardInput","currentCapMhz","powerCapMhz","maxClockMhz",
             "clockMhz","gpuPowerMw","corePowerMw","boardInputLimiterActivity"}) g[key]=nullptr;
     // This guard precedes EVERY driver read, including below-EC-floor readback.
@@ -151,7 +156,7 @@ Json Controller::fans_status() {
 }
 // Owned state only, no EC reads: the bypass and the live liquid cooler flag.
 Json Controller::advanced_status() const {
-    return {{"ecBypass",{{"available",bypass_supported_},{"active",bypass_active_},{"clearing",bypass_clearing_},{"status",bypass_status_}}},
+    return {{"ecBypass",{{"available",bypass_supported_},{"reason",bypass_unavailable_},{"active",bypass_active_},{"clearing",bypass_clearing_},{"status",bypass_status_}}},
         {"coolerFlag",{{"available",session_.hardware.liquid_cooling()},{"connected",cooler_flag_}}}};
 }
 Json Controller::status() {
@@ -193,7 +198,7 @@ static std::string text_status(const Json& j) {
     auto advanced=[&] {
         auto& b=j.at("ecBypass");auto& f=j.at("coolerFlag");auto on=[](bool v){return v?"on":"off";};
         auto status=b.at("status").get<std::string>();
-        out<<"EC    power-limit bypass "<<(!b.at("available").get<bool>()?"unavailable":!status.empty()?status:"Off")<<"; liquid cooler flag ";
+        out<<"EC    power-limit bypass "<<(!b.at("available").get<bool>()?"unavailable ("+b.at("reason").get<std::string>()+")":!status.empty()?status:"Off")<<"; liquid cooler flag ";
         if(!f.at("available").get<bool>()) out<<"unavailable";else out<<on(f.at("connected").get<bool>());
     };
     if(j.contains("model")) {

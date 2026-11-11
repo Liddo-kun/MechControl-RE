@@ -550,8 +550,9 @@ void x6fr(const std::filesystem::path& root) {
         EcSession es([&](const std::wstring&){return std::make_unique<Fake>(t);},log,false,[](unsigned){},profiles_directory(),Identity{"X6FR5xxY","fixture","amd",uint8_t{26}});
         Controller ec(es,dir,log,[](unsigned){},{},false,{},false);
         check(std::ranges::any_of(logs,[](auto& m){return m.find("EC power-limit bypass available")!=std::string::npos;})==offered,offered?"X6FR EC 117.0 is inside the checked bypass range":"X6FR EC 118.0 is outside the checked bypass range");
-        if(!offered) continue;
-        auto cpu=ec.execute(UiRead{0}).peripherals->at("ui").at("cpu");
+        auto ui=ec.execute(UiRead{0}).peripherals->at("ui");
+        if(!offered) {auto b=ui.at("advanced").at("ecBypass");check(b["available"]==false && b["reason"]=="EC version 118.0 has not been checked","an unchecked EC version tells the Power tab why the bypass is unavailable");continue;}
+        auto cpu=ui.at("cpu");
         check(cpu["preset"]=="gaming" && cpu["pl1"]["value"]==75 && cpu["pl2"]["value"]==85 && cpu["pl4"]["value"]==85,"PL registers at 0 show the Gaming preset, not 0 W");
     }
 }

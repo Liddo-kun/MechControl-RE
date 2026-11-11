@@ -53,7 +53,7 @@ Curve linked_curve(int duty,int ramp) {
 Controller::Controller(EcSession& session,std::filesystem::path directory,std::function<void(const std::string&)> diagnostic,
     std::function<void(unsigned)> wait,std::function<void(std::function<void()>)> run_blocking,bool nvidia_hardware,std::unique_ptr<nv::Power> driver,bool peripheral_hardware,
     std::function<void(Json)> cooler_delivery,Lighting::Send lighting_send):session_(session),
-    store_(std::move(directory),gpu_recovery_supported(session.profile,session.hardware.gpu_module()),diagnostic),
+    store_(std::move(directory),gpu_recovery_unavailable(session.profile,session.hardware.gpu_module()).empty(),diagnostic),
     diagnostic_(std::move(diagnostic)),wait_(std::move(wait)),run_blocking_(std::move(run_blocking)),cooler_delivery_(std::move(cooler_delivery)),lighting_send_(std::move(lighting_send)),peripheral_hardware_(peripheral_hardware) {
     if(!wait_) wait_=[](unsigned ms){std::this_thread::sleep_for(std::chrono::milliseconds(ms));};
     if(!run_blocking_) run_blocking_=[](std::function<void()> work){work();};
@@ -72,32 +72,39 @@ Controller::Controller(EcSession& session,std::filesystem::path directory,std::f
             for(size_t i=0;i<3;++i) if(session_.transport().read(w[i].address)==255) cpu_minimum_=false;
         }
     } catch(const std::exception& ex) {diagnostic_(std::string("CPU emergency capability unavailable: ")+ex.what());}
+    // The Thermal Failsafe tab shows why the GPU cannot be protected.
     try {
-        if(enabled("gpuPower") && gpu_recovery_supported(p,session.hardware.gpu_module()) && p.limits.contains("TGP") && p.limits.at("TGP").offset) {
+        gpu_unprotected_=enabled("gpuPower")?gpu_recovery_unavailable(p,session.hardware.gpu_module()):"GPU power control is disabled";
+        if(gpu_unprotected_.empty() && !(p.limits.contains("TGP") && p.limits.at("TGP").offset)) gpu_unprotected_="this model's GPU power register format is unsupported";
+        if(gpu_unprotected_.empty()) {
             auto g=gpu();int minimum=control_limit(p,"TGP").min;
             auto w=gpu_writes(p,minimum,false,0);
             gpu_minimum_=minimum>0 && g.tgp>=p.tgp_offset() && g.tgp<=control_limit(p,"TGP").max+75 && g.dynamic_boost_watts<=control_limit(p,"dynamicBoost").max && read("tgpDbCtrl")!=255;
             for(auto x:w) session_.guard->admit(x.address);
+            if(!gpu_minimum_) gpu_unprotected_="the EC's GPU power values are outside this model's range";
         }
-    } catch(const std::exception& ex) {diagnostic_(std::string("GPU emergency capability unavailable: ")+ex.what());}
+    } catch(const std::exception& ex) {gpu_unprotected_=ex.what();diagnostic_("GPU emergency capability unavailable: "+gpu_unprotected_);}
     try {session_.guard->admit(p.reg("fanControlMode"));fan_boost_=enabled("fanControl") && read("fanControlMode")!=255;} catch(...) {}
     int supported=(cpu_minimum_?Cpu:0)|(gpu_minimum_?Gpu:0)|(fan_boost_?Fan:0);
-    diagnostic_("[Thermal] Emergency actions: GPU "+(gpu_minimum_?"TGP "+std::to_string(control_limit(p,"TGP").min)+" W, Dynamic Boost off":std::string("unavailable"))
+    diagnostic_("[Thermal] Emergency actions: GPU "+(gpu_minimum_?"TGP "+std::to_string(control_limit(p,"TGP").min)+" W, Dynamic Boost off":"unavailable ("+gpu_unprotected_+")")
         +"; CPU "+(cpu_minimum_?"PL1/PL2/PL4 "+std::to_string(control_limit(p,"PL1").min)+"/"+std::to_string(control_limit(p,"PL2").min)+"/"+std::to_string(control_limit(p,"PL4").min)+" W":std::string("unavailable"))
         +"; fan boost "+(fan_boost_?"available":"unavailable")+(p.registers.contains("gpuTemp")?"":"; no GPU temperature register"));
     thermal_=std::make_unique<ThermalProtection>(store_,supported,[this](int a){emergency(a);},[this](int a){return matches(a);},
         [this]{return temperature("gpuTemp");},diagnostic_);
     session_.guard->recover=[this]{return recover("write verify failure");};
-    if(p.ec_bypass) try {
+    // The Power tab shows why the bypass is unavailable.
+    if(!enabled("cpuPower")) bypass_unavailable_="CPU power control is disabled";
+    else if(!p.ec_bypass) bypass_unavailable_="this model's EC firmware has not been checked";
+    else try {
         for(const char* name:{"ecBypass","ecBypassLimits","acStatus","ecRunState"}) if(!p.registers.contains(name)) throw std::runtime_error(std::string("profile has no ")+name+" register");
-        if(!enabled("cpuPower")) throw std::runtime_error("CPU power control unavailable");
         session_.guard->admit(p.reg("ecBypass"));
         auto major=session.hardware.at(0x454),minor=session.hardware.at(0x47D);
         if(!major || !minor) throw std::runtime_error("EC version unread");
         EcVersion live{*major,*minor};auto version=std::to_string(live.first)+"."+std::to_string(live.second);
         if(std::ranges::none_of(p.ec_bypass->ec_versions,[&](const auto& r){return r.first<=live && live<=r.second;})) throw std::runtime_error("EC version "+version+" has not been checked");
         bypass_supported_=true;diagnostic_("EC power-limit bypass available (EC version "+version+")");
-    } catch(const std::exception& ex) {diagnostic_(std::string("EC power-limit bypass unavailable: ")+ex.what());}
+    } catch(const std::exception& ex) {bypass_unavailable_=ex.what();}
+    if(!bypass_supported_) diagnostic_("EC power-limit bypass unavailable: "+bypass_unavailable_);
 }
 Controller::~Controller() {session_.guard->recover={};} // Leave linked crash-safe tails and all EC state unchanged.
 bool Controller::enabled(const char* feature) const {return session_.validation.enabled.contains(feature);}

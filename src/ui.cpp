@@ -6,6 +6,9 @@
 #endif
 #include <commctrl.h>
 #include <shellapi.h>
+#include <shlobj.h>
+#include <shldisp.h>
+#include <exdisp.h>
 #include <commdlg.h>
 #include <tlhelp32.h>
 #include <windowsx.h>
@@ -34,10 +37,10 @@ constexpr GUID displayState{0x6FE69556,0x704A,0x47A0,{0x8F,0x24,0xC2,0x8D,0x93,0
 enum Id {
     tabsId=100,saveId=110,defaultsId,renameId,clearId,showId,exitId,readId,
     slotId=120,defaultId=140,
-    pl1Id=200,pl2Id,pl4Id,tempId,tgpId,dbId,nvId,msId,inputId,dbOnId,unlockId,dlppcId,powerApplyId,powerReadId,advancedId,bypassId,coolerFlagId,
-    boostId=300,switchId,switchMsId,switchApplyId,curveId,linkId,cpuChartId,gpuChartId,fanApplyId,fanReadId,debugCpuId,debugGpuId,boostApplyId,
-    protectionId=400,thresholdId,reduceId,fanBoostId,showWindowId,protectionApplyId,resetId,testId,detailsId,
-    batteryModeId=500,batteryApplyId,batteryTextId,
+    pl1Id=200,pl2Id,pl4Id,tempId,tgpId,dbId,nvId,msId,inputId,dbOnId,unlockId,dlppcId,powerApplyId,powerReadId,advancedId,bypassId,coolerFlagId,cpuSupportId,gpuSupportId,unlockSupportId,boardSupportId,bypassSupportId,
+    boostId=300,switchId,switchMsId,switchApplyId,curveId,linkId,cpuChartId,gpuChartId,fanApplyId,fanReadId,debugCpuId,debugGpuId,boostApplyId,fanSupportId,
+    protectionId=400,thresholdId,reduceId,fanBoostId,showWindowId,protectionApplyId,resetId,testId,detailsId,thermalSupportId,
+    batteryModeId=500,batteryApplyId,batteryTextId,batterySupportId,
     zoneBaseId=600,idleId=660,dimmingId,lightingReadId,
     devicesId=800,scanId,connectId,autoConnectId,
     coolerFanOnId,coolerFanId,coolerFanApplyId,coolerPumpOnId,coolerPumpId,voltageId,coolerPumpApplyId,
@@ -52,6 +55,29 @@ std::wstring text(HWND window) {int n=GetWindowTextLengthW(window);std::wstring 
 std::wstring decimal(double value,int places=1) {std::wostringstream out;out.imbue(std::locale::classic());out<<std::fixed<<std::setprecision(places)<<value;return out.str();}
 // .NET "0.###": up to three decimals without trailing zeros.
 std::wstring compact(double value) {auto s=decimal(value,3);s.erase(s.find_last_not_of(L'0')+1);if(s.back()==L'.') s.pop_back();return s;}
+// Percent-encodes a URL query value.
+std::wstring encode(const std::wstring& value) {
+    std::wstring out;
+    for(unsigned char c:utf8(value)) {
+        if((c>='0' && c<='9') || (c>='A' && c<='Z') || (c>='a' && c<='z') || c=='-' || c=='_' || c=='.') out+=wchar_t(c);
+        else {wchar_t hex[4];swprintf_s(hex,L"%%%02X",c);out+=hex;}
+    }
+    return out;
+}
+// Through Explorer, so the browser does not start elevated like this process.
+void openUnelevated(const std::wstring& address) {
+    try {
+        auto windows=winrt::create_instance<IShellWindows>(CLSID_ShellWindows,CLSCTX_LOCAL_SERVER);
+        VARIANT desktop{},none{};desktop.vt=VT_I4;desktop.lVal=CSIDL_DESKTOP;long handle=0;winrt::com_ptr<IDispatch> dispatch,background,application;
+        if(windows->FindWindowSW(&desktop,&none,SWC_DESKTOP,&handle,SWFO_NEEDDISPATCH,dispatch.put())!=S_OK) throw winrt::hresult_error(E_FAIL);
+        winrt::com_ptr<IShellBrowser> browser;winrt::check_hresult(dispatch.as<IServiceProvider>()->QueryService(SID_STopLevelBrowser,__uuidof(IShellBrowser),browser.put_void()));
+        winrt::com_ptr<IShellView> view;winrt::check_hresult(browser->QueryActiveShellView(view.put()));
+        winrt::check_hresult(view->GetItemObject(SVGIO_BACKGROUND,__uuidof(IDispatch),background.put_void()));
+        winrt::check_hresult(background.as<IShellFolderViewDual>()->get_Application(application.put()));
+        auto url=SysAllocString(address.c_str());
+        auto result=application.as<IShellDispatch2>()->ShellExecute(url,none,none,none,none);SysFreeString(url);winrt::check_hresult(result);
+    } catch(const winrt::hresult_error&) {throw std::runtime_error("Could not open the browser. Report at github.com/Liddo-kun/MechControl-RE/issues");}
+}
 constexpr COLORREF okColor=RGB(46,125,50),warnColor=RGB(230,124,0),errorColor=RGB(198,40,40),frameColor=RGB(180,180,180);
 // Green up to normal, amber midway, red from limiting; unknown keeps the normal text color.
 COLORREF tint(std::optional<double> value,double normal,double limiting) {
@@ -98,6 +124,8 @@ std::wstring dlppcTip(const Json& detected) {
 }
 struct Row {HWND label=nullptr,control=nullptr,number=nullptr;int id=0,y=0,height=36;bool slider=false;};
 struct Text {RECT rect;std::wstring text;COLORREF color;HFONT font=nullptr;}; // No font: the normal one.
+// The note of a control withheld on this model: what the issue it opens is about, what else to send, and why.
+struct Support {const wchar_t* subject=L"",*also=L"";std::wstring reason;COLORREF color=GetSysColor(COLOR_BTNTEXT);};
 // The Battery page stacks rows; the others paint titled section frames and notes.
 bool framed(int page) {return page>=0 && page<7 && page!=3;}
 struct Page {HWND window=nullptr;std::vector<Row> rows;int height=0,scroll=0;std::vector<std::pair<RECT,const wchar_t*>> frames;std::vector<Text> texts;};
@@ -216,6 +244,32 @@ private:
     HWND get(int id) const {auto i=controls_.find(id);return i==controls_.end()?nullptr:i->second;}
     int index(HWND page) const {for(int i=0;i<7;++i) if(pages_[i].window==page) return i;return -1;}
     void set(int id,const std::wstring& value) {if(text(get(id))!=value) {SetWindowTextW(get(id),value.c_str());InvalidateRect(get(id),nullptr,TRUE);}}
+    // A new GitHub issue with the title, the note and this machine filled in; the user attaches the files and submits it.
+    std::wstring issueUrl(const Support& s) const {
+        auto model=w(state_.value("model",std::string{}));auto identity=identity_.is_object()?identity_:Json::object();
+        auto body=s.reason+L"\n\n- Model: "+model+L"\n- Baseboard: "+w(identity.value("baseboard",std::string{}))+L"\n- CPU: "+w(identity.value("cpu",std::string{}))
+            +L"\n\nPlease attach `mechcontrol.log` (beside MechControl.exe) and a diagnostic report made with `MechControl.exe --diagnose report.json`"
+            +(*s.also?L", and add "+std::wstring(s.also):L"")+L".";
+        return L"https://github.com/Liddo-kun/MechControl-RE/issues/new?title="+encode(s.subject+(L" support for "+model))+L"&body="+encode(body);
+    }
+    // A support note is a SysLink, so that its "open an issue" link works. Hidden while it has nothing to say.
+    void support(int page,int id,const wchar_t* subject,const wchar_t* also=L"") {
+        ShowWindow(control(pages_[page].window,WC_LINK,L"",WS_TABSTOP|LWS_TRANSPARENT|LWS_NOPREFIX,id),SW_HIDE);support_[id]={subject,also};
+    }
+    // Sets why a control is unavailable, followed by the request to report it. A note does not ask when the cause is
+    // another disabled control, whose own note does.
+    void explain(int id,const std::wstring& reason,bool ask=true) {
+        auto& s=support_.at(id);s.reason=reason;
+        set(id,reason.empty() || !ask?reason:reason+L" To get it supported, <a>open an issue</a> with mechcontrol.log"+(*s.also?L" and "+std::wstring(s.also):L"")+L".");
+        if(reason.empty()) ShowWindow(get(id),SW_HIDE);
+    }
+    // Places a framed page's support note below y+top and returns its bottom, or y when it is not shown.
+    int supportNote(int id,bool shown,COLORREF color,int x,int y,int top,int width,bool apply) {
+        auto link=get(id);auto& s=support_.at(id);if(!shown || s.reason.empty()) {if(apply) ShowWindow(link,SW_HIDE);return y;}
+        s.color=color;SIZE ideal{};int height=int(SendMessageW(link,LM_GETIDEALSIZE,width,reinterpret_cast<LPARAM>(&ideal)));
+        if(apply) {ShowWindow(link,SW_SHOW);place(link,x,y+top,width,height);}
+        return y+top+height;
+    }
     int scale(int n) const {return MulDiv(n,dpi_,96);}
     // Power page metrics are the reference PowerTab's pixel constants, which it drew unscaled on its 144 DPI
     // screen. Scaling them from 144 DPI keeps the same proportions to the text at every DPI.
@@ -275,7 +329,8 @@ private:
         SendMessageW(get(inputId),TBM_SETLINESIZE,0,100); // Board input moves in milliamps; arrow keys step 0.1 A.
         button(0,powerApplyId,L"&Apply");button(0,powerReadId,L"Read from EC");
         row(0,advancedId,L"<a>Show advanced controls</a>",WC_LINK,WS_TABSTOP|LWS_TRANSPARENT);
-        check(0,bypassId,L"Bypass EC power throttling");check(0,coolerFlagId,L"Tell the EC a liquid cooler is connected");
+        support(0,cpuSupportId,L"CPU power control");support(0,gpuSupportId,L"GPU power control");support(0,unlockSupportId,L"NVIDIA GPU unlock");support(0,boardSupportId,L"Board input current limit");
+        check(0,bypassId,L"Bypass EC power throttling");support(0,bypassSupportId,L"EC power-limit bypass",L"a link to your model's BIOS/EC update");check(0,coolerFlagId,L"Tell the EC a liquid cooler is connected");
         tooltip_=CreateWindowExW(WS_EX_TOPMOST,TOOLTIPS_CLASSW,nullptr,WS_POPUP|TTS_ALWAYSTIP|TTS_NOPREFIX,CW_USEDEFAULT,CW_USEDEFAULT,CW_USEDEFAULT,CW_USEDEFAULT,window_,nullptr,instance_,nullptr);
         for(UINT_PTR i=0;i<std::size(liveTips);++i) tip(i+1,liveTips[i]); // Rectangles follow the painted table.
         tip(reinterpret_cast<UINT_PTR>(get(dlppcId)),dlppcTip_=dlppcTip(nullptr),TTF_IDISHWND);
@@ -283,17 +338,17 @@ private:
         tip(reinterpret_cast<UINT_PTR>(get(coolerFlagId)),L"The flag the OEM app sets when its cooler connects. Saved with the profile. Does not connect the cooler.",TTF_IDISHWND);
         for(int id:{nvId,msId,inputId}) tip(reinterpret_cast<UINT_PTR>(get(id)),(L"Applies live within the active ceiling. The unlock allows up to "+std::wstring(id==inputId?L"154":L"140")+L"% of the stock current; raising an older ceiling restarts the GPU."),TTF_IDISHWND);
         check(1,boostId,L"Enable Fan Boost");button(1,boostApplyId,L"Apply");check(1,switchId,L"Enable Fan Switch Speed");slider(1,switchMsId,L"Switch Speed",1,127,3);button(1,switchApplyId,L"Apply");
-        check(1,curveId,L"Custom Fan Curve");check(1,linkId,L"Link Fans");
+        check(1,curveId,L"Custom Fan Curve");check(1,linkId,L"Link Fans");support(1,fanSupportId,L"Fan control");
         row(1,cpuChartId,L"CPU Fan Curve",chartClass,WS_BORDER);row(1,gpuChartId,L"GPU Fan Curve",chartClass,WS_BORDER);
         button(1,fanApplyId,L"Apply");button(1,fanReadId,L"Read from EC");
         row(1,debugCpuId,L"CPU (Sent to EC)",chartClass,WS_BORDER);row(1,debugGpuId,L"GPU (Sent to EC)",chartClass,WS_BORDER);
-        check(2,protectionId,L"Enable thermal failsafe");slider(2,thresholdId,L"GPU trigger temperature",50,95,70);
+        support(2,thermalSupportId,L"Thermal failsafe");check(2,protectionId,L"Enable thermal failsafe");slider(2,thresholdId,L"GPU trigger temperature",50,95,70);
         SendMessageW(get(thresholdId),TBM_SETPAGESIZE,0,1); // As in the reference, a click on the track moves the trigger one degree.
         check(2,reduceId,L"Also drop CPU power limits (PL1 / PL2 / PL4) to minimum");check(2,fanBoostId,L"Turn on fan boost when tripped");
         check(2,showWindowId,L"Bring up the MechControl window when tripped (safety alert, tray alert and sound remain enabled)");
         button(2,protectionApplyId,L"Apply");button(2,resetId,L"Reset");button(2,testId,L"Test Failsafe");
         row(2,detailsId,L"<a>Safety details and limitations</a>",WC_LINK,WS_TABSTOP|LWS_TRANSPARENT);
-        combo(3,batteryModeId,L"Battery charge mode",{L"High Capacity (Performance)",L"Balanced",L"Stationary (Health)"});button(3,batteryApplyId,L"Apply battery mode");label(3,batteryTextId,L"Battery telemetry is read every two seconds only while this page is visible.",400);
+        combo(3,batteryModeId,L"Battery charge mode",{L"High Capacity (Performance)",L"Balanced",L"Stationary (Health)"});button(3,batteryApplyId,L"Apply battery mode");support(3,batterySupportId,L"Battery charge mode");label(3,batteryTextId,L"Battery telemetry is read every two seconds only while this page is visible.",400);
         // Zones 0-2 are the keyboard, light bar and logo; the page shows the logo first, as in the reference.
         for(int zone:{2,0,1}) {int id=zoneBaseId+zone*16;
             check(4,id,L"Enabled");slider(4,id+4,L"Brightness",0,100,0);rgb(4,id);
@@ -322,7 +377,7 @@ private:
         auto font=make(9,FW_NORMAL),bold=make(9,FW_BOLD),title=make(10,FW_BOLD),header=make(12,FW_BOLD),heading=make(9,FW_BOLD,TRUE);
         for(auto [id,window]:controls_) {(void)id;SendMessageW(window,WM_SETFONT,reinterpret_cast<WPARAM>(font),TRUE);}
         for(auto& p:pages_) for(auto& r:p.rows) if(r.label) SendMessageW(r.label,WM_SETFONT,reinterpret_cast<WPARAM>(framed(index(p.window))?bold:font),TRUE);
-        for(int id:{dbOnId,boostId,switchId,curveId,linkId,protectionId}) SendMessageW(get(id),WM_SETFONT,reinterpret_cast<WPARAM>(bold),TRUE);
+        for(int id:{dbOnId,boostId,switchId,curveId,linkId,fanSupportId,protectionId}) SendMessageW(get(id),WM_SETFONT,reinterpret_cast<WPARAM>(bold),TRUE);
         SendMessageW(tooltip_,TTM_SETMAXTIPWIDTH,0,ref(600));
         if(alert_) EnumChildWindows(alert_,[](HWND child,LPARAM value)->BOOL {SendMessageW(child,WM_SETFONT,WPARAM(value),TRUE);return TRUE;},reinterpret_cast<LPARAM>(font));
         for(auto old:{font_,bold_,title_,header_,heading_}) if(old) DeleteObject(old);font_=font;bold_=bold;title_=title;header_=header;heading_=heading;
@@ -345,7 +400,7 @@ private:
             if(r.slider) {int label=std::min(scale(255),width/2),edit=scale(80);
                 place(r.label,m,y,label,h);place(r.control,m+label,y,std::max(scale(60),width-label-edit-scale(8)),h);place(r.number,rc.right-m-edit,y+scale(5),edit,scale(27));
             } else if(r.label) {int label=std::min(scale(255),width/2);place(r.label,m,y,label,h);place(r.control,m+label,y,width-label,scale(240));}
-            else place(r.control,m,y,width,h);
+            else {place(r.control,m,y,width,h);if(r.id==batteryTextId) place(get(batterySupportId),m,y,width,h);} // Its note takes the telemetry's place.
         }
         RedrawWindow(p.window,nullptr,nullptr,RDW_INVALIDATE|RDW_ERASE|RDW_ALLCHILDREN);
     }
@@ -377,24 +432,28 @@ private:
         auto check=[&](int id,bool shown,HFONT font){if(shown) y+=ref(6);put(get(id),shown,left,y,extent(font,text(get(id)))+ref(40),box);if(shown) y+=box;};
         open(L"CPU Power");auto c=columns({pl1Id,pl2Id,pl4Id,tempId},L"000 °C");
         for(int id:{pl1Id,pl2Id,pl4Id,tempId}) slide(id,cpu,c);
-        note(cpuNote_,errorColor,0,0);note(cpuPreset_,GetSysColor(COLOR_GRAYTEXT),ref(4),0);close();
+        y=supportNote(cpuSupportId,true,errorColor,noteLeft,y,0,wrap,apply);note(cpuNote_,errorColor,0,0);
+        note(cpuPreset_,GetSysColor(COLOR_GRAYTEXT),ref(4),0);close();
         open(L"GPU Power");c=columns({tgpId,dbId},L"000 W");
         slide(tgpId,gpu,c);check(dbOnId,gpu,bold_);slide(dbId,gpu,c);
-        note(gpu?powerHint_:gpuNote_,gpu?GetSysColor(COLOR_GRAYTEXT):errorColor,0,0);close();
+        y=supportNote(gpuSupportId,true,errorColor,noteLeft,y,0,wrap,apply);if(gpu) note(powerHint_,GetSysColor(COLOR_GRAYTEXT),0,0);close();
         y+=ref(6);put(get(powerApplyId),true,x,y,ref(110),ref(32));put(get(powerReadId),true,x+ref(120),y,ref(140),ref(32));y+=ref(44);
-        // Collapsed by default; the EC controls appear only where this model and EC firmware support them.
+        // Collapsed by default. Controls withheld for an unverified model or firmware stay visible, greyed, with the
+        // reason; the cooler flag appears only when the EC reports cooler support.
         auto advanced=state_.value("advanced",Json::object());
-        bool bypass=advanced.value("ecBypass",Json::object()).value("available",false),flag=advanced.value("coolerFlag",Json::object()).value("available",false),any=gpu || bypass || flag;
-        put(get(advancedId),any,x+ref(3),y,extent(font_,L"Hide advanced controls")+ref(8),line);if(any) y+=line+ref(14);
-        bool expanded=advanced_ && any;
+        bool flag=advanced.value("coolerFlag",Json::object()).value("available",false),expanded=advanced_;
+        put(get(advancedId),true,x+ref(3),y,extent(font_,L"Hide advanced controls")+ref(8),line);y+=line+ref(14);
+        auto muted=GetSysColor(COLOR_GRAYTEXT);
         if(expanded) open(L"Advanced");
-        check(unlockId,expanded && gpu,font_);check(dlppcId,expanded && gpu,font_);
+        check(unlockId,expanded && gpu,font_);y=supportNote(unlockSupportId,expanded && gpu,muted,noteLeft,y,ref(2),wrap,apply);
+        check(dlppcId,expanded && gpu,font_);
         // Current limits apply with the Apply button above, like the other GPU settings.
         if(expanded && gpu) y+=ref(6);c=columns({nvId,msId,inputId},L"000.000 A");
         for(int id:{nvId,msId,inputId}) slide(id,expanded && gpu,c);
-        auto muted=GetSysColor(COLOR_GRAYTEXT);
-        check(bypassId,expanded && bypass,font_);
-        if(expanded && bypass) {note(L"Keeps your PL1/PL2/PL4 under heavy CPU+GPU load instead of the EC lowering them. Fans run at full speed.",muted,ref(2),0);note(bypassText_,bypassColor_,ref(2),0);}
+        y=supportNote(boardSupportId,expanded && gpu,muted,noteLeft,y,ref(2),wrap,apply);
+        check(bypassId,expanded,font_);
+        if(expanded) {note(L"Keeps your PL1/PL2/PL4 under heavy CPU+GPU load instead of the EC lowering them. Fans run at full speed.",muted,ref(2),0);note(bypassText_,bypassColor_,ref(2),0);}
+        y=supportNote(bypassSupportId,expanded,muted,noteLeft,y,ref(2),wrap,apply);
         check(coolerFlagId,expanded && flag,font_);
         if(expanded && flag) note(L"Switches the EC to its liquid-cooler fan and GPU tables and changes some hardware signals whose purpose is unknown. Does not lift custom or adapter limits.",muted,ref(2),0);
         if(expanded) close();
@@ -443,13 +502,13 @@ private:
         put(get(curveId),true,left,y+ref(4),curve,box);put(get(linkId),linkable,left+curve+ref(24),y+ref(4),link,box);
         if(linked) bar={left+curve+link+ref(48),y+ref(2),end,y+ref(31)};
         y+=ref(39);charts(cpuChartId,gpuChartId,left,end,supported);
+        explain(fanSupportId,fans?L"":disabledReason(L"Fan controls","fanControl"));
         if(supported) y+=chart+ref(6);
-        else {
-            auto warning=fans?L"Fan curve editing is not available (format: "+w(state_.value("fanFormat",std::string{}))+L"). Only fan boost and curve enable are supported."
-                :std::wstring(L"Fan controls disabled — register validation failed. See log for details.");
+        else if(fans) {
+            auto warning=L"Fan curve editing is not available (format: "+w(state_.value("fanFormat",std::string{}))+L"). Only fan boost and curve enable are supported.";
             RECT r{left+pad,y+ref(6),end-pad,y+ref(6)};SelectObject(dc,bold_);DrawTextW(dc,warning.c_str(),-1,&r,DT_CALCRECT|DT_WORDBREAK|DT_NOPREFIX);r.right=end-pad;
-            texts.push_back({r,warning,fans?warnColor:errorColor,bold_});y+=ref(94);
-        }
+            texts.push_back({r,warning,warnColor,bold_});y+=ref(94);
+        } else y=std::max(y+ref(94),supportNote(fanSupportId,true,errorColor,left+pad,y,ref(6),end-left-2*pad,apply)+ref(6));
         y+=ref(3);put(get(fanApplyId),true,left+ref(3),y+ref(6),ref(110),button);put(get(fanReadId),true,left+ref(123),y+ref(6),ref(140),button);
         int footer=ref(6)+button;
         if(supported) {
@@ -481,7 +540,11 @@ private:
         };
         auto note=[&](const std::wstring& s){y=paragraph(s,left+pad,y+ref(3),gray,false)+ref(3);};
         auto check=[&](int id,HFONT font){y+=ref(6);put(get(id),left,y,std::min(extent(font,text(get(id)))+ref(40),end-left),box);y+=box;};
-        open(L"GPU Thermal Failsafe");note(thermalDescription);check(protectionId,bold_);
+        open(L"GPU Thermal Failsafe");note(thermalDescription);
+        bool unavailable=state_.contains("thermalActions") && !(state_["thermalActions"].get<int>()&Gpu);
+        explain(thermalSupportId,unavailable?L"Thermal failsafe unavailable: "+w(state_.value("thermalReason",std::string{}))+L".":L"",state_.value("enabled",std::set<std::string>{}).contains("gpuPower"));
+        y=supportNote(thermalSupportId,true,errorColor,left+pad,y,ref(3),end-left-2*pad,apply);
+        check(protectionId,bold_);
         auto& trigger=find(thresholdId);int label=extent(bold_,text(trigger.label))+2*pad,value=extent(font_,L"00 °C")+2*pad,track=left+label+ref(8);y+=ref(6);
         put(trigger.label,left+pad,y+ref(8),label-pad,line);put(trigger.control,track,y,end-value-ref(8)-track,slider);put(trigger.number,end-value+pad,y+ref(8),value-pad,line);y+=slider;
         for(int id:{reduceId,fanBoostId,showWindowId}) check(id,font_);
@@ -722,14 +785,22 @@ private:
             if(r==0 || i==0) {TOOLINFOW tool{sizeof tool};tool.hwnd=pages_[0].window;tool.uId=r==0?i:r+4;tool.rect={cx,cy,cx+extent(r,i),cy+line};SendMessageW(tooltip_,TTM_NEWTOOLRECTW,0,reinterpret_cast<LPARAM>(&tool));}
         }
     }
+    // Why startup validation disabled a feature.
+    std::wstring disabledReason(const wchar_t* what,const char* feature) const {
+        return std::wstring(what)+L" disabled: "+w(state_.value("disabled",Json::object()).value(feature,std::string("register validation failed")))+L".";
+    }
     void refreshPower() {
         const Json& g=gpuTelemetry_;auto nvidia=g.is_object()?g.value("nvidia",Json(nullptr)):Json(nullptr);
-        cpuNote_=state_.contains("cpu") && state_["cpu"].is_null()?L"CPU power controls disabled — register validation failed. See log for details."
-            :state_.contains("cpuError")?L"CPU read failed: "+w(state_["cpuError"].get<std::string>()):L"";
+        bool cpu=!(state_.contains("cpu") && state_["cpu"].is_null());
+        explain(cpuSupportId,cpu?L"":disabledReason(L"CPU power controls","cpuPower"));
+        cpuNote_=cpu && state_.contains("cpuError")?L"CPU read failed: "+w(state_["cpuError"].get<std::string>()):L"";
         auto preset=state_.contains("cpu") && state_["cpu"].is_object()?state_["cpu"].value("preset",std::string{}):std::string{};
         if(!preset.empty()) preset[0]=char(std::toupper(static_cast<unsigned char>(preset[0])));
         cpuPreset_=preset.empty()?L"":L"No custom limits are set in the EC, so it uses a built-in preset. Showing its "+w(preset)+L" preset; Apply sets these as custom limits.";
-        gpuNote_=state_.contains("gpu") && state_["gpu"].is_null()?L"GPU power controls disabled — register validation failed. See log for details.":L"";
+        explain(gpuSupportId,state_.contains("gpu") && state_["gpu"].is_null()?disabledReason(L"GPU power controls","gpuPower"):L"");
+        auto unlockReason=g.is_object()?g.value("unlockReason",std::string{}):std::string{};
+        explain(unlockSupportId,unlockReason.empty()?L"":L"Unavailable: "+w(unlockReason)+L".");
+        explain(boardSupportId,g.is_object() && g.value("boardInputUnmatched",false)?L"Board input current limit unavailable: no driver limit matches the GPU BIOS.":L"");
         powerHint_=gpuError_;
         if(gpuError_.empty() && g.is_object()) {
             auto failed=g.value("powerError",std::string{});if(failed.empty()) failed=g.value("currentsError",std::string{});
@@ -746,8 +817,8 @@ private:
         auto dlppc=dlppcTip(g.is_object()?g.value("dlppc",Json(nullptr)):Json(nullptr));
         if(dlppc!=dlppcTip_) {dlppcTip_=std::move(dlppc);tip(reinterpret_cast<UINT_PTR>(get(dlppcId)),dlppcTip_,TTF_IDISHWND,TTM_UPDATETIPTEXTW);}
         // Text that changes the layout relays out the page; live readings only repaint the table.
-        auto advanced=state_.value("advanced",Json::object());
-        auto key=cpuNote_+L'\n'+cpuPreset_+L'\n'+gpuNote_+L'\n'+powerHint_+L'\n'+liveReason_+L'\n'+text(get(unlockId))+L'\n'+bypassText_+std::to_wstring(int(advanced_)+2*advanced.value("ecBypass",Json::object()).value("available",false)+4*advanced.value("coolerFlag",Json::object()).value("available",false));
+        auto key=cpuNote_+L'\n'+cpuPreset_+L'\n'+powerHint_+L'\n'+liveReason_+L'\n'+text(get(unlockId))+L'\n'+bypassText_+std::to_wstring(int(advanced_)+2*state_.value("advanced",Json::object()).value("coolerFlag",Json::object()).value("available",false));
+        for(int id:{cpuSupportId,gpuSupportId,unlockSupportId,boardSupportId,bypassSupportId}) key+=L'\n'+text(get(id));
         if(key!=powerKey_) {powerKey_=std::move(key);layoutPage(pages_[0]);} else InvalidateRect(pages_[0].window,&liveTable_,FALSE);
     }
     // The reference MainForm: the profile bar, the tabs and the monitor bar fill the window edge to edge.
@@ -1081,6 +1152,8 @@ private:
             checked(bypassId,active || clearing);enable(bypassId,bypass.value("available",false));checked(coolerFlagId,flag.value("connected",false));enable(coolerFlagId,flag.value("available",false));
             // The status line only explains an automatic turn-off or a failure to clear.
             bypassText_=clearing || (!active && status!=L"Off (turned off)")?status:L"";bypassColor_=clearing?errorColor:GetSysColor(COLOR_GRAYTEXT);
+            // Only the EC firmware image can show that a model or EC version handles the bypass the same way.
+            explain(bypassSupportId,bypass.value("available",false)?L"":L"Unavailable: "+w(bypass.value("reason",std::string{}))+L".",features.contains("cpuPower"));
             refreshPower();
         }
         if(page==1 && state_.contains("fan")) {
@@ -1099,7 +1172,10 @@ private:
             auto p=state_["protection"].get<ProtectionSettings>();checked(protectionId,p.enabled);value(thresholdId,p.threshold,50,95);checked(reduceId,p.reduce_cpu);checked(fanBoostId,p.fan_boost);checked(showWindowId,p.show_window);
             int a=state_.value("thermalActions",0);for(int id:{protectionId,thresholdId,protectionApplyId,showWindowId}) enable(id,(a&Gpu)!=0);enable(testId,(a&Gpu)!=0 && !tripped_);enable(resetId,tripped_);enable(reduceId,(a&Cpu)!=0);enable(fanBoostId,(a&Fan)!=0);
         }
-        if(page==3) {for(int id:{batteryModeId,batteryApplyId}) enable(id,features.contains("battery"));if(state_.contains("batteryMode") && !edited_.contains(batteryModeId)) SendMessageW(get(batteryModeId),CB_SETCURSEL,state_["batteryMode"].get<int>(),0);}
+        if(page==3) {bool battery=features.contains("battery");for(int id:{batteryModeId,batteryApplyId}) enable(id,battery);
+            explain(batterySupportId,battery?L"":disabledReason(L"Battery charge mode and telemetry","battery"));
+            ShowWindow(get(batterySupportId),battery?SW_HIDE:SW_SHOW);ShowWindow(get(batteryTextId),battery?SW_SHOW:SW_HIDE); // The note takes the telemetry's place.
+            if(state_.contains("batteryMode") && !edited_.contains(batteryModeId)) SendMessageW(get(batteryModeId),CB_SETCURSEL,state_["batteryMode"].get<int>(),0);}
         if(page==6) refreshInfo();
         if(page>=3 && page<=5) bindPeripherals(page);
         boundPages_[page]=true;updating_=false;hints();
@@ -1344,6 +1420,15 @@ private:
         case WM_NOTIFY: {
             auto n=reinterpret_cast<NMHDR*>(lp);if(n->idFrom==tabsId && n->code==TCN_SELCHANGE) selectPage();
             if(n->idFrom==detailsId && (n->code==NM_CLICK || n->code==NM_RETURN)) {thermalDetails_=!thermalDetails_;layoutPage(pages_[2]);}
+            if(auto note=support_.find(int(n->idFrom));note!=support_.end()) {
+                if(n->code==NM_CLICK || n->code==NM_RETURN) openUnelevated(issueUrl(note->second));
+                // A support note takes the color of the painted note it stands in for; its link keeps the link color.
+                if(n->code==NM_CUSTOMDRAW) {
+                    auto draw=reinterpret_cast<NMCUSTOMDRAW*>(lp);if(draw->dwDrawStage==CDDS_PREPAINT) return CDRF_NOTIFYITEMDRAW;
+                    if(draw->dwDrawStage==CDDS_ITEMPREPAINT && draw->dwItemSpec==UINT_PTR(-1)) SetTextColor(draw->hdc,note->second.color);
+                    return CDRF_DODEFAULT;
+                }
+            }
             if(n->idFrom==advancedId && (n->code==NM_CLICK || n->code==NM_RETURN)) {advanced_=!advanced_;SetWindowTextW(get(advancedId),advanced_?L"<a>Hide advanced controls</a>":L"<a>Show advanced controls</a>");refreshPower();}
             return 0;
         }
@@ -1376,7 +1461,7 @@ private:
     HWND tooltip_=nullptr,hot_=nullptr;RECT bar_{},linkedBar_{},thermalLive_{};std::vector<Text> barText_;std::wstring status_,fanValidation_,fanKey_;std::array<std::wstring,7> thermalText_;bool thermalDetails_=false;
     std::array<std::wstring,6> monitor_{L"CPU Fan: --",L"GPU Fan: --",L"CPU Temp Limit: --",L"Battery: --",L"Fan Boost: --",L"Fan Curve: --"};HFONT font_=nullptr,bold_=nullptr,title_=nullptr,header_=nullptr,heading_=nullptr;UINT dpi_=96,taskbarMessage_=0;
     RECT liveTable_{0,-1,0,-1},coolerSwatch_{};std::array<RECT,3> swatches_{};std::wstring coolerStatus_=L"Disconnected",coolerFirmware_;std::array<RECT,8> infoCells_{};std::array<std::wstring,8> infoText_;std::map<int,int> detectedMa_;
-    std::wstring cpuNote_,cpuPreset_,gpuNote_,powerHint_,liveReason_,powerKey_,dlppcTip_,bypassText_;COLORREF bypassColor_=0;bool advanced_=false;std::array<HPOWERNOTIFY,2> powerNotifications_{};std::array<Page,7> pages_;std::map<int,HWND> controls_;std::set<int> edited_;
+    std::wstring cpuNote_,cpuPreset_,powerHint_,liveReason_,powerKey_,dlppcTip_,bypassText_;COLORREF bypassColor_=0;bool advanced_=false;std::map<int,Support> support_;std::array<HPOWERNOTIFY,2> powerNotifications_{};std::array<Page,7> pages_;std::map<int,HWND> controls_;std::set<int> edited_;
     std::array<HICON,5> slotIcons_{};std::vector<HICON> animation_;size_t animationFrame_=0;int trayState_=-3,lostAlerts_=0;bool closing_=false,trayAdded_=false,updating_=false,busy_=false,ready_=false,tripped_=false,coolerConnected_=false,coolerAvailable_=false,fanEditQueued_=false,powerRead_=false;
     int target_=0;std::uint64_t sequence_=0,busySequence_=0;ULONGLONG lastError_=0;
     Json state_=Json::object(),peripheralState_=Json::object(),identity_,gpuTelemetry_,live_,gpuBudget_,devices_=Json::array();std::map<int,std::pair<Json,ChartOptions>> boundCharts_;std::array<bool,7> boundPages_{};
