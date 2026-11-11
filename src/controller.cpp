@@ -571,18 +571,15 @@ nv::ProfilePlan Controller::plan(const UserProfile& profile, bool automatic) {
     std::vector<EcWrite> writes;
     nv::ProfilePlan gpu_value;
     auto append = [&](std::vector<EcWrite> w) { writes.insert(writes.end(), w.begin(), w.end()); };
-    if (features_.cpu_power()) {
-        auto c = *profile.cpu;
-        append(cpu_writes(p, c));
-    }
-    if (features_.gpu_power()) {
+    if (features_.cpu_power() && profile.cpu) append(cpu_writes(p, *profile.cpu));
+    if (features_.gpu_power() && profile.gpu) {
         gpu_value = plan_gpu(*profile.gpu, automatic);
         auto g = gpu_value.settings;
         const auto& l = limits_.tgp;
         append(gpu_writes(p, std::max(g.tgp, l.min), g.dynamic_boost_enabled, g.dynamic_boost_watts,
                           gpu_value.unlock && gpu_extend() ? gpu_unlock_max() : l.max));
     }
-    if (features_.fan_control()) {
+    if (features_.fan_control() && profile.fan) {
         if (curves_supported()) {
             auto c = active_curve(*profile.fan->cpu_curve, p.fan_table.entries);
             std::optional<Curve> g;
@@ -593,7 +590,7 @@ nv::ProfilePlan Controller::plan(const UserProfile& profile, bool automatic) {
         append(
             {{p.reg("fanSwitchSpeed"), encoding::switch_speed(profile.fan->switch_enabled, profile.fan->switch_ms)}});
     }
-    if (features_.battery()) {
+    if (features_.battery() && profile.battery) {
         if (profile.battery->mode < 0 || profile.battery->mode > 2)
             throw std::runtime_error("Battery mode must be 0-2");
         append({{p.reg("batteryMode"), encoding::battery(profile.battery->mode, *session_.battery_bit3),
@@ -604,30 +601,30 @@ nv::ProfilePlan Controller::plan(const UserProfile& profile, bool automatic) {
 }
 void Controller::apply_profile(const UserProfile& profile, const nv::ProfilePlan& gpu_value) {
     auto& p = session_.profile;
-    if (features_.gpu_power()) configure_gpu(gpu_value); // Driver ceilings/currents precede other feature writes.
-    if (curves_supported()) fans(*profile.fan);
-    if (features_.cpu_power()) {
-        auto c = *profile.cpu;
+    bool gpu_saved = features_.gpu_power() && profile.gpu, fan_saved = features_.fan_control() && profile.fan;
+    if (gpu_saved) configure_gpu(gpu_value); // Driver ceilings/currents precede other feature writes.
+    if (fan_saved && curves_supported()) fans(*profile.fan);
+    if (features_.cpu_power() && profile.cpu) {
         if (thermal_->holds(Cpu)) {
             if (!thermal_->verified(Cpu) || !matches(Cpu)) emergency(Cpu);
         } else {
-            auto w = cpu_writes(p, c);
+            auto w = cpu_writes(p, *profile.cpu);
             log_cpu(w);
             batch(w);
         }
     }
-    if (features_.gpu_power()) {
+    if (gpu_saved) {
         auto g = gpu_value.settings;
         if (thermal_->holds(Gpu)) {
             if (!thermal_->verified(Gpu) || !matches(Gpu)) emergency(Gpu);
         } else
             apply_gpu(g);
     }
-    if (features_.fan_control()) {
+    if (fan_saved) {
         boost(profile.fan->boost);
         speed(profile.fan->switch_enabled, profile.fan->switch_ms);
     }
-    if (features_.battery()) battery(profile.battery->mode);
+    if (features_.battery() && profile.battery) battery(profile.battery->mode);
     if (session_.hardware.liquid_cooling() && profile.liquid_cooler_connected != cooler_flag_)
         cooler_flag(profile.liquid_cooler_connected);
     // Peripheral failures are independent and log-only, as in the source.
@@ -663,8 +660,20 @@ void Controller::apply_slot(const UserProfile& profile, const nv::ProfilePlan& g
     active_slot_ = slot;
     saved_profile_ = profile;
     if (deliberate) store_.select(slot); // Hardware can be applied even when this save fails.
+    auto unsaved = unsaved_groups(profile);
     diagnostic_("Slot " + std::to_string(slot) +
-                " applied; peripheral failures are logged independently; BLE completion is asynchronous");
+                " applied; peripheral failures are logged independently; BLE completion is asynchronous" +
+                (unsaved.empty() ? "" : "; not saved in this slot, left unchanged: " + unsaved));
+}
+// The groups a slot does not hold although this run could apply them.
+std::string Controller::unsaved_groups(const UserProfile& profile) const {
+    std::string text;
+    for (auto [missing, name] : {std::pair(features_.cpu_power() && !profile.cpu, "CPU power"),
+                                 std::pair(features_.gpu_power() && !profile.gpu, "GPU power"),
+                                 std::pair(features_.fan_control() && !profile.fan, "fans"),
+                                 std::pair(features_.battery() && !profile.battery, "battery mode")})
+        if (missing) text += (text.empty() ? "" : ", ") + std::string(name);
+    return text;
 }
 void Controller::boost(bool value) {
     if (!features_.fan_control()) throw std::runtime_error("Fan control unavailable");
@@ -868,14 +877,10 @@ UserProfile Controller::capture(int slot) {
     UserProfile profile;
     profile.project_id = session_.profile.project_id;
     profile.saved_at = timestamp_now();
-    profile.cpu = features_.cpu_power() ? cpu() : CpuSettings{45, 65, 90, 95};
-    if (features_.gpu_power())
-        profile.gpu = gpu(true);
-    else {
-        profile.gpu->tgp = 115;
-        profile.gpu->dynamic_boost_enabled = false;
-    }
-    if (features_.gpu_power() && nvidia_ && !nvidia_busy_) {
+    // A group whose feature is unavailable has nothing to read and is saved as null.
+    profile.cpu = features_.cpu_power() ? std::optional(cpu()) : std::nullopt;
+    profile.gpu = features_.gpu_power() ? std::optional(gpu(true)) : std::nullopt;
+    if (profile.gpu && nvidia_ && !nvidia_busy_) {
         if (gpu_driver_uncertain_) throw std::runtime_error(nvidia_error_);
         nv::Currents c;
         nvidia_work([&] { c = nvidia_->currents(); });
@@ -890,8 +895,9 @@ UserProfile Controller::capture(int slot) {
              (c.ms && c.ms->current > c.ms->stock_max) || (c.input && c.input->current > c.input->stock_max));
     }
     profile.protection = thermal_->settings();
-    profile.fan = features_.fan_control() ? fan_intent_ : FanSettings{};
+    profile.fan.reset();
     if (features_.fan_control()) {
+        profile.fan = fan_intent_;
         profile.fan->boost = (read("fanControlMode") & session_.profile.bitfields.at("fanBoost").get_mask()) != 0;
         profile.fan->curve =
             (read("fanCurveEnable") & 128) != 0 && (session_.transport().read(0x7C6) & latch_mask_) == 4;
@@ -899,25 +905,19 @@ UserProfile Controller::capture(int slot) {
         auto [en, ms] = encoding::decode_switch_speed(read("fanSwitchSpeed"));
         profile.fan->switch_enabled = en;
         profile.fan->switch_ms = ms;
+        // A curve this model does not use is saved with no active points, which no load can apply.
+        const auto& table = session_.profile.fan_table;
+        Curve unused;
+        unused.temp_up.assign(table.entries, table.padding_temp);
+        unused.temp_down = unused.temp_up;
+        unused.duty.assign(unused.temp_up.size(), 0);
+        if (!unused.temp_up.empty()) unused.temp_up[0] = unused.temp_down[0] = 0;
+        bool curves = curves_supported();
+        profile.fan->cpu_curve = curves ? saved_curve(*fan_intent_.cpu_curve, table) : unused;
+        profile.fan->gpu_curve = curves && table.has_gpu ? saved_curve(*fan_intent_.gpu_curve, table) : unused;
     }
-    auto placeholder = [&] {
-        Curve c;
-        c.temp_up.assign(session_.profile.fan_table.entries, session_.profile.fan_table.padding_temp);
-        c.temp_down = c.temp_up;
-        c.duty.assign(c.temp_up.size(), 0);
-        if (!c.temp_up.empty()) c.temp_up[0] = c.temp_down[0] = 0;
-        return c;
-    };
-    if (curves_supported()) {
-        profile.fan->cpu_curve = saved_curve(*fan_intent_.cpu_curve, session_.profile.fan_table);
-        profile.fan->gpu_curve = session_.profile.fan_table.has_gpu
-                                     ? saved_curve(*fan_intent_.gpu_curve, session_.profile.fan_table)
-                                     : placeholder();
-    } else {
-        profile.fan->cpu_curve = placeholder();
-        profile.fan->gpu_curve = placeholder();
-    }
-    if (features_.battery()) profile.battery->mode = encoding::decode_battery(read("batteryMode"));
+    profile.battery.reset();
+    if (features_.battery()) profile.battery = BatterySettings{encoding::decode_battery(read("batteryMode"))};
     profile.liquid_cooler_connected = cooler_flag_;
     // Unavailable owners must not discard target-slot peripheral intent. An unreadable
     // existing slot refuses capture rather than being silently replaced with defaults.
@@ -1202,15 +1202,16 @@ ControlResult Controller::execute(const ControlCommand& command) {
                         if (!profile) throw std::runtime_error("Requested slot is missing");
                     }
                     auto g = profile ? profile->gpu : c.gpu;
-                    if (!g) throw std::runtime_error("GPU intent unavailable");
-                    auto value = features_.gpu_power() ? (profile ? plan(*profile, false) : plan_gpu(*g, false))
-                                                       : nv::ProfilePlan{};
+                    if (!profile && !g) throw std::runtime_error("GPU intent unavailable");
+                    auto value = !features_.gpu_power() ? nv::ProfilePlan{}
+                                 : profile              ? plan(*profile, false)
+                                                        : plan_gpu(*g, false);
                     result.peripherals = Json{{"plan",
                                                {{"restart", value.restart},
                                                 {"unlock", value.unlock},
                                                 {"wasUnlocked", gpu_unlocked_},
                                                 {"slot", c.slot},
-                                                {"gpu", *g},
+                                                {"gpu", nullable(g)},
                                                 {"stockWatts", nvidia_ ? nvidia_->stock_watts() : 0}}}};
                 } else if constexpr (std::is_same_v<T, GpuUnlock>) {
                     unlock_gpu(c.enabled);
@@ -1332,6 +1333,8 @@ ControlResult Controller::execute(const ControlCommand& command) {
                             ? "Profile applied with thermal-held substitutions; normal held power intent was not applied"
                             : "Profile applied; peripheral errors are log-only, BLE completion is asynchronous";
                     if (!gpu_notice_.empty()) result.text += "; " + gpu_notice_;
+                    if (auto unsaved = unsaved_groups(*saved_profile_); !unsaved.empty())
+                        result.text += "; not saved in this profile, left unchanged: " + unsaved;
                 } else if constexpr (std::is_same_v<T, SlotSave>) {
                     int slot = c.slot ? c.slot : 1;
                     auto profile = capture(slot);

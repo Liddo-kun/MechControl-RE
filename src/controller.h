@@ -198,6 +198,7 @@ private:
     void load_slot(int, bool, bool preserve_protection = false);
     void apply_profile(const config::UserProfile&, const nv::ProfilePlan&);
     config::UserProfile capture(int slot);
+    std::string unsaved_groups(const config::UserProfile&) const;
     void fans(const config::FanSettings&);
     void link(std::optional<int>, std::optional<int>);
     void boost(bool);

@@ -631,7 +631,7 @@ void integration(const std::filesystem::path& root) {
     partial_limits.limits.erase("PL1");
     check(cpu_writes(partial_limits, {15, 150, 200, 95}).front().value == 15 && !partial_limits.limits.contains("PL1"),
           "per-key controller fallback does not change whole-map default semantics");
-    write_json(root / "integrated/userprofile_1.json", {{"cpu", nullptr}}, false);
+    write_json(root / "integrated/userprofile_1.json", {{"gpuFailsafe", nullptr}}, false);
     check(c.execute(SlotLoad{1}).code == 1 && s->writes.empty(), "null required persisted group fails before writes");
     write_json(root / "integrated/userprofile_1.json", {{"fan", {{"cpuCurve", {{"tempUp", nullptr}}}}}}, false);
     check(c.execute(SlotLoad{1}).code == 1 && s->writes.empty(),
@@ -1090,10 +1090,8 @@ void capture_preservation(const std::filesystem::path& root) {
         r.session->validation.disabled[feature] = "fixture";
     saved = r.controller->execute(SlotSave{3});
     after = read_json(path / "userprofile_3.json");
-    check(saved.saved && after["cpu"] == Json(CpuSettings{45, 65, 90, 95}) && after["gpu"]["tgp"] == 115 &&
-              after["fan"]["cpuCurve"]["tempUp"][0] == 0 && after["fan"]["cpuCurve"]["tempUp"][1] == 255 &&
-              !after["fan"]["curveEnabled"].get<bool>(),
-          "unavailable groups capture reference placeholders, not zero power or fabricated fan readings");
+    check(saved.saved && after["cpu"].is_null() && after["gpu"].is_null() && after["fan"].is_null(),
+          "unavailable groups are saved as null, not as values nobody chose");
     r.state->writes.clear();
     auto defaults = r.controller->execute(DefaultsApply{});
     check(defaults.code == 0 && std::none_of(r.state->writes.begin(), r.state->writes.end(),
@@ -1103,6 +1101,17 @@ void capture_preservation(const std::filesystem::path& root) {
                                                         w.first == 0x7C5 || w.first >= 0xF00;
                                              }),
           "firmware defaults leave the groups startup validation disabled untouched");
+    r.session->validation.disabled.clear();
+    r.state->writes.clear();
+    auto loaded = r.controller->execute(SlotLoad{3});
+    check(loaded.code == 0 && loaded.text.find("left unchanged: CPU power, GPU power, fans") != std::string::npos &&
+              std::none_of(r.state->writes.begin(), r.state->writes.end(),
+                           [](auto w) {
+                               return (w.first >= 0x743 && w.first <= 0x746) ||
+                                      (w.first >= 0x783 && w.first <= 0x787) || w.first == 0x751 || w.first == 0x7C5 ||
+                                      w.first >= 0xF00;
+                           }),
+          "a slot saved without a group loads once that feature works, leaves its hardware alone and says so");
     {
         std::ofstream bad(path / "userprofile_4.json");
         bad << "{broken";
