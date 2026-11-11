@@ -367,6 +367,12 @@ void recovery(const std::filesystem::path& root) {
     EcSession session([&](const std::wstring&){return std::make_unique<Fake>(s);},[](const std::string&){},false,[](unsigned){},profiles_directory(),Identity{"X6AR55xY","fixture","intel",uint8_t{26}});
     Controller c(session,no_gpu,[](const std::string&){},[](unsigned){},{},false,{},false);c.start();
     check(c.thermal().state().held==6 && c.thermal().complete(),"no-GPU recovery preserves Held 6 without inventing GPU fallback");
+    auto turbo=root/"turbo-tcc";std::filesystem::create_directories(turbo);
+    auto t=std::make_shared<State>();t->bytes[0x463]=2; // Firmware Turbo preset: 103 C, above the fixture's 95 C ECSpec maximum.
+    EcSession turbo_session([&](const std::wstring&){return std::make_unique<Fake>(t);},[](const std::string&){},false,[](unsigned){},profiles_directory(),Identity{"X6AR55xY","fixture","intel",uint8_t{26}});
+    Controller turbo_controller(turbo_session,turbo,[](const std::string&){},[](unsigned){},{},false,{},false);turbo_controller.start();
+    turbo_controller.execute(ProtectionApply{{false,50,true,true,false}});turbo_controller.execute(ThermalTest{});
+    check(turbo_controller.thermal().complete() && (turbo_controller.thermal().state().held&2) && t->bytes[0x783]==10 && t->bytes[0x786]==0x8A,"CPU emergency lowers a firmware limit above the ECSpec maximum to that maximum");
     auto failed_path=root/"failed-trip";std::filesystem::create_directories(failed_path);
     write_json(failed_path/"settings.json",{{"thermalProtection",{{"Stage",0},{"Held",0}}}},false);
     Rig failed(failed_path);failed.controller->execute(ProtectionApply{{false,50,true,true,false}});

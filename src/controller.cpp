@@ -159,8 +159,9 @@ GpuSettings Controller::gpu(bool driver_read) {
 CpuSettings Controller::minimum_cpu() {
     auto& p=session_.profile;auto t=read("cpuTempLimitRead");
     int limit=encoding::decode_cpu_temperature(t,p.cpu_encoding()=="direct",p.tj_max());auto bounds=control_limit(p,"cpuTempLimit");
-    if(t==255 || limit<bounds.min || limit>bounds.max) throw std::runtime_error("Current CPU temperature limit invalid; no fallback replacement");
-    return {control_limit(p,"PL1").min,control_limit(p,"PL2").min,control_limit(p,"PL4").min,limit};
+    if(t==255 || limit<bounds.min) throw std::runtime_error("Current CPU temperature limit invalid; no fallback replacement");
+    // Firmware presets can sit above the ECSpec maximum (one Turbo preset sets 103 C against 95 C); lower those to the maximum.
+    return {control_limit(p,"PL1").min,control_limit(p,"PL2").min,control_limit(p,"PL4").min,std::min(limit,bounds.max)};
 }
 void Controller::batch(const std::vector<EcWrite>& writes) {
     for(auto w:writes) session_.guard->admit(w.address);
