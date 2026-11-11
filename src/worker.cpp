@@ -132,11 +132,7 @@ void ControlWorker::run(std::stop_token stop) {
     if(options_.once) return;
     counters.emplace();
     if(!options_.read_only) {
-        controller=std::make_unique<Controller>(*session,options_.state_directory,[this](const std::string& text){log_.write(text);},
-            options_.wait?options_.wait:[this](unsigned ms) {
-                if(WaitForSingleObject(stopping_.get(),ms)==WAIT_OBJECT_0)
-                    throw std::system_error(ERROR_OPERATION_ABORTED,std::system_category(),"Controller shutdown");
-             },[&](std::function<void()> work) {
+        auto run_blocking=[&](std::function<void()> work) {
                  Handle completed(CreateEventW(nullptr,TRUE,FALSE,nullptr));
                   if(!completed) throw std::runtime_error("Cannot create device-operation completion event");
                  std::exception_ptr failure;
@@ -168,12 +164,20 @@ void ControlWorker::run(std::stop_token stop) {
                   {std::lock_guard lock(mutex_);if(!commands_.empty()) SetEvent(wake_.get());}
                   if(failure) std::rethrow_exception(failure);
                    if(stop.stop_requested()) throw std::runtime_error("Controller stopping after device operation");
-              },options_.nvidia_hardware,options_.nvidia_factory?options_.nvidia_factory():std::unique_ptr<nv::Power>{},options_.peripheral_hardware,
-              [delivery=delivery_](config::Json value) {
-                  ControlResult result;result.code=value.value("ok",true)?0:1;result.text=value.value("status",std::string{});
-                  result.peripherals=config::Json{{"cooler",std::move(value)}};
-                  delivery->post({ResultKind::ble,0,config::wide(result.text),{},std::move(result)});
-              },options_.lighting_send);
+        };
+        auto wait=options_.wait;
+        if(!wait) wait=[this](unsigned ms) {
+            if(WaitForSingleObject(stopping_.get(),ms)==WAIT_OBJECT_0)
+                throw std::system_error(ERROR_OPERATION_ABORTED,std::system_category(),"Controller shutdown");
+        };
+        auto cooler_delivery=[delivery=delivery_](config::Json value) {
+            ControlResult result;result.code=value.value("ok",true)?0:1;result.text=value.value("status",std::string{});
+            result.peripherals=config::Json{{"cooler",std::move(value)}};
+            delivery->post({ResultKind::ble,0,config::wide(result.text),{},std::move(result)});
+        };
+        controller=std::make_unique<Controller>(*session,options_.state_directory,[this](const std::string& text){log_.write(text);},
+            wait,run_blocking,options_.nvidia_hardware,options_.nvidia_factory?options_.nvidia_factory():std::unique_ptr<nv::Power>{},
+            options_.peripheral_hardware,cooler_delivery,options_.lighting_send);
         auto init_errors=controller->start();
         delivery_->post({ResultKind::command,0,L"Core controller ready: "+config::wide(session->profile.project_id)});
         if(!init_errors.empty()) {
