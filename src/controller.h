@@ -173,10 +173,9 @@ public:
     config::Json presentation(bool read = false, bool gpu_live = false, int page = -1);
     int ui_page() const { return ui_page_; }
     // The Power tab's live table.
-    bool gpu_presentation() const { return visible_ && ui_page_ == 0 && enabled("gpuPower"); }
+    bool gpu_presentation() const { return visible_ && ui_page_ == 0 && features_.gpu_power(); }
 
 private:
-    bool enabled(const char*) const;
     uint8_t read(const char*);
     std::optional<int> temperature(const char*);
     config::CpuSettings cpu(std::string* preset = nullptr);
@@ -251,6 +250,8 @@ private:
     unsigned advanced_revision_ = 0, presented_advanced_ = ~0u;
     std::function<void(std::function<void()>)> run_blocking_; // Existing joined wait path; never moves EC work.
     EcSession& session_;
+    const config::Validation& features_;
+    const ControlLimits limits_;
     config::ProfileStore store_;
     std::function<void(const std::string&)> diagnostic_;
     std::function<void(unsigned)> wait_;

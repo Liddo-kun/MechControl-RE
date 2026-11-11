@@ -80,7 +80,7 @@ Controller::Controller(EcSession& session, std::filesystem::path directory,
                        std::function<void(std::function<void()>)> run_blocking, bool nvidia_hardware,
                        std::unique_ptr<nv::Power> driver, bool peripheral_hardware,
                        std::function<void(Json)> cooler_delivery, Lighting::Send lighting_send)
-    : session_(session),
+    : session_(session), features_(session.validation), limits_(control_limits(session.profile)),
       store_(std::move(directory), gpu_recovery_unavailable(session.profile, session.hardware.gpu_module()).empty(),
              diagnostic),
       diagnostic_(std::move(diagnostic)), wait_(std::move(wait)), run_blocking_(std::move(run_blocking)),
@@ -88,7 +88,7 @@ Controller::Controller(EcSession& session, std::filesystem::path directory,
       peripheral_hardware_(peripheral_hardware) {
     if (!wait_) wait_ = [](unsigned ms) { std::this_thread::sleep_for(std::chrono::milliseconds(ms)); };
     if (!run_blocking_) run_blocking_ = [](std::function<void()> work) { work(); };
-    nvidia_available_ = dlppc_available_ = nvidia_hardware && enabled("gpuPower") && nv::Store::present();
+    nvidia_available_ = dlppc_available_ = nvidia_hardware && features_.gpu_power() && nv::Store::present();
     nvidia_ = std::move(driver);
     if (nvidia_) {
         nvidia_available_ = dlppc_available_ = true;
@@ -102,7 +102,7 @@ Controller::Controller(EcSession& session, std::filesystem::path directory,
     // Other profiles retain the reference whole-byte contract, not inferred bit semantics.
     if (auto i = p.bitfields.find("fanCurveLatch"); i != p.bitfields.end()) latch_mask_ = i->second.get_mask();
     try {
-        if (enabled("cpuPower") && !p.cpu_fallback && p.limits.contains("PL1") && p.limits.contains("PL2") &&
+        if (features_.cpu_power() && !p.cpu_fallback && p.limits.contains("PL1") && p.limits.contains("PL2") &&
             p.limits.contains("PL4")) {
             auto m = minimum_cpu();
             auto w = cpu_writes(p, m.pl1, m.pl2, m.pl4, m.temp_limit);
@@ -117,16 +117,16 @@ Controller::Controller(EcSession& session, std::filesystem::path directory,
     }
     // The Thermal Failsafe tab shows why the GPU cannot be protected.
     try {
-        gpu_unprotected_ = enabled("gpuPower") ? gpu_recovery_unavailable(p, session.hardware.gpu_module())
-                                               : "GPU power control is disabled";
+        gpu_unprotected_ = features_.gpu_power() ? gpu_recovery_unavailable(p, session.hardware.gpu_module())
+                                                 : "GPU power control is disabled";
         if (gpu_unprotected_.empty() && !(p.limits.contains("TGP") && p.limits.at("TGP").offset))
             gpu_unprotected_ = "this model's GPU power register format is unsupported";
         if (gpu_unprotected_.empty()) {
             auto g = gpu();
-            int minimum = control_limit(p, "TGP").min;
+            int minimum = limits_.tgp.min;
             auto w = gpu_writes(p, minimum, false, 0);
-            gpu_minimum_ = minimum > 0 && g.tgp >= p.tgp_offset() && g.tgp <= control_limit(p, "TGP").max + 75 &&
-                           g.dynamic_boost_watts <= control_limit(p, "dynamicBoost").max && read("tgpDbCtrl") != 255;
+            gpu_minimum_ = minimum > 0 && g.tgp >= p.tgp_offset() && g.tgp <= limits_.tgp.max + 75 &&
+                           g.dynamic_boost_watts <= limits_.dynamic_boost.max && read("tgpDbCtrl") != 255;
             for (auto x : w) session_.guard->admit(x.address);
             if (!gpu_minimum_) gpu_unprotected_ = "the EC's GPU power values are outside this model's range";
         }
@@ -136,17 +136,16 @@ Controller::Controller(EcSession& session, std::filesystem::path directory,
     }
     try {
         session_.guard->admit(p.reg("fanControlMode"));
-        fan_boost_ = enabled("fanControl") && read("fanControlMode") != 255;
+        fan_boost_ = features_.fan_control() && read("fanControlMode") != 255;
     } catch (...) {
     }
     int supported = (cpu_minimum_ ? Cpu : 0) | (gpu_minimum_ ? Gpu : 0) | (fan_boost_ ? Fan : 0);
     diagnostic_("[Thermal] Emergency actions: GPU " +
-                (gpu_minimum_ ? "TGP " + std::to_string(control_limit(p, "TGP").min) + " W, Dynamic Boost off"
+                (gpu_minimum_ ? "TGP " + std::to_string(limits_.tgp.min) + " W, Dynamic Boost off"
                               : "unavailable (" + gpu_unprotected_ + ")") +
                 "; CPU " +
-                (cpu_minimum_ ? "PL1/PL2/PL4 " + std::to_string(control_limit(p, "PL1").min) + "/" +
-                                    std::to_string(control_limit(p, "PL2").min) + "/" +
-                                    std::to_string(control_limit(p, "PL4").min) + " W"
+                (cpu_minimum_ ? "PL1/PL2/PL4 " + std::to_string(limits_.pl1.min) + "/" +
+                                    std::to_string(limits_.pl2.min) + "/" + std::to_string(limits_.pl4.min) + " W"
                               : std::string("unavailable")) +
                 "; fan boost " + (fan_boost_ ? "available" : "unavailable") +
                 (p.registers.contains("gpuTemp") ? "" : "; no GPU temperature register"));
@@ -155,7 +154,7 @@ Controller::Controller(EcSession& session, std::filesystem::path directory,
         [this] { return temperature("gpuTemp"); }, diagnostic_);
     session_.guard->recover = [this] { return recover("write verify failure"); };
     // The Power tab shows why the bypass is unavailable.
-    if (!enabled("cpuPower"))
+    if (!features_.cpu_power())
         bypass_unavailable_ = "CPU power control is disabled";
     else if (!p.ec_bypass)
         bypass_unavailable_ = "this model's EC firmware has not been checked";
@@ -180,9 +179,8 @@ Controller::Controller(EcSession& session, std::filesystem::path directory,
     if (!bypass_supported_) diagnostic_("EC power-limit bypass unavailable: " + bypass_unavailable_);
 }
 Controller::~Controller() { session_.guard->recover = {}; } // Leave linked crash-safe tails and all EC state unchanged.
-bool Controller::enabled(const char* feature) const { return session_.validation.enabled.contains(feature); }
 bool Controller::curves_supported() const {
-    return enabled("fanControl") && session_.profile.fan_table.format == "RamFan1";
+    return features_.fan_control() && session_.profile.fan_table.format == "RamFan1";
 }
 void Controller::seed_fans() {
     if (!curves_supported()) return;
@@ -225,8 +223,9 @@ std::optional<int> Controller::temperature(const char* name) {
 // The Gaming preset (else the first) stands in, so Apply and Save never use 0 or the slider minimum.
 CpuSettings Controller::cpu(std::string* preset) {
     auto& p = session_.profile;
-    CpuSettings c{read("PL1"), read("PL2"), encoding::decode_pl4(read("PL4"), p.pl4_doubled()),
-                  encoding::decode_cpu_temperature(read("cpuTempLimitRead"), p.cpu_encoding() == "direct", p.tj_max())};
+    CpuSettings c{
+        read("PL1"), read("PL2"), encoding::decode_pl4(read("PL4"), p.pl4_doubled()),
+        encoding::decode_cpu_temperature(read("cpuTempLimitRead"), session_.profile.cpu_direct(), p.tj_max())};
     if ((!c.pl1 || !c.pl2 || !c.pl4) && p.modes && !p.modes->empty()) {
         auto mode = p.modes->find("gaming");
         if (mode == p.modes->end()) mode = p.modes->begin();
@@ -253,14 +252,14 @@ GpuSettings Controller::gpu(bool driver_read) {
     g.dynamic_boost_enabled = (ctrl & 2) != 0;
     // Passive reads never contact NVIDIA, even at the EC floor. Retain our
     // lower request while asleep; only report it when the EC still matches it.
-    if (g.tgp == control_limit(session_.profile, "TGP").min && gpu_unlocked_ && driver_watts_) {
+    if (g.tgp == limits_.tgp.min && gpu_unlocked_ && driver_watts_) {
         int below = *driver_watts_ - (g.dynamic_boost_enabled ? g.dynamic_boost_watts : 0);
         if (below < g.tgp) g.tgp = std::max(below, gpu_min());
     }
-    if (driver_read && gpu_unlocked_ && g.tgp <= control_limit(session_.profile, "TGP").min) {
+    if (driver_read && gpu_unlocked_ && g.tgp <= limits_.tgp.min) {
         nv::PowerLimits power;
         nvidia_work([&] { power = nvidia_->limits(); });
-        int floor = control_limit(session_.profile, "TGP").min;
+        int floor = limits_.tgp.min;
         int below = power.requested
                         ? int(*power.requested / 1000) - (g.dynamic_boost_enabled ? g.dynamic_boost_watts : 0)
                         : floor;
@@ -271,14 +270,13 @@ GpuSettings Controller::gpu(bool driver_read) {
 CpuSettings Controller::minimum_cpu() {
     auto& p = session_.profile;
     auto t = read("cpuTempLimitRead");
-    int limit = encoding::decode_cpu_temperature(t, p.cpu_encoding() == "direct", p.tj_max());
-    auto bounds = control_limit(p, "cpuTempLimit");
+    int limit = encoding::decode_cpu_temperature(t, session_.profile.cpu_direct(), p.tj_max());
+    const auto& bounds = limits_.cpu_temperature;
     if (t == 255 || limit < bounds.min)
         throw std::runtime_error("Current CPU temperature limit invalid; no fallback replacement");
     // Firmware presets can sit above the ECSpec maximum (one Turbo
     // preset sets 103 C against 95 C); lower those to the maximum.
-    return {control_limit(p, "PL1").min, control_limit(p, "PL2").min, control_limit(p, "PL4").min,
-            std::min(limit, bounds.max)};
+    return {limits_.pl1.min, limits_.pl2.min, limits_.pl4.min, std::min(limit, bounds.max)};
 }
 void Controller::batch(const std::vector<EcWrite>& writes) {
     for (auto w : writes) session_.guard->admit(w.address);
@@ -293,7 +291,7 @@ void Controller::batch(const std::vector<EcWrite>& writes) {
 }
 void Controller::log_cpu(const std::vector<EcWrite>& w) { // PL1, PL2, PL4, temperature limit from cpu_writes.
     auto& p = session_.profile;
-    bool direct = p.cpu_encoding() == "direct";
+    bool direct = session_.profile.cpu_direct();
     diagnostic_("[CPU Power] PL1=" + hex_text(w[0].value) + "(" + std::to_string(w[0].value) +
                 "W) PL2=" + hex_text(w[1].value) + "(" + std::to_string(w[1].value) + "W) PL4=" + hex_text(w[2].value) +
                 "(" + std::to_string(encoding::decode_pl4(w[2].value, p.pl4_doubled())) +
@@ -333,7 +331,7 @@ void Controller::emergency(int action) {
     if (action == Gpu) {
         if (!gpu_minimum_) throw std::runtime_error("Model-specific GPU minimum unavailable");
         GpuSettings g;
-        g.tgp = control_limit(p, "TGP").min;
+        g.tgp = limits_.tgp.min;
         apply_gpu(g);
     }
     if (action == Cpu) {
@@ -352,7 +350,7 @@ bool Controller::matches(int action) {
     std::vector<EcWrite> w;
     if (action == Gpu) {
         if (!gpu_minimum_) return false;
-        w = gpu_writes(p, control_limit(p, "TGP").min, false, 0);
+        w = gpu_writes(p, limits_.tgp.min, false, 0);
     }
     if (action == Cpu) {
         if (!cpu_minimum_) return false;
@@ -370,7 +368,7 @@ bool Controller::matches(int action) {
             return false;
     if (action == Gpu && (gpu_unlocked_ || gpu_driver_uncertain_)) {
         bool minimum = false;
-        nvidia_work([&] { minimum = nvidia_->at_most(control_limit(p, "TGP").min); });
+        nvidia_work([&] { minimum = nvidia_->at_most(limits_.tgp.min); });
         return minimum;
     }
     return true;
@@ -517,7 +515,7 @@ std::vector<std::string> Controller::start() {
             diagnostic_(std::string("Saved NVIDIA state not applied: ") + ex.what());
         }
         if (nvidia_ && gpu_extend()) {
-            auto l = control_limit(session_.profile, "TGP");
+            const auto& l = limits_.tgp;
             diagnostic_(std::string("GPU TGP unlock: ") + (gpu_unlocked_ ? "ON" : "OFF") + " (normal TGP " +
                         std::to_string(l.min) + "-" + std::to_string(l.max) + " W, unlocked " +
                         std::to_string(gpu_unlock_min()) + "-" + std::to_string(gpu_unlock_max()) + " W)");
@@ -555,7 +553,7 @@ std::vector<std::string> Controller::start() {
         } catch (const std::exception& ex) {
             diagnostic_(std::string("Fan table verify-read failed: ") + ex.what());
         }
-    if (!slot && enabled("fanControl") && !session_.fans.valid()) try {
+    if (!slot && features_.fan_control() && !session_.fans.valid()) try {
             batch({{session_.profile.reg("fanCurveEnable"), 0, 128}});
             fan_intent_.curve = false;
             diagnostic_("EC fan table invalid at startup; custom mode disabled without applying seed curves");
@@ -582,18 +580,18 @@ nv::ProfilePlan Controller::plan(const UserProfile& profile, bool automatic) {
     std::vector<EcWrite> writes;
     nv::ProfilePlan gpu_value;
     auto append = [&](std::vector<EcWrite> w) { writes.insert(writes.end(), w.begin(), w.end()); };
-    if (enabled("cpuPower")) {
+    if (features_.cpu_power()) {
         auto c = *profile.cpu;
         append(cpu_writes(p, c.pl1, c.pl2, c.pl4, c.temp_limit));
     }
-    if (enabled("gpuPower")) {
+    if (features_.gpu_power()) {
         gpu_value = plan_gpu(*profile.gpu, automatic);
         auto g = gpu_value.settings;
-        auto l = control_limit(p, "TGP");
+        const auto& l = limits_.tgp;
         append(gpu_writes(p, std::max(g.tgp, l.min), g.dynamic_boost_enabled, g.dynamic_boost_watts,
                           gpu_value.unlock && gpu_extend() ? gpu_unlock_max() : l.max));
     }
-    if (enabled("fanControl")) {
+    if (features_.fan_control()) {
         if (curves_supported()) {
             auto c = active_curve(*profile.fan->cpu_curve, p.fan_table.entries);
             std::optional<Curve> g;
@@ -604,7 +602,7 @@ nv::ProfilePlan Controller::plan(const UserProfile& profile, bool automatic) {
         append(
             {{p.reg("fanSwitchSpeed"), encoding::switch_speed(profile.fan->switch_enabled, profile.fan->switch_ms)}});
     }
-    if (enabled("battery")) {
+    if (features_.battery()) {
         if (profile.battery->mode < 0 || profile.battery->mode > 2)
             throw std::runtime_error("Battery mode must be 0-2");
         append({{p.reg("batteryMode"), encoding::battery(profile.battery->mode, *session_.battery_bit3),
@@ -615,9 +613,9 @@ nv::ProfilePlan Controller::plan(const UserProfile& profile, bool automatic) {
 }
 void Controller::apply_profile(const UserProfile& profile, const nv::ProfilePlan& gpu_value) {
     auto& p = session_.profile;
-    if (enabled("gpuPower")) configure_gpu(gpu_value); // Driver ceilings/currents precede other feature writes.
+    if (features_.gpu_power()) configure_gpu(gpu_value); // Driver ceilings/currents precede other feature writes.
     if (curves_supported()) fans(*profile.fan);
-    if (enabled("cpuPower")) {
+    if (features_.cpu_power()) {
         auto c = *profile.cpu;
         if (thermal_->holds(Cpu)) {
             if (!thermal_->verified(Cpu) || !matches(Cpu)) emergency(Cpu);
@@ -627,18 +625,18 @@ void Controller::apply_profile(const UserProfile& profile, const nv::ProfilePlan
             batch(w);
         }
     }
-    if (enabled("gpuPower")) {
+    if (features_.gpu_power()) {
         auto g = gpu_value.settings;
         if (thermal_->holds(Gpu)) {
             if (!thermal_->verified(Gpu) || !matches(Gpu)) emergency(Gpu);
         } else
             apply_gpu(g);
     }
-    if (enabled("fanControl")) {
+    if (features_.fan_control()) {
         boost(profile.fan->boost);
         speed(profile.fan->switch_enabled, profile.fan->switch_ms);
     }
-    if (enabled("battery")) battery(profile.battery->mode);
+    if (features_.battery()) battery(profile.battery->mode);
     if (session_.hardware.liquid_cooling() && profile.liquid_cooler_connected != cooler_flag_)
         cooler_flag(profile.liquid_cooler_connected);
     // Peripheral failures are independent and log-only, as in the source.
@@ -678,7 +676,7 @@ void Controller::apply_slot(const UserProfile& profile, const nv::ProfilePlan& g
                 " applied; peripheral failures are logged independently; BLE completion is asynchronous");
 }
 void Controller::boost(bool value) {
-    if (!enabled("fanControl")) throw std::runtime_error("Fan control unavailable");
+    if (!features_.fan_control()) throw std::runtime_error("Fan control unavailable");
     if (thermal_->holds(Fan)) {
         value = true;
         if (thermal_->verified(Fan) && matches(Fan)) return;
@@ -686,14 +684,14 @@ void Controller::boost(bool value) {
     batch({fan_boost_write(session_.profile, value)});
 }
 void Controller::battery(int mode) {
-    if (!enabled("battery")) throw std::runtime_error("Battery control unavailable");
+    if (!features_.battery()) throw std::runtime_error("Battery control unavailable");
     if (mode < 0 || mode > 2) throw std::runtime_error("Battery mode must be 0-2");
     auto& p = session_.profile;
     batch({{p.reg("batteryMode"), encoding::battery(mode, *session_.battery_bit3),
             p.bitfields.at("batteryMode").get_mask()}});
 }
 void Controller::speed(bool enabled_value, int ms) {
-    if (!enabled("fanControl")) throw std::runtime_error("Fan control unavailable");
+    if (!features_.fan_control()) throw std::runtime_error("Fan control unavailable");
     batch({{session_.profile.reg("fanSwitchSpeed"), encoding::switch_speed(enabled_value, ms)}});
 }
 // EC power-limit bypass: the verified firmware skips its adaptive CPU-limit reduction and publishes the
@@ -817,7 +815,7 @@ void Controller::ensure_cooler_flag(const char* when) {
 }
 void Controller::fans(const FanSettings& f) {
     auto& p = session_.profile;
-    if (!enabled("fanControl")) throw std::runtime_error("Fan control unavailable");
+    if (!features_.fan_control()) throw std::runtime_error("Fan control unavailable");
     if (!curves_supported()) throw std::runtime_error("Fan curve format unsupported");
     if (!f.cpu_curve || (p.fan_table.has_gpu && !f.gpu_curve)) throw std::runtime_error("Fan curves are null");
     auto c = active_curve(*f.cpu_curve, p.fan_table.entries);
@@ -887,14 +885,14 @@ UserProfile Controller::capture(int slot) {
     UserProfile profile;
     profile.project_id = session_.profile.project_id;
     profile.saved_at = timestamp_now();
-    profile.cpu = enabled("cpuPower") ? cpu() : CpuSettings{45, 65, 90, 95};
-    if (enabled("gpuPower"))
+    profile.cpu = features_.cpu_power() ? cpu() : CpuSettings{45, 65, 90, 95};
+    if (features_.gpu_power())
         profile.gpu = gpu(true);
     else {
         profile.gpu->tgp = 115;
         profile.gpu->dynamic_boost_enabled = false;
     }
-    if (enabled("gpuPower") && nvidia_ && !nvidia_busy_) {
+    if (features_.gpu_power() && nvidia_ && !nvidia_busy_) {
         if (gpu_driver_uncertain_) throw std::runtime_error(nvidia_error_);
         nv::Currents c;
         nvidia_work([&] { c = nvidia_->currents(); });
@@ -902,7 +900,7 @@ UserProfile Controller::capture(int slot) {
         g.nvvdd_ma = c.nv.current;
         if (c.ms) g.msvdd_ma = c.ms->current;
         if (c.input) g.board_input_ma = c.input->current;
-        auto l = control_limit(session_.profile, "TGP");
+        const auto& l = limits_.tgp;
         g.bios_override_enabled =
             gpu_unlocked_ && (g.tgp < l.min || g.tgp > l.max ||
                               g.tgp + (g.dynamic_boost_enabled ? g.dynamic_boost_watts : 0) > nvidia_->stock_watts() ||
@@ -910,8 +908,8 @@ UserProfile Controller::capture(int slot) {
                               (c.input && c.input->current > c.input->stock_max));
     }
     profile.protection = thermal_->settings();
-    profile.fan = enabled("fanControl") ? fan_intent_ : FanSettings{};
-    if (enabled("fanControl")) {
+    profile.fan = features_.fan_control() ? fan_intent_ : FanSettings{};
+    if (features_.fan_control()) {
         profile.fan->boost = (read("fanControlMode") & session_.profile.bitfields.at("fanBoost").get_mask()) != 0;
         profile.fan->curve =
             (read("fanCurveEnable") & 128) != 0 && (session_.transport().read(0x7C6) & latch_mask_) == 4;
@@ -937,7 +935,7 @@ UserProfile Controller::capture(int slot) {
         profile.fan->cpu_curve = placeholder();
         profile.fan->gpu_curve = placeholder();
     }
-    if (enabled("battery")) profile.battery->mode = encoding::decode_battery(read("batteryMode"));
+    if (features_.battery()) profile.battery->mode = encoding::decode_battery(read("batteryMode"));
     profile.liquid_cooler_connected = cooler_flag_;
     // Unavailable owners must not discard target-slot peripheral intent. An unreadable
     // existing slot refuses capture rather than being silently replaced with defaults.
@@ -1033,7 +1031,7 @@ std::optional<Sensors> Controller::tick(ULONGLONG now) {
         }
         thermal_->enforce(true);
     }
-    if (visible_ && battery_page_ && enabled("battery") && now >= battery_at_) {
+    if (visible_ && battery_page_ && features_.battery() && now >= battery_at_) {
         battery_at_ = now + 2000;
         try {
             battery_sample_ = battery_telemetry(session_.transport());
@@ -1113,7 +1111,7 @@ ControlResult Controller::execute(const ControlCommand& command) {
         auto r = state();
         Json data = Json::object();
         if (c->page == 4) data = *execute(PeripheralRead{}).peripherals;
-        if (c->page == 3 && enabled("battery")) try {
+        if (c->page == 3 && features_.battery()) try {
                 data["battery"] = battery_telemetry(session_.transport());
             } catch (const std::exception& e) {
                 data["batteryError"] = e.what();
@@ -1167,7 +1165,7 @@ ControlResult Controller::execute(const ControlCommand& command) {
                 using T = std::decay_t<decltype(c)>;
                 auto& p = session_.profile;
                 if constexpr (std::is_same_v<T, CpuApply>) {
-                    if (!enabled("cpuPower")) throw std::runtime_error("CPU control unavailable");
+                    if (!features_.cpu_power()) throw std::runtime_error("CPU control unavailable");
                     auto s = c.settings;
                     auto w = cpu_writes(p, s.pl1, s.pl2, s.pl4, s.temp_limit);
                     explicit_apply([&] {
@@ -1176,10 +1174,10 @@ ControlResult Controller::execute(const ControlCommand& command) {
                     });
                     result.applied = true;
                 } else if constexpr (std::is_same_v<T, GpuApply>) {
-                    if (!enabled("gpuPower")) throw std::runtime_error("GPU control unavailable");
+                    if (!features_.gpu_power()) throw std::runtime_error("GPU control unavailable");
                     std::vector<EcWrite> cpu;
                     if (c.cpu) {
-                        if (!enabled("cpuPower")) throw std::runtime_error("CPU control unavailable");
+                        if (!features_.cpu_power()) throw std::runtime_error("CPU control unavailable");
                         auto v = *c.cpu;
                         cpu = cpu_writes(p, v.pl1, v.pl2, v.pl4, v.temp_limit);
                     }
@@ -1212,7 +1210,7 @@ ControlResult Controller::execute(const ControlCommand& command) {
                     }
                     result.applied = true;
                 } else if constexpr (std::is_same_v<T, UiPreflight>) {
-                    if (c.cpu && enabled("cpuPower")) {
+                    if (c.cpu && features_.cpu_power()) {
                         auto v = *c.cpu;
                         cpu_writes(p, v.pl1, v.pl2, v.pl4, v.temp_limit);
                     }
@@ -1223,8 +1221,8 @@ ControlResult Controller::execute(const ControlCommand& command) {
                     }
                     auto g = profile ? profile->gpu : c.gpu;
                     if (!g) throw std::runtime_error("GPU intent unavailable");
-                    auto value = enabled("gpuPower") ? (profile ? plan(*profile, false) : plan_gpu(*g, false))
-                                                     : nv::ProfilePlan{};
+                    auto value = features_.gpu_power() ? (profile ? plan(*profile, false) : plan_gpu(*g, false))
+                                                       : nv::ProfilePlan{};
                     result.peripherals = Json{{"plan",
                                                {{"restart", value.restart},
                                                 {"unlock", value.unlock},
@@ -1257,7 +1255,7 @@ ControlResult Controller::execute(const ControlCommand& command) {
                     boost(c.enabled);
                     result.applied = true;
                 } else if constexpr (std::is_same_v<T, FanMaster>) {
-                    if (!enabled("fanControl")) throw std::runtime_error("Fan control unavailable");
+                    if (!features_.fan_control()) throw std::runtime_error("Fan control unavailable");
                     auto mask = p.bitfields.at("fanCurveEnable").get_mask();
                     batch({{p.reg("fanCurveEnable"), uint8_t(c.enabled ? mask : 0), mask}});
                     fan_intent_.curve = c.enabled;
@@ -1332,7 +1330,7 @@ ControlResult Controller::execute(const ControlCommand& command) {
                             j["dimmingError"] = e.what();
                         }
                     if (cooler_) j["cooler"] = cooler_->snapshot();
-                    if (c.battery && enabled("battery")) try {
+                    if (c.battery && features_.battery()) try {
                             j["battery"] = battery_telemetry(session_.transport());
                         } catch (const std::exception& e) {
                             j["batteryError"] = e.what();

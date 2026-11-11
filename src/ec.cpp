@@ -126,13 +126,17 @@ void WriteGuard::apply(std::span<const EcWrite> writes) {
 config::Limit control_limit(const config::MachineProfile& p, const std::string& key) {
     if (auto i = p.limits.find(key); i != p.limits.end()) return i->second;
     // Controller per-key fallbacks, not UniversalDefaults' whole-map semantics.
-    if (key == "cpuTempLimit") return {80, p.cpu_encoding() == "direct" ? 120 : 95, p.cpu_encoding(), p.tj_max(), {}};
+    if (key == "cpuTempLimit") return {80, p.cpu_direct() ? 120 : 95, p.cpu_encoding(), p.tj_max(), {}};
     static const auto defaults = [] {
         config::MachineProfile p;
         config::apply_universal_defaults(p);
         return p;
     }();
     return defaults.limits.at(key);
+}
+ControlLimits control_limits(const config::MachineProfile& p) {
+    return {control_limit(p, "PL1"),          control_limit(p, "PL2"), control_limit(p, "PL4"),
+            control_limit(p, "cpuTempLimit"), control_limit(p, "TGP"), control_limit(p, "dynamicBoost")};
 }
 std::vector<EcWrite> cpu_writes(const config::MachineProfile& p, int pl1, int pl2, int pl4, int temperature) {
     using namespace config::encoding;
@@ -148,7 +152,7 @@ std::vector<EcWrite> cpu_writes(const config::MachineProfile& p, int pl1, int pl
     return {{p.reg("PL1"), config::encoding::pl1(pl1)},
             {p.reg("PL2"), config::encoding::pl1(pl2)},
             {p.reg("PL4"), raw_pl4},
-            {p.reg("cpuTempLimitWrite"), cpu_temperature(temperature, p.cpu_encoding() == "direct", p.tj_max())}};
+            {p.reg("cpuTempLimitWrite"), cpu_temperature(temperature, p.cpu_direct(), p.tj_max())}};
 }
 std::vector<EcWrite> gpu_writes(const config::MachineProfile& p, int tgp, bool dynamic_boost, int db,
                                 std::optional<int> maximum) {

@@ -235,17 +235,15 @@ int main(int argc, char** argv) try {
     p = load_machine(profiles / "IDY_7Y.json");
     p.verified = true;
     apply_universal_defaults(p);
-    require(!validate_startup(p, read, 1, {}, "amd").enabled.contains("cpuPower"),
-            "Verified vendor contradiction gated");
-    require(validate_startup(p, read, 1, {}, "intel").enabled.contains("cpuPower"), "Matching vendor enabled");
+    require(!validate_startup(p, read, 1, {}, "amd").cpu_power(), "Verified vendor contradiction gated");
+    require(validate_startup(p, read, 1, {}, "intel").cpu_power(), "Matching vendor enabled");
     p.verified = false;
-    require(!validate_startup(p, read, 0, {}, "intel").enabled.contains("gpuPower"), "Absent GPU gated");
+    require(!validate_startup(p, read, 0, {}, "intel").gpu_power(), "Absent GPU gated");
     auto sentinel = [](int) -> uint8_t { return 0; };
-    require(!validate_startup(p, sentinel, 1, {}, "intel").enabled.contains("cpuPower"), "Unverified sanity gate");
+    require(!validate_startup(p, sentinel, 1, {}, "intel").cpu_power(), "Unverified sanity gate");
     Enrichment ec;
     ec.limits = {"PL1"};
-    require(validate_startup(p, sentinel, 1, ec, "intel").enabled.contains("cpuPower"),
-            "ECSpec stronger than sentinel");
+    require(validate_startup(p, sentinel, 1, ec, "intel").cpu_power(), "ECSpec stronger than sentinel");
     require(encoding::cpu_temperature(95, false) == 0x8A && encoding::cpu_temperature(95, true) == 0xDF, "CPU encode");
     require(encoding::decode_cpu_temperature(0x8A, false) == 95 && encoding::decode_cpu_temperature(0xDF, true) == 95,
             "CPU read high bit mask");

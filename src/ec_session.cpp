@@ -74,8 +74,7 @@ Sensors read_sensors(EcTransport& ec, const config::MachineProfile& p, Detail de
     if (detail == Detail::rpm) return s;
     s.cpu_percent = config::encoding::decode_fan_duty(read("cpuFanDuty"));
     s.gpu_percent = config::encoding::decode_fan_duty(read("gpuFanDuty"));
-    s.cpu_limit =
-        config::encoding::decode_cpu_temperature(read("cpuTempLimitRead"), p.cpu_encoding() == "direct", p.tj_max());
+    s.cpu_limit = config::encoding::decode_cpu_temperature(read("cpuTempLimitRead"), p.cpu_direct(), p.tj_max());
     s.battery_soc = read("batterySoc");
     s.battery_raw = read("batteryMode");
     s.battery_mode = config::encoding::decode_battery(uint8_t(*s.battery_raw));
@@ -139,7 +138,6 @@ EcSession::EcSession(
     try {
         battery_bit3 = uint8_t(read(profile.reg("batteryMode")) & 8);
     } catch (const std::exception& ex) {
-        validation.enabled.erase("battery");
         validation.disabled["battery"] = std::string("Battery mode variant read failed: ") + ex.what();
     }
     if (read_only) snapshot_fans();
@@ -170,7 +168,7 @@ void EcSession::describe(const std::function<void(const std::string&)>& log, con
         return v ? to_string(*v) : std::string("?");
     };
     auto pl4 = h.pl4_doubled();
-    bool absolute = p.cpu_encoding() == "direct";
+    bool absolute = p.cpu_direct();
     std::string s = "--- Hardware Detection ---\n  Support1 (0x765): " + byte(0x765) +
                     "\n  Support2 (0x766): " + byte(0x766) + "\n  Support5 (0x742): " + byte(0x742);
     if (h.ecspec)
@@ -320,7 +318,7 @@ void EcSession::describe(const std::function<void(const std::string&)>& log, con
         } catch (const std::exception& ex) {
             s += "\n  Bitfield " + name + ": read failed: " + ex.what();
         }
-    for (const auto& f : validation.enabled) s += "\n  Enabled:  " + f;
+    for (const auto& f : validation.enabled()) s += "\n  Enabled:  " + f;
     for (const auto& [f, why] : validation.disabled) s += "\n  Disabled: " + f + " - " + why;
     if (battery_bit3) {
         using config::encoding::battery;
@@ -368,7 +366,7 @@ config::Json EcSession::diagnostic_report() {
         {"ecspecError", hardware.ecspec_error},
         {"startupReadsDecimalAddresses", raw},
         {"limits", limits},
-        {"enabled", validation.enabled},
+        {"enabled", validation.enabled()},
         {"disabled", validation.disabled},
         {"pl4Doubled", profile.pl4_doubled()},
         {"batteryBit3", nullable(battery_bit3)},
