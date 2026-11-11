@@ -241,7 +241,7 @@ void to_json(Json& j, const Settings& v) {
 void UserProfile::preflight(const std::string& current) const {
     if (project_id && !blank(*project_id) && !equal_ignore_case(*project_id, current))
         throw std::runtime_error("Profile belongs to another machine model");
-    if (!cpu || !gpu || !protection || !fan || !battery || !lighting || !fan->cpu_curve || !fan->gpu_curve)
+    if (!protection || !lighting || (fan && (!fan->cpu_curve || !fan->gpu_curve)))
         throw std::runtime_error("Profile contains null settings/curves");
 }
 ThermalState recover(const std::optional<ThermalState>& committed, const std::optional<ThermalState>& pending,

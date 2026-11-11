@@ -59,6 +59,8 @@ struct LightingState {
 struct UserProfile {
     std::optional<std::string> name = "", project_id = "";
     std::string saved_at = "0001-01-01T00:00:00";
+    // cpu, gpu, fan and battery are null when the slot was saved while that feature was unavailable. Loading
+    // such a slot leaves that hardware as it is.
     std::optional<CpuSettings> cpu = CpuSettings{};
     std::optional<GpuSettings> gpu = GpuSettings{};
     std::optional<ProtectionSettings> protection = ProtectionSettings{};

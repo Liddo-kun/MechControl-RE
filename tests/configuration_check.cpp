@@ -173,7 +173,9 @@ int main(int argc, char** argv) try {
             "Omitted defaults");
     auto null_cpu = parse(R"({"cpu":null})").get<UserProfile>();
     require(!null_cpu.cpu, "Explicit null preserved");
-    fails([&] { null_cpu.preflight("IDY_7Y"); });
+    null_cpu.preflight("IDY_7Y"); // Saved while CPU control was unavailable; a load skips the group.
+    fails([&] { parse(R"({"gpuFailsafe":null})").get<UserProfile>().preflight("IDY_7Y"); });
+    fails([&] { parse(R"({"fan":{"cpuCurve":null}})").get<UserProfile>().preflight("IDY_7Y"); });
     auto foreign = defaults;
     foreign.project_id = "X6FR5xxY";
     fails([&] { foreign.preflight("IDY_7Y"); });
