@@ -25,14 +25,18 @@ To start MechControl at logon, create a Task Scheduler task for the full executa
 path that runs with highest privileges, has no execution time limit and is allowed
 on battery. The project page has a PowerShell command for this.
 
-## Upgrading from the C# version (v1.6.0 or earlier)
+## Upgrading from the C# version (v1.6.0)
 
-This version reads the C# version's settings and profile files. Exit the old version
-from the tray, then either extract this archive over the old folder, or copy
+This version reads the settings and profile files that v1.6.0 writes. Exit the old
+version from the tray, then either extract this archive over the old folder, or copy
 `settings.json`, `userprofile_*.json`, `lighting_state.json` and
 `liquid_cooler_state.json` into the new folder. If a scheduled task starts
 MechControl, make sure it points at the new `MechControl.exe`. The old version's
 `.dll` files are no longer used and can be deleted.
+
+Files last saved by a C# release older than v1.6.0 may not carry over. A profile slot
+with a failsafe trigger below 50 C does not load and has to be saved again, and a
+thermal trip recorded in the older format is not restored.
 
 ## Command line
 
