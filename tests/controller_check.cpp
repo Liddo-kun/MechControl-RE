@@ -1094,6 +1094,15 @@ void capture_preservation(const std::filesystem::path& root) {
               after["fan"]["cpuCurve"]["tempUp"][0] == 0 && after["fan"]["cpuCurve"]["tempUp"][1] == 255 &&
               !after["fan"]["curveEnabled"].get<bool>(),
           "unavailable groups capture reference placeholders, not zero power or fabricated fan readings");
+    r.state->writes.clear();
+    auto defaults = r.controller->execute(DefaultsApply{});
+    check(defaults.code == 0 && std::none_of(r.state->writes.begin(), r.state->writes.end(),
+                                             [](auto w) {
+                                                 return (w.first >= 0x743 && w.first <= 0x746) ||
+                                                        (w.first >= 0x783 && w.first <= 0x786) || w.first == 0x751 ||
+                                                        w.first == 0x7C5 || w.first >= 0xF00;
+                                             }),
+          "firmware defaults leave the groups startup validation disabled untouched");
     {
         std::ofstream bad(path / "userprofile_4.json");
         bad << "{broken";
