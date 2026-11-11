@@ -307,6 +307,26 @@ void worker_owner(const std::filesystem::path& scratch) {
     require(config::read_json(scratch / L"diagnostic.json")["model"] == "IDY_7Y" && writes(*s).empty(),
             "worker diagnostic writes report, never hardware");
 }
+void ended_worker(const std::filesystem::path& scratch) {
+    Log log(scratch / L"ended.log");
+    auto delivery = std::make_shared<Delivery>();
+    Handle release(CreateEventW(nullptr, TRUE, FALSE, nullptr));
+    WorkerOptions options;
+    options.nvidia_hardware = false;
+    options.peripheral_hardware = false;
+    options.channel_factory = [&](const std::wstring&, HANDLE) -> std::unique_ptr<EcChannel> {
+        WaitForSingleObject(release.get(), INFINITE);
+        throw std::runtime_error("injected driver open failure");
+    };
+    ControlWorker worker(delivery, log, std::move(options));
+    auto queued = worker.request(CpuApply{{50, 80, 180, 95}});
+    SetEvent(release.get());
+    require(worker.wait() == 1, "a failed startup ends the worker with an error outcome");
+    auto late = worker.request(CpuApply{{50, 80, 180, 95}});
+    auto ready = [](auto& f) { return f.wait_for(std::chrono::seconds(0)) == std::future_status::ready; };
+    require(ready(queued) && queued.get().code == 1 && ready(late) && late.get().code == 1,
+            "a worker that ended on its own answers queued and later commands instead of leaving them waiting");
+}
 void shutdown_io(const std::filesystem::path& scratch) {
     struct Pending {
         std::atomic<bool> entered = false, completed = false, destroyed = false;
@@ -457,6 +477,7 @@ int wmain() {
         abi_and_guard();
         snapshots_and_startup();
         worker_owner(scratch);
+        ended_worker(scratch);
         shutdown_io(scratch);
         recurring_worker(scratch);
         fan_batches();
