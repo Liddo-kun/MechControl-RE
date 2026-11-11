@@ -167,7 +167,11 @@ bool Lighting::open_device() {
          " logo=" + std::to_string(available(3)));
     return std::any_of(handles_.begin(), handles_.end(), [](auto& h) { return bool(h); });
 }
-bool Lighting::available(int z) const { return z >= 0 && z < 4 && (output_ || bool(handles_[z])); }
+bool Lighting::available(int z) const {
+    // The logo is also written to EC registers, which startup validation may have rejected.
+    if (z == 3 && !session_.validation.lighting()) return false;
+    return z >= 0 && z < 4 && (output_ || bool(handles_[z]));
+}
 void Lighting::send(int z, const HidReport& report) {
     if (output_) {
         output_(z, report);
@@ -264,11 +268,11 @@ void Lighting::apply(const LightingSettings& s) {
 }
 void Lighting::capture(LightingSettings& s) {
     if (!hardware_ && !output_) return;
-    try {
-        s.logo = logo();
-    } catch (const std::exception& e) {
-        log_(std::string("Logo capture failed; target intent retained: ") + e.what());
-    }
+    if (session_.validation.lighting()) try {
+            s.logo = logo();
+        } catch (const std::exception& e) {
+            log_(std::string("Logo capture failed; target intent retained: ") + e.what());
+        }
     // Null intent is invalid, not an implicit off zone. Refuse capture rather than erase it.
     if (available(0)) {
         if (!state_.keyboard) throw std::runtime_error("Cannot capture explicit-null keyboard intent");

@@ -96,6 +96,7 @@ enum Id {
     batteryApplyId,
     batteryTextId,
     batterySupportId,
+    logoSupportId,
     zoneBaseId = 600,
     idleId = 660,
     dimmingId,
@@ -751,6 +752,7 @@ private:
         button(3, batteryApplyId, L"Apply battery mode");
         support(3, batterySupportId, L"Battery charge mode");
         label(3, batteryTextId, L"Battery telemetry is read every two seconds only while this page is visible.", 400);
+        support(4, logoSupportId, L"Logo LED control");
         // Zones 0-2 are the keyboard, light bar and logo; the page shows the logo first, as in the reference.
         for (int zone : {2, 0, 1}) {
             int id = zoneBaseId + zone * 16;
@@ -1340,6 +1342,7 @@ private:
             int base = zoneBaseId + zone * 16;
             auto& brightness = find(base + 4);
             open(titles[zone], x, right);
+            if (zone == 2) y = supportNote(logoSupportId, true, errorColor, left, y, 0, end - left, apply);
             y += ref(4);
             put(get(base), left, y, extent(font_, L"Enabled") + ref(40), box);
             y += box + ref(6);
@@ -3020,6 +3023,13 @@ private:
                 if (seconds[i] == s.idle_seconds) SendMessageW(get(idleId), CB_SETCURSEL, i, 0);
         }
         if (page == 4) {
+            auto logo = state_.value("enabled", std::set<std::string>{}).contains("lighting")
+                            ? std::wstring()
+                            : disabledReason(L"Logo LED control", "lighting");
+            if (logo != support_.at(logoSupportId).reason) {
+                explain(logoSupportId, logo);
+                layoutPage(pages_[4]);
+            }
             if (j.contains("logoError"))
                 setStatus(L"Logo read failed independently: " + w(j["logoError"].get<std::string>()));
             if (j.contains("dimmingError"))
