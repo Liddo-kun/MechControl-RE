@@ -247,7 +247,6 @@ private:
     bool bypass_supported_ = false, bypass_active_ = false, bypass_clearing_ = false, emergency_ = false,
          cooler_flag_ = false;
     std::string bypass_unavailable_, bypass_status_, bypass_reason_, gpu_unprotected_;
-    unsigned advanced_revision_ = 0, presented_advanced_ = ~0u;
     std::function<void(std::function<void()>)> run_blocking_; // Existing joined wait path; never moves EC work.
     EcSession& session_;
     const config::Validation& features_;
@@ -265,10 +264,8 @@ private:
     bool peripheral_hardware_ = true, dimming_available_ = false;
     std::unique_ptr<ThermalProtection> thermal_;
     config::FanSettings fan_intent_;
-    unsigned fan_revision_ = 0, presented_fan_ = ~0u;
     std::optional<config::UserProfile> saved_profile_;
     std::optional<config::Curve> written_cpu_, written_gpu_; // Last complete write, never hardware readback confidence.
-    unsigned written_revision_ = 0, presented_written_ = ~0u;
     FanApplication fan_application_ = FanApplication::unapplied;
     bool fan_review_required_ = false;
     int active_slot_ = 0, epoch_ = 0, last_duty_ = -1, last_cpu_ramp_ = -1, last_gpu_ramp_ = -1;

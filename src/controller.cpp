@@ -719,7 +719,6 @@ void Controller::bypass(bool on) {
     }
     SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED);
     bypass_status_ = "Active";
-    ++advanced_revision_;
     diagnostic_("[EC Bypass] " + hex_text(address, 3) + " = " + hex_text(value) +
                 " verified; existing CPU limits apply within about 24 s; automatic sleep blocked");
 }
@@ -737,13 +736,11 @@ bool Controller::clear_bypass(const std::string& reason) {
         bypass_clearing_ = true;
         bypass_reason_ = reason;
         bypass_status_ = "NOT CLEARED (" + reason + "): " + ex.what();
-        ++advanced_revision_;
         return false;
     }
     bypass_active_ = bypass_clearing_ = false;
     SetThreadExecutionState(ES_CONTINUOUS);
     bypass_status_ = "Off (" + reason + ")";
-    ++advanced_revision_;
     diagnostic_("[EC Bypass] Cleared (" + reason + "); " + hex_text(address, 3) + " = 0x00 verified");
     return true;
 }
@@ -765,7 +762,6 @@ void Controller::watch_bypass() {
                 bypass_active_ = false;
                 SetThreadExecutionState(ES_CONTINUOUS);
                 bypass_status_ = "Off (cleared by the EC)";
-                ++advanced_revision_;
                 diagnostic_("[EC Bypass] The EC cleared it");
                 return;
             }
@@ -790,7 +786,6 @@ void Controller::cooler_flag(bool connected) {
     if (((session_.transport().read(0x7C7) & 2) != 0) != connected)
         throw std::runtime_error("Liquid cooler flag readback mismatch (0x7C7 bit 1)");
     cooler_flag_ = connected;
-    ++advanced_revision_;
     diagnostic_(std::string("[Cooler flag] 0x7C7 bit 1 ") + (connected ? "set" : "cleared"));
 }
 // The EC clears the flag on power transitions; EC reinitialization writes it with the init byte.
@@ -819,7 +814,6 @@ void Controller::fans(const FanSettings& f) {
     last_duty_ = -1;
     fan_intent_ = f;
     fan_intent_.cpu_curve = c;
-    ++fan_revision_;
     if (g) fan_intent_.gpu_curve = g;
     fan_review_required_ = false;
     fan_application_ = FanApplication::unapplied;
@@ -833,7 +827,6 @@ void Controller::fans(const FanSettings& f) {
             batch(w);
             written_cpu_ = c;
             written_gpu_ = g;
-            ++written_revision_;
             fan_application_ = FanApplication::applied;
         } catch (...) {
             fan_application_ = FanApplication::partial;
@@ -859,7 +852,6 @@ void Controller::link(std::optional<int> c, std::optional<int> g) {
         batch(fan_curve_writes(session_.profile, cpu, gpu, true, latch_mask_));
         written_cpu_ = std::move(cpu);
         written_gpu_ = std::move(gpu);
-        ++written_revision_;
         fan_application_ = FanApplication::applied;
     } catch (...) {
         fan_application_ = FanApplication::partial;
@@ -1249,7 +1241,6 @@ ControlResult Controller::execute(const ControlCommand& command) {
                     auto mask = p.bitfields.at("fanCurveEnable").get_mask();
                     batch({{p.reg("fanCurveEnable"), uint8_t(c.enabled ? mask : 0), mask}});
                     fan_intent_.curve = c.enabled;
-                    ++fan_revision_;
                     result.applied = true;
                 } else if constexpr (std::is_same_v<T, FanEdit>) {
                     if (!linked_ || !curves_supported()) throw std::runtime_error("Linked editor is not active");
@@ -1260,7 +1251,6 @@ ControlResult Controller::execute(const ControlCommand& command) {
                     fan_intent_.cpu_curve = std::move(cpu);
                     fan_intent_.gpu_curve = std::move(gpu);
                     fan_application_ = FanApplication::unapplied;
-                    ++fan_revision_;
                 } else if constexpr (std::is_same_v<T, FanRead>) {
                     if (linked_) throw std::runtime_error("Disable linked fans before reading EC tables");
                     if (curves_supported()) {
@@ -1273,7 +1263,6 @@ ControlResult Controller::execute(const ControlCommand& command) {
                         fan_intent_.cpu_curve = std::move(cpu);
                         if (gpu) fan_intent_.gpu_curve = std::move(gpu);
                         fan_intent_.curve = snapshot.custom_mode(latch_mask_);
-                        ++fan_revision_;
                     }
                     result.peripherals = Json{{"ui", presentation(true, false, 1)}};
                 } else if constexpr (std::is_same_v<T, FanApply>) {
