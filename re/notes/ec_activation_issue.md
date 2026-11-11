@@ -61,7 +61,7 @@ Snapshot comparison of OEM Custom-mode working state vs our standalone state (fi
 | 0x787 | 0x81 | 0x00 | fanSwitchSpeed (enabled vs off) |
 | 0x7E6 | 0xBC | 0x00 | Unknown — set during Custom mode selection |
 | 0x7E7 | 0x88 | 0x00 | Unknown — set during Custom mode selection |
-| 0x7E8 | 0x20 | 0x00 | Unknown — set during Custom mode selection |
+| 0x7E8 | 0x20 | 0x00 | Saved mode bits; bit 5 is the remembered `CUME` (0x727 bit 6) the EC restores at power-on. Never write. See `intel_x6ar_power_sequencing.md` |
 
 **Tested individually:** Writing 0x7E6=0xBC, 0x7E7=0x88, 0x7E8=0x20, 0x766=0x93 one at a time did NOT fix the issue. Haven't tested 0x726, 0x727, or combinations.
 

@@ -6,6 +6,8 @@ Single source of truth for all register addresses, encodings, write sequences, a
 
 **Model-scope update (2026-10-29):** Static analysis of the PCSpecialist X6FR EC image found GPU RPM at **0x46C high / 0x46D low**, shared mode bits in **0x751/0x7C6**, and a **145 W preset at 0x7A7** that must not be universally labeled Battery Saver. It also identified a keyboard-history setter for **0x741 bit 7 in that image**. These qualify the generic/IDY-derived descriptions below; they do not establish new Intel X6AR mappings. Evidence, exact firmware hash/offsets, and pending application corrections: [`notes/lp3123079_ec_firmware_review.md`](notes/lp3123079_ec_firmware_review.md).
 
+**Intel X6AR power sequencing (EC 77.0, static analysis, 2026-11-11):** what the EC resets, rebuilds and saves at each power transition, the `0x6E6` state and `0x47E`/`0x47F` shutdown-cause codes, and the bytes that must never be written: [`notes/intel_x6ar_power_sequencing.md`](notes/intel_x6ar_power_sequencing.md). Summary in 11.9.3.
+
 ---
 
 ## 1. EC Driver Interface
@@ -392,7 +394,7 @@ Sent before keyboard OFF (other zones don't use this).
 | `0x767` (trigger clear) | Skip verification (fire-and-forget) |
 | `0x78C` (logo commit) | Skip verification (write-only trigger) |
 | `0x741` (activation) | Skip verification (EC transforms value: write 0x05, reads back 0x01) |
-| `0x7C6` (fan curve mode) | Skip verification (mode flag, set to 0x04 on startup and leave) |
+| `0x7C6` (fan curve mode) | Skip verification (mode flag, set bit 2 on startup and leave) |
 | Everything else | Read same address, compare directly |
 
 ---
@@ -429,14 +431,14 @@ The BIOS reads `OemMagicVariable` (180 bytes, GUID `{9f33f85c-13ca-4fd1-9c4a-962
 Pre-write sanity checks: size must be exactly 180 bytes, PowerMode must be 0-3, boolean fields must be 0 or 1. Write is verified by readback. Not strictly required for operation (MechControl's EC init handles everything at runtime) but ensures the EC boots into a sane state before the app launches.
 
 **2. EC power management activation (0x726, 0x727):**
-Setting bit 7 of `0x726` (ADDR_AP_OEM_BYTE9) and bit 6 of `0x727` (DSDT field `CUME`) activates the EC's PECI power management loop. Without these bits, PL register values sit in EC RAM but are never applied to the CPU via PECI — the CPU stays at its default 75W regardless of PL1/PL2 settings. Written as read-modify-write (OR) every startup. These persist in EC microcontroller NVRAM across reboots, but clearing them immediately deactivates power management without a reboot.
+Setting bit 7 of `0x726` (ADDR_AP_OEM_BYTE9) and bit 6 of `0x727` (DSDT field `CUME`) activates the EC's PECI power management loop. Without these bits, PL register values sit in EC RAM but are never applied to the CPU via PECI — the CPU stays at its default 75W regardless of PL1/PL2 settings. Written as read-modify-write (OR) every startup; clearing them immediately deactivates power management without a reboot. They do not simply persist: on Intel EC 77.0 the EC rebuilds `0x727` bit 6 at every power-on from its saved byte `0x7E8` (set only if `0x7E8` bit 5 is set and the adapter is present), and saves `0x7E8` and `0x726` bit 3 only when it shuts the machine off on battery. `0x726` bit 3 enables power-on when the adapter is detected, so `0x726` must only be written with a mask. See 11.9.3.
 
 **3. Activation byte (0x741):**
 EC clears this to 0x00 when the OEM service stops. While 0x741=0, the EC ignores writes to PL/fan/GPU registers (simple direct-control registers like fan boost 0x751 still work). Write 0x05 on app startup (EC transforms to 0x01). Required for PL and GPU writes to take effect. Post-init verification: bit 0 set and bit 2 cleared means the EC is actively processing. The EC usually clears bit 2 within ~60 ms but has been seen still pending ~900 ms after the write, so the app polls for up to 3 s more before warning.
 
-The byte is a bitfield (OEM code does RMW `| 1` to set it): bit 0 = activation (DSDT `APPE`), bit 2 = cleared by the EC ~60 ms after it accepts activation, bit 3 = OEM keyboard-lighting "on key pressed", bit 5 = fan error (`GetECFanAlert()` returns bit 5 in a decrypted Eluktronics Control Center 4.23.47.11 GCUService; sent to the UI as `System/FanErrorInfo`; the byte's `ADDR_FAN_ALERT_BYTE` name comes from this), bit 7 = unknown EC-owned flag (no OEM reader or writer found). Record and tools: `notes/ec_0x741_bits.md`. Measured 2026-10-29 (IDY_7Y): bit 7 is clear after boot, appears later in the boot, survives app stop and fan spin-up, and the EC sets it again ~190 ms after our 0x05 write clears it (`0x81 -> 0x05 -> 0x01 -> 0x81`). So `0x81` after a same-boot app restart is normal; the OEM app also reads 0x81 on X6FR5xxY.
+The byte is a bitfield (OEM code does RMW `| 1` to set it): bit 0 = activation (DSDT `APPE`), bit 2 = cleared by the EC ~60 ms after it accepts activation, bit 3 = OEM keyboard-lighting "on key pressed", bit 5 = fan error (`GetECFanAlert()` returns bit 5 in a decrypted Eluktronics Control Center 4.23.47.11 GCUService; sent to the UI as `System/FanErrorInfo`; the byte's `ADDR_FAN_ALERT_BYTE` name comes from this), bit 7 = EC-owned keyboard-history flag (no OEM reader or writer found; the EC sets it once bytes `0x14` and `0x32` have both appeared in its `0xB00` FIFO and clears it at each power-on, confirmed statically in both the X6FR and Intel EC 77.0 images). Bit 4 must never be set: on Intel EC 77.0 the power-on sequence reads it and changes a GPIO output. Record and tools: `notes/ec_0x741_bits.md`. Measured 2026-10-29 (IDY_7Y): bit 7 is clear after boot, appears later in the boot, survives app stop and fan spin-up, and the EC sets it again ~190 ms after our 0x05 write clears it (`0x81 -> 0x05 -> 0x01 -> 0x81`). So `0x81` after a same-boot app restart is normal; the OEM app also reads 0x81 on X6FR5xxY.
 
-**Fan curve mode flag (0x7C6):** Must be set to 0x04 and **left set** for the EC to use the custom fan table (0xF00-0xF5F). This is a persistent mode flag, not a trigger. Without it, the EC ignores fan table writes and runs fans at ~26% default. Not needed for PL/GPU writes — only for fan curves.
+**Fan curve mode flag (0x7C6):** Bit 2 must be set and **left set** for the EC to use the custom fan table (0xF00-0xF5F). It is a mode flag, not a trigger, but it does not survive shutdown: Intel EC 77.0 clears bit 2 at S5 entry. Without it, the EC ignores fan table writes and runs fans at ~26% default. Not needed for PL/GPU writes — only for fan curves. Other bits are shared: X6FR firmware uses bits 6/7, and on Intel EC 77.0 bit 6 is a "press the power button" request, so profiles for those models write bit 2 alone (`fanCurveLatch`). Never set bit 6.
 
 ### MechControl init sequence (9 steps)
 
@@ -449,7 +451,7 @@ The byte is a bitfield (OEM code does RMW `| 1` to set it): bit 0 = activation (
 5. Write(0x7C5, Read(0x7C5) | 0xE0)        -- fan curve enable
 6. Write fan table (0xF00-0xF5F)            -- CPU+GPU curves
 7. Write(0x7C7, 0x0C)                       -- OCPL=3, LCSE=0 (see 11.9.1)
-8. Write(0x7C6, 0x04)                       -- fan curve commit
+8. Write(0x7C6, 0x04)                       -- fan curve commit (bit 2 only with fanCurveLatch)
 9. Write(0x706, 0x41)                       -- BIOS_CTRL init complete
 -- Verify: Read(0x741) & 0x05 == 0x01       -- EC active confirmation (bit 7 may be set)
 ```
@@ -535,7 +537,7 @@ DSDT `_BIF` sets Power Unit = 1 (**mAh**), so capacity values are mAh and rate v
 | `0x434-0x435` | R | ADDR_EC_BST_BPR | 16-bit LE, mA | Battery present rate — charge/discharge (DSDT XST1) |
 | `0x436-0x437` | R | ADDR_EC_BST_BRC | 16-bit LE, mAh | Battery remaining capacity (DSDT XST2) |
 | `0x438-0x439` | R | ADDR_EC_BST_BPV | 16-bit LE, mV | Battery present voltage (DSDT XST3) |
-| `0x490` | R | ecPowSource | Bit 0 (DSDT ACIC) | Power source: bit 0 = AC connected |
+| `0x490` | R | ecPowSource | Bit 0 (DSDT ACIC) | Power source: bit 0 = AC connected. Debounced on Intel EC 77.0: set after 40 ticks (200 ms) present, cleared after one tick absent, so a brief adapter glitch reads as an AC loss. |
 | `0x494` | R | ADDR_BATTERY_ALERT_BYTE | Byte | Battery alert flags |
 | `0x4A2-0x4A3` | R | ecBt1Temperature | 16-bit LE, 0.1K | Battery temperature. Celsius = (raw / 10) - 273.15 |
 | `0x4A6-0x4A7` | R | ADDR_EC_BT1CycleCount | 16-bit LE | Battery cycle count (DSDT CYCN) |
@@ -561,8 +563,10 @@ EC version, system ID, live sensor temps, BIOS info, fan RPM, silent mode.
 | `0x46B` | R | ADDR_EC_SECOND_FAN_RPM_BYTE2 | **Not the GPU RPM low byte** despite the OEM name: reads a constant 0xC3 on IDY_7Y whether the fan is stopped or at 4,600 RPM (measured 2026-10-29). Written from a power-control value in X6FR firmware. |
 | `0x46C` | R | ADDR_EC_SECOND_FAN_RPM_BYTE1 | GPU fan RPM high byte. RPM = `(0x46C << 8) \| 0x46D` (verified on IDY_7Y and in X6FR firmware) |
 | `0x46D` | R | — | GPU fan RPM low byte (pair with 0x46C) |
-| `0x476` | R | BIOSFuncReg | BIOS function register |
+| `0x476` | R | BIOSFuncReg | BIOS function register. Bit 1 = lid closed on Intel EC 77.0. |
 | `0x47D` | R | ecOEM_SUB_VER2 | EC sub-version 2 |
+| `0x47E` | R | — | Cause of the last power-down on Intel EC 77.0 (`CC` normal, `CD` power button held, `FC` forced by the EC, `EC` EC cold start). Survives the next boot. Never write. See 11.9.3. |
+| `0x47F` | R | — | Reason code when `0x47E` = `FC`. Never write. |
 | `0x49F` | R | ADDR_BIOS_INFO_3_BYTE | BIOS info byte 3 |
 
 ---
@@ -573,14 +577,14 @@ Handshake, activation, feature enable, command clears, BIOS control.
 
 | Address | R/W | OEM Name | Description |
 |---------|-----|----------|-------------|
-| `0x706` | W | ADDR_AP_BIOS_CONTROL_BYTE | BIOS control. Write 0x41 at end of init (signals init complete). |
+| `0x706` | W | ADDR_AP_BIOS_CONTROL_BYTE | BIOS control. Write 0x41 at end of init (signals init complete). One of the four bytes Intel EC 77.0 saves, and only on the battery shut-off path. |
 | `0x708` | RW | (handshake step 2) | Unlock step 2. Write 0x01 after 0x709. Verify reads 0x01. |
 | `0x709` | W | (handshake step 1) | Unlock step 1. Write 0x05 before 0x708. |
-| `0x726` | RW | ADDR_AP_OEM_BYTE9 | **Power management activation.** Bit 7 must be set (`\|= 0x80`) to enable EC PECI power management loop. Persists in EC NVRAM. Clearing deactivates PL enforcement immediately. |
-| `0x727` | RW | ADDR_AP_OEM_BYTE10 / ADDR_CPU_DOUBLE_FLAG_SUPPORT / ADDR_ESHUTTER_STATUS | **DSDT fields:** bit 6 = `CUME` (CPU Management Enable), bit 7 = `PL4D`. Bit 6 must be set (`\|= 0x40`) alongside 0x726 bit 7 to activate PECI loop. Also polled by OEM for e-shutter status. |
+| `0x726` | RW | ADDR_AP_OEM_BYTE9 | **Power management activation.** Bit 7 must be set (`\|= 0x80`) to enable EC PECI power management loop. Clearing deactivates PL enforcement immediately. Bit 3 = power on when the adapter is detected (Intel EC 77.0), so write masked only. |
+| `0x727` | RW | ADDR_AP_OEM_BYTE10 / ADDR_CPU_DOUBLE_FLAG_SUPPORT / ADDR_ESHUTTER_STATUS | **DSDT fields:** bit 6 = `CUME` (CPU Management Enable), bit 7 = `PL4D`. Bit 6 must be set (`\|= 0x40`) alongside 0x726 bit 7 to activate PECI loop. Intel EC 77.0 rebuilds bit 6 from `0x7E8` bit 5 at every power-on. Also polled by OEM for e-shutter status. |
 | `0x728` | RW | ADDR_AP_OEM_BYTEB | OEM byte B |
 | `0x740` | R | ADDR_PROJECT_ID_BYTE | Model/project ID. `raw >> 1` = enum value (26>>1 = 13 = IDY_7Y). |
-| `0x741` | RW | ADDR_AP_OEM_BYTE / ADDR_FAN_ALERT_BYTE | Activation byte + fan alert. Write 0x05 on startup (EC transforms to 0x01; bit 7 is EC-owned and may read back as 0x81). Active = bit 0 set. EC clears on service disconnect. |
+| `0x741` | RW | ADDR_AP_OEM_BYTE / ADDR_FAN_ALERT_BYTE | Activation byte + fan alert. Write 0x05 on startup (EC transforms to 0x01; bit 7 is EC-owned and may read back as 0x81). Active = bit 0 set. EC clears on service disconnect. Never set bit 4. |
 | `0x742` | R | ADDR_SUPPORT_BYTE5 | Support flags byte 5 (reads 0x22) |
 | `0x748` | W | ADDR_LIGHTBAR_CONTROL_BYTE | Feature enable / lightbar control. Write 0x81 during init (4x). Also see lighting group. |
 | `0x749` | W | ADDR_REDBAR_CONTROL_BYTE | Red bar control / command clear 1. Write 0x00 during init. |
@@ -704,7 +708,7 @@ OEM config bytes, BIOS OEM bytes, watchdog, complex power status.
 | `0x7A4` | RW | ADDR_AP_BIOS_BYTE | AP BIOS byte |
 | `0x7A5` | RW | ADDR_AP_OEM_BYTE3 | AP OEM byte 3 |
 | `0x7C5` | RW | ADDR_AP_OEM_BYTE5 | Multi-bitfield: bit 7=fan curve enable, bit 6=service managed(?), bit 5=logo flag. Read-modify-write. |
-| `0x7C6` | RW | ADDR_AP_OEM_BYTE6 | Fan curve apply/mode flag. Write 0x04 to activate fan table, EC ignores 0xF00+ while 0x00. |
+| `0x7C6` | RW | ADDR_AP_OEM_BYTE6 | Fan curve apply/mode flag. Bit 2 activates the fan table; EC ignores 0xF00+ while it is clear. Bit 6 = power-button request on Intel EC 77.0: never set. Cleared bits: 2 at S5 entry, 6 at S0 entry. |
 | `0x7C7` | RW | ADDR_AP_OEM_BYTE7 | Bit 1 = host-reported liquid cooler connection (`LCSE`); bits 2-4 = OC/power level (`OCPL`). Current init writes 0x0C (level 3, cooler disconnected). See 11.9.1. |
 | `0x7C8` | RW | ADDR_AP_OEM_BYTE8 | OEM byte 8 |
 | `0x7CA` | R | ADDR_BIOS_OEM_BYTE8 | BIOS OEM byte 8 (polled by OEM app) |
@@ -779,8 +783,8 @@ Writing **0x780 = 0xA2** makes the EC skip its adaptive CPU-cap aggregation and
 publish the existing custom PL1/PL2/PL4 instead. It also forces the fans to full,
 changes thermal-cap and GPIO protection outputs, and takes up to ~24 EC calls
 (about 24 s) to take effect. Outside the normal running state (`0x6E6` != 1) the
-EC clears 0x780 and spins; so the value must never persist across a power
-transition. Confirmed by instruction-level analysis and execution of the exact
+EC clears 0x780 and deliberately resets itself through its watchdog (Intel B2 `8AEF`),
+so the value must never persist across a power transition. Confirmed by instruction-level analysis and execution of the exact
 Intel image (EC version `0x454`=0x4D, `0x47D`=0) and the AMD X6FR image
 (EC version 112.0); both load those version bytes the same way (B1 851E / B1 10611).
 `0x781` holds an alternate request the EC prefers when nonzero.
@@ -799,6 +803,30 @@ This is not a selective overcurrent-protection disable: see
 
 `0x60C`-`0x60D` is a raw adapter-current ADC reading in this firmware (ADC6, low
 byte in `0x449`), **not** watts; System Info labels it "Adapter Current, raw ADC".
+
+### 11.9.3 Power sequencing (Intel EC 77.0)
+
+Static analysis only; evidence and code addresses in
+[`notes/intel_x6ar_power_sequencing.md`](notes/intel_x6ar_power_sequencing.md).
+
+- **Nothing MechControl writes powers the machine on from S5.** The only byte on that
+  path is `0x726` bit 3 (power on at adapter detection), which the masked init write keeps.
+- **Saved state:** the EC saves `0x9400`, `0x9401`, `0x706` and `0x7E8` only on the
+  battery-only shut-off path. At every power-on it rebuilds `0x751` bits 4/7 and `0x727`
+  bit 6 (`CUME`) from `0x7E8`; bit 5 of `0x7E8` is the remembered `CUME`.
+- **Cleared at S5 entry:** `0x7C5` bits 3/7, `0x7C6` bit 2, `0x459`, `0x480`, logo colour
+  `0x769`-`0x76B`. **Cleared at S0 entry:** `0x7C6` bit 6, `0x7C7` bit 1, `0x743` bits 0/2,
+  `0x786`, `0x787`, the published PL bytes `0x46A`/`0x46B`/`0x46E`/`0x46F`.
+- **`0x6E6`** power state: 0 just reset, 1 S0, 3 S3, 5 off, `0x81` powering on, `0x82`
+  entering S3, `0x83` resuming, `0x84` powering down.
+- **`0x47E`/`0x47F`/`0x6EC`** (cause of the last power-down, its reason, and the failure code
+  of the last power sequence) survive the next boot.
+- **Never write** (not in any allowlist): `0x459`, `0x45D` (wake timer), `0x45E`/`0x45F`
+  (EC event injection), `0x47E`/`0x47F`, `0x4FE`/`0x4FF` (adapter test overrides),
+  `0x6E6`-`0x6EC`, `0x77E`/`0x77F` and `0xDFF` (reset and power back on), `0x7E8`,
+  `0x7FD`-`0x7FF`. Never set `0x741` bit 4 or `0x7C6` bit 6.
+- `0x800`-`0xBFF` reads `0xFF` through the driver, so the EC's event log at `0x990` is
+  not readable.
 
 ---
 

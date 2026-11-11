@@ -21,7 +21,8 @@ come from that model and runtime validation, not assumptions about this host.
 A `fanCurveLatch` bitfield selects read-modify-write of the `0x7C6` latch, and
 `modePresets` limits which EC presets are exposed. X6FR5xxY uses both: firmware
 `XxFR5xxx_Pro_14.810` shares other bits in `0x7C6`, and its `0x7A7` preset is 145 W,
-not Battery Saver.
+not Battery Saver. IDY_7Y uses `fanCurveLatch` because Intel EC 77.0 treats `0x7C6`
+bit 6 as a power-button request. Other profiles write the whole byte.
 
 `ec.*` and `ec_session.*` own the OEM transport, activation and central WriteGuard.
 `controller*` coordinates power, fans, presets and partial outcomes. Thermal

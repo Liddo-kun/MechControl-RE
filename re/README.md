@@ -8,7 +8,8 @@ anything in this directory.
 - `report.md`: OEM architecture, methodology, project IDs and safety background.
 - `Architecture_BLE.md` and `notes/liquid_cooler_ble_protocol.md`: the BLE liquid cooler.
 - `notes/`: findings by topic. Multi-model state is in `notes/other_machines.md` and
-  `notes/ec_firmware_X6FR5_findings.md`.
+  `notes/ec_firmware_X6FR5_findings.md`. Intel EC power transitions are in
+  `notes/intel_x6ar_power_sequencing.md`.
 - `Profiles/MECHREVO/`: full OEM-extracted profiles. Use these
   to create a compact runtime profile in the repository's root `Profiles/MECHREVO/`
   when adding a model.
