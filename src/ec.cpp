@@ -66,21 +66,31 @@ uint32_t EcTransport::spec(int index) {
     const int32_t input = std::bit_cast<int32_t>(0xBBu | (static_cast<uint32_t>(index) << 8));
     return channel_->ioctl(ecSpecIoctl, {&input, 1}); // Reference does not reconnect SMAPC calls.
 }
+// Every address the app may write, on any model: EC initialization, the feature registers and the fan tables.
+// A profile adds only the EC bypass register it declares.
+static std::set<int> writable(const config::MachineProfile& p) {
+    std::set<int> r = {0x706, 0x708, 0x709, 0x726, 0x727, 0x741, 0x748, 0x7C5, 0x7C6, 0x7C7, 0x743, 0x744, 0x745, 0x746,
+                       0x751, 0x767, 0x769, 0x76A, 0x76B, 0x783, 0x784, 0x785, 0x786, 0x787, 0x78C, 0x7A6, 0x7AB};
+    for (int a = 0xF00; a <= 0xF5F; ++a) r.insert(a);
+    if (p.ec_bypass && p.registers.contains("ecBypass")) r.insert(p.reg("ecBypass"));
+    return r;
+}
+// The EC consumes or transforms what is written here, so reading the address back proves nothing.
+static const std::set<int> unverifiable = {0x706, 0x708, 0x709, 0x726, 0x727, 0x741, 0x748, 0x767, 0x78C, 0x7C6, 0x7C7};
 WriteGuard::WriteGuard(EcTransport& ec, const config::MachineProfile& profile, bool read_only,
                        std::function<void(unsigned)> wait)
-    : ec_(ec), read_only_(read_only), allow_(profile.expanded_allowlist()), skip_(profile.expanded_skip_verify()),
-      redirects_(profile.expanded_redirects()), wait_(std::move(wait)) {
+    : ec_(ec), read_only_(read_only), allow_(writable(profile)), redirects_(profile.expanded_redirects()),
+      wait_(std::move(wait)) {
     if (!wait_) wait_ = [](unsigned ms) { std::this_thread::sleep_for(std::chrono::milliseconds(ms)); };
 }
 void WriteGuard::admit(int32_t address) const {
     if (read_only_) throw std::runtime_error("EC diagnostic session is read-only");
-    if (!allow_.contains(address))
-        throw std::runtime_error("EC write address is not in the effective profile allowlist");
+    if (!allow_.contains(address)) throw std::runtime_error("EC write address is not in the allowlist");
 }
-bool WriteGuard::verifies_same_address(int32_t a) const { return !skip_.contains(a) && !redirects_.contains(a); }
+bool WriteGuard::verifies_same_address(int32_t a) const { return !unverifiable.contains(a) && !redirects_.contains(a); }
 void WriteGuard::write_verify(int32_t address, uint8_t value) {
     ec_.write(address, value);
-    if (skip_.contains(address)) return;
+    if (unverifiable.contains(address)) return;
     if (auto i = redirects_.find(address); i != redirects_.end()) {
         uint8_t mask = (i->second.transform == "direct" || i->second.transform == "inverted_offset") ? 127 : 255;
         for (unsigned delay : {450, 200, 350, 500}) {

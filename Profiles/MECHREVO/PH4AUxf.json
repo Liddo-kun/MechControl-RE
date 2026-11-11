@@ -1,7 +1,6 @@
 {
   "projectId": "PH4AUxf",
   "projectIdValue": 5895,
-  "verified": false,
   "driver": {
     "devicePath": "\\\\.\\ACPIDriver"
   },
@@ -406,13 +405,5 @@
       ]
     }
   },
-  "skipVerify": [
-    "0x741",
-    "0x7C6"
-  ],
-  "verifyRedirect": {},
-  "writeAllowlist": [
-    "0x741",
-    "0x7C6"
-  ]
+  "verifyRedirect": {}
 }

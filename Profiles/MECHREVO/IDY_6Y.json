@@ -1,7 +1,6 @@
 {
   "projectId": "IDY_6Y",
   "projectIdValue": 12,
-  "verified": false,
   "driver": { "devicePath": "\\\\.\\ACPIDriver" },
   "registers": {
     "PL1": "0x783", "PL2": "0x784", "PL4": "0x785",
@@ -29,7 +28,5 @@
   "limits": {},
   "bitfields": {},
   "batteryModes": [],
-  "skipVerify": ["0x741", "0x7C6"],
-  "verifyRedirect": {},
-  "writeAllowlist": ["0x741", "0x7C6"]
+  "verifyRedirect": {}
 }

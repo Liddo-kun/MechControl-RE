@@ -48,8 +48,8 @@ struct FanTable {
 struct MachineProfile {
     std::string project_id, device_path = R"(\\.\ACPIDriver)";
     int project_id_value = 0;
-    bool verified = false, tgp_fallback = false, cpu_fallback = false;
-    std::vector<std::string> baseboard_patterns, allowlist, skip_verify;
+    bool tgp_fallback = false, cpu_fallback = false;
+    std::vector<std::string> baseboard_patterns;
     std::optional<std::string> cpu_vendor;
     std::map<std::string, std::string> registers;
     std::map<std::string, Limit> limits;
@@ -68,8 +68,6 @@ struct MachineProfile {
     // The CPU temperature limit is written in C, not as an offset below TjMax.
     bool cpu_direct() const { return cpu_encoding() == "direct"; }
     bool pl4_doubled() const;
-    std::set<int> expanded_allowlist() const;
-    std::set<int> expanded_skip_verify() const;
     std::map<int, Redirect> expanded_redirects() const;
 };
 int hex(const std::string& value);

@@ -1,7 +1,6 @@
 {
   "projectId": "PH4TUX1",
   "projectIdValue": 19,
-  "verified": false,
   "driver": {
     "devicePath": "\\\\.\\ACPIDriver"
   },
@@ -405,13 +404,5 @@
       ]
     }
   },
-  "skipVerify": [
-    "0x741",
-    "0x7C6"
-  ],
-  "verifyRedirect": {},
-  "writeAllowlist": [
-    "0x741",
-    "0x7C6"
-  ]
+  "verifyRedirect": {}
 }
