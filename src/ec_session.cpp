@@ -125,8 +125,7 @@ EcSession::EcSession(
     profile = config::load_machine(selection.path);
     if (diagnostic)
         diagnostic("[Profile] Selected " + profile.project_id + " by " + selection.method + " from " +
-                   selection.path.string() + " (projectIdValue " + std::to_string(profile.project_id_value) +
-                   ", verified " + (profile.verified ? "yes" : "no") + ")");
+                   selection.path.string() + " (projectIdValue " + std::to_string(profile.project_id_value) + ")");
     config::apply_universal_defaults(profile);
     if (profile.device_path != R"(\\.\ACPIDriver)")
         ec_ = std::make_unique<EcTransport>(factory(config::wide(profile.device_path)), diagnostic);
@@ -308,9 +307,7 @@ void EcSession::describe(const std::function<void(const std::string&)>& log, con
     reg("logoG", logo);
     reg("logoB", logo);
     log(s);
-    s = "--- Startup Validation ---\n  Profile " +
-        std::string(p.verified ? "verified: features are not gated by register checks"
-                               : "unverified: register layout validated");
+    s = "--- Startup Validation ---";
     for (const auto& [name, b] : p.bitfields) try {
             auto v = ec_->read(config::hex(b.reg));
             s += "\n  Bitfield " + name + " (" + b.reg + "): raw=" + hex_text(v) +

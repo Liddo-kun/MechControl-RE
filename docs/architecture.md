@@ -18,6 +18,8 @@ Detection preserves baseboard-pattern precedence, CPU-vendor filtering, direct
 then shifted project IDs, filename fallback and manual selection. Runtime models
 live in the one `Profiles/MECHREVO` tree. Device capabilities, encodings and limits
 come from that model and runtime validation, not assumptions about this host.
+Limits the EC reports (ECSpec) replace the profile's, and startup validation disables
+a feature whose registers read outside their sane range.
 A `fanCurveLatch` bitfield selects read-modify-write of the `0x7C6` latch, and
 `modePresets` limits which EC presets are exposed. X6FR5xxY uses both: firmware
 `XxFR5xxx_Pro_14.810` shares other bits in `0x7C6`, and its `0x7A7` preset is 145 W,
@@ -25,6 +27,8 @@ not Battery Saver. IDY_7Y uses `fanCurveLatch` because Intel EC 77.0 treats `0x7
 bit 6 as a power-button request. Other profiles write the whole byte.
 
 `ec.*` and `ec_session.*` own the OEM transport, activation and central WriteGuard.
+The guard admits one fixed set of addresses on every model, plus the EC bypass
+register of a profile that declares it.
 `controller*` coordinates power, fans, presets and partial outcomes. Thermal
 enforcement runs before linked fans and telemetry. Held actions constrain later
 writes, and acquisitions during waits win. `thermal.*` persists existing Stage

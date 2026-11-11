@@ -96,7 +96,6 @@ void from_json(const Json& j, MachineProfile& v) {
     object(j);
     F("projectId", project_id);
     F("projectIdValue", project_id_value);
-    F("verified", verified);
     if (auto i = j.find("driver"); i != j.end()) {
         object(*i);
         field(*i, "devicePath", v.device_path);
@@ -107,13 +106,11 @@ void from_json(const Json& j, MachineProfile& v) {
     F("bitfields", bitfields);
     F("baseboardPatterns", baseboard_patterns);
     F("cpuVendor", cpu_vendor);
-    F("skipVerify", skip_verify);
     F("verifyRedirect", redirects);
     F("defaultFanCurve", default_fan);
     F("defaultLogo", default_logo);
     F("modeDefaults", modes);
     F("modePresets", mode_presets);
-    F("writeAllowlist", allowlist);
     F("ecBypass", ec_bypass);
 }
 #undef F
@@ -148,35 +145,6 @@ bool MachineProfile::pl4_doubled() const {
     auto i = limits.find("PL4");
     return i != limits.end() && i->second.encoding == "double";
 }
-static const std::vector<std::string> init_allow = {"0x708", "0x709", "0x726", "0x727", "0x741",      "0x748",
-                                                    "0x7C5", "0x7C7", "0x7C6", "0x706", "0xF00-0xF5F"};
-static const std::vector<std::string> feature_allow = {"0x783", "0x784", "0x785", "0x786", "0x743", "0x744",
-                                                       "0x745", "0x746", "0x751", "0x7A6", "0x767", "0x769",
-                                                       "0x76A", "0x76B", "0x7AB", "0x78C", "0x787"};
-static const std::vector<std::string> universal_skip = {"0x767", "0x78C", "0x726", "0x727", "0x741", "0x7C6",
-                                                        "0x708", "0x709", "0x748", "0x706", "0x7C7"};
-static void expand(std::set<int>& out, const std::vector<std::string>& entries) {
-    for (const auto& e : entries) {
-        auto dash = e.find('-');
-        if (dash == std::string::npos)
-            out.insert(hex(e));
-        else {
-            for (int n = hex(e.substr(0, dash)), last = hex(e.substr(dash + 1)); n <= last; ++n) out.insert(n);
-        }
-    }
-}
-std::set<int> MachineProfile::expanded_allowlist() const {
-    std::set<int> r;
-    expand(r, init_allow);
-    expand(r, allowlist);
-    return r;
-}
-std::set<int> MachineProfile::expanded_skip_verify() const {
-    std::set<int> r;
-    expand(r, universal_skip);
-    expand(r, skip_verify);
-    return r;
-}
 std::map<int, Redirect> MachineProfile::expanded_redirects() const {
     std::map<int, Redirect> r;
     for (const auto& [k, v] : redirects) r[hex(k)] = v;
@@ -184,8 +152,8 @@ std::map<int, Redirect> MachineProfile::expanded_redirects() const {
 }
 MachineProfile load_machine(const std::filesystem::path& path) {
     auto p = read_json(path).get<MachineProfile>();
-    if (p.project_id.empty() || p.registers.empty() || p.allowlist.empty())
-        throw std::runtime_error("Profile requires projectId, registers and writeAllowlist: " + path.string());
+    if (p.project_id.empty() || p.registers.empty())
+        throw std::runtime_error("Profile requires projectId and registers: " + path.string());
     return p;
 }
 void apply_universal_defaults(MachineProfile& p) {
@@ -205,16 +173,6 @@ void apply_universal_defaults(MachineProfile& p) {
                     {"fanDuty", {0, 200, "raw_div_2_percent", {}, {}}},
                     {"fanTemp", {0, 105, "direct", {}, {}}},
                     {"fanSwitchSpeed", {100, 12700, "fan_switch_speed", {}, {}}}};
-    }
-    if (!p.verified) {
-        // Unverified profiles use the universal lists. A declared EC bypass keeps only its own explicit entry.
-        std::set<int> listed;
-        expand(listed, p.allowlist);
-        bool bypass = p.ec_bypass && p.registers.contains("ecBypass") && listed.contains(p.reg("ecBypass"));
-        p.allowlist = init_allow;
-        p.allowlist.insert(p.allowlist.end(), feature_allow.begin(), feature_allow.end());
-        p.skip_verify = universal_skip;
-        if (bypass) p.allowlist.push_back(p.registers.at("ecBypass"));
     }
     if (p.redirects.empty()) p.redirects["0x786"] = {"0x463", "inverted_offset", 105};
 }
@@ -394,20 +352,16 @@ std::optional<std::map<std::string, Mode>> Hardware::extract_modes(bool absolute
 }
 Enrichment enrich(MachineProfile& p, const Hardware& h) {
     Enrichment e;
+    // What the EC reports for this machine outranks the profile's limits.
     auto limits = h.extract_limits();
-    if (!p.verified) {
-        for (const auto& [k, v] : limits) {
-            p.limits[k] = v;
-            e.limits.insert(k);
-        }
-        if (limits.contains("TGP")) p.tgp_fallback = false;
-        if (limits.contains("PL1") && limits.contains("PL2") && limits.contains("PL4")) p.cpu_fallback = false;
+    for (const auto& [k, v] : limits) {
+        p.limits[k] = v;
+        e.limits.insert(k);
     }
+    if (limits.contains("TGP")) p.tgp_fallback = false;
+    if (limits.contains("PL1") && limits.contains("PL2") && limits.contains("PL4")) p.cpu_fallback = false;
     auto temp = limits.find("cpuTempLimit");
-    if (temp != limits.end() && temp->second.encoding == "direct") {
-        p.limits["cpuTempLimit"] = temp->second;
-        p.redirects["0x786"] = {"0x463", "direct", {}};
-    }
+    if (temp != limits.end() && temp->second.encoding == "direct") p.redirects["0x786"] = {"0x463", "direct", {}};
     e.cpu_encoding_confirmed = temp != limits.end() && temp->second.encoding == p.cpu_encoding();
     if (auto d = h.pl4_doubled()) {
         if (p.limits.contains("PL4")) p.limits["PL4"].encoding = *d ? "double" : "direct";
@@ -439,9 +393,7 @@ Validation validate_startup(const MachineProfile& p, const ReadByte& read, uint8
         if (f == "gpuPower") return e.limits.contains("TGP") || e.limits.contains("dynamicBoost");
         return false;
     };
-    auto disable = [&](const std::string& feature, const std::string& why) {
-        if (!p.verified) r.disabled.try_emplace(feature, why);
-    };
+    auto disable = [&](const std::string& feature, const std::string& why) { r.disabled.try_emplace(feature, why); };
     const std::map<std::string, std::string> features = {{"fanCurveEnable", "fanControl"},
                                                          {"batteryMode", "battery"},
                                                          {"dynamicBoostEn", "gpuPower"},

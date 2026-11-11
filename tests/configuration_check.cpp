@@ -63,8 +63,6 @@ int main(int argc, char** argv) try {
         }
         auto p = load_machine(f);
         apply_universal_defaults(p);
-        require(!p.expanded_allowlist().empty(), "Allowlist");
-        p.expanded_skip_verify();
         p.expanded_redirects();
         for (const auto& [_, b] : p.bitfields) {
             hex(b.reg);
@@ -140,7 +138,7 @@ int main(int argc, char** argv) try {
     mask.bit = 0;
     require(mask.get_mask() == 255, "Explicit mask takes priority and casts to byte");
     auto invalid = area("invalid");
-    raw(invalid / "oem.json", R"({"projectId":"archive","registers":{"x":"0x740"}})");
+    raw(invalid / "oem.json", R"({"projectId":"archive","ecRegisters":{"x":"0x740"}})");
     fails([&] { load_machine(invalid / "oem.json"); });
     auto minimal = machine;
     minimal["limits"] = Json::object();
@@ -216,13 +214,10 @@ int main(int argc, char** argv) try {
     require(p.modes && p.modes->at("gaming").tcc_offset == 95 && p.modes->at("gaming").pl4 == 200,
             "EC mode defaults decode");
     p = load_machine(profiles / "IDY_7Y.json");
-    p.verified = true;
     p.modes = std::map<std::string, Mode>{};
     apply_universal_defaults(p);
-    auto verified_max = p.limits.at("PL1").max;
     enrich(p, h);
-    require(p.limits.at("PL1").max == verified_max && p.cpu_encoding() == "direct" && p.modes->empty(),
-            "Verified limits; hardware encoding; empty modes not replaced");
+    require(p.limits.at("PL1").max == 150 && p.modes->empty(), "ECSpec limits replace the profile's; empty modes stay");
     h.ecspec->at(9) = 0;
     require(h.extract_limits().empty(), "ECSpec marker validated");
     auto read = [](int a) -> uint8_t {
@@ -235,14 +230,12 @@ int main(int argc, char** argv) try {
         return 100;
     };
     p = load_machine(profiles / "IDY_7Y.json");
-    p.verified = true;
     apply_universal_defaults(p);
-    require(!validate_startup(p, read, 1, {}, "amd").cpu_power(), "Verified vendor contradiction gated");
+    require(!validate_startup(p, read, 1, {}, "amd").cpu_power(), "Vendor contradiction gated");
     require(validate_startup(p, read, 1, {}, "intel").cpu_power(), "Matching vendor enabled");
-    p.verified = false;
     require(!validate_startup(p, read, 0, {}, "intel").gpu_power(), "Absent GPU gated");
     auto sentinel = [](int) -> uint8_t { return 0; };
-    require(!validate_startup(p, sentinel, 1, {}, "intel").cpu_power(), "Unverified sanity gate");
+    require(!validate_startup(p, sentinel, 1, {}, "intel").cpu_power(), "Register sanity gate");
     Enrichment ec;
     ec.limits = {"PL1"};
     require(validate_startup(p, sentinel, 1, ec, "intel").cpu_power(), "ECSpec stronger than sentinel");

@@ -52,7 +52,7 @@ private:
     void write_verify(int32_t address, uint8_t value);
     EcTransport& ec_;
     bool read_only_, recovering_ = false;
-    std::set<int> allow_, skip_;
+    std::set<int> allow_;
     std::map<int, config::Redirect> redirects_;
     std::function<void(unsigned)> wait_;
 };

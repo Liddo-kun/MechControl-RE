@@ -132,6 +132,11 @@ void abi_and_guard() {
     std::array<EcWrite, 2> bad{{{0x783, 50}, {0x123456, 1}}};
     refuses([&] { g.apply(bad); }, "group allowlist preflight");
     require(s->calls.empty(), "all group addresses admitted before first write");
+    auto undeclared = p;
+    undeclared.ec_bypass.reset();
+    g.admit(0x780);
+    refuses([&] { WriteGuard(ec, undeclared, false).admit(0x780); },
+            "only a profile that declares the EC bypass may write its register");
     s->bytes[0x743] = 0xA8;
     g.apply(gpu_writes(p, 140, true, 15));
     require(writes(*s) ==
