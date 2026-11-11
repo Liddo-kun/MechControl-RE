@@ -589,12 +589,17 @@ std::string Controller::defaults(const std::string& key) {
                  {p.reg("cpuTempLimitWrite"),
                   encoding::cpu_temperature(temp, session_.profile.cpu_direct(), p.tj_max())}};
         }
-        auto mask = p.bitfields.at("dynamicBoostEn").get_mask();
-        append({{p.reg("tgpDbCtrl"), 0, mask}, {p.reg("tgp"), 0}, {p.reg("dbTotalPower"), 0}, {p.reg("dbMaxTgp"), 0}});
-        append({fan_boost_write(p, false), {p.reg("fanCurveEnable"), 0, 128}});
-        fan = fan_intent_;
-        fan->linked = false;
-        fan->curve = false;
+        if (features_.gpu_power()) {
+            auto mask = p.bitfields.at("dynamicBoostEn").get_mask();
+            append(
+                {{p.reg("tgpDbCtrl"), 0, mask}, {p.reg("tgp"), 0}, {p.reg("dbTotalPower"), 0}, {p.reg("dbMaxTgp"), 0}});
+        }
+        if (features_.fan_control()) {
+            append({fan_boost_write(p, false), {p.reg("fanCurveEnable"), 0, 128}});
+            fan = fan_intent_;
+            fan->linked = false;
+            fan->curve = false;
+        }
         if (curves_supported() && p.default_fan && p.default_fan->cpu && p.default_fan->gpu) {
             fan->cpu_curve = active_curve(*p.default_fan->cpu, p.fan_table.entries);
             auto g = active_curve(*p.default_fan->gpu, p.fan_table.entries);
@@ -603,7 +608,7 @@ std::string Controller::defaults(const std::string& key) {
                                     latch_mask_));
             full_curves = true;
         }
-        if (session_.battery_bit3)
+        if (features_.battery())
             append({{p.reg("batteryMode"), encoding::battery(0, *session_.battery_bit3),
                      p.bitfields.at("batteryMode").get_mask()}});
     }
@@ -659,7 +664,8 @@ std::string Controller::defaults(const std::string& key) {
         }
         thermal_->enforce();
     }
-    if (key.empty() && peripheral_hardware_ && p.default_logo) {
+    bool logo_defaults = key.empty() && peripheral_hardware_ && p.default_logo && features_.lighting();
+    if (logo_defaults) {
         // No held CPU/GPU/fan setting is rewritten after the slow NVIDIA wait.
         thermal_->enforce();
         auto logo = *p.default_logo;
@@ -673,9 +679,8 @@ std::string Controller::defaults(const std::string& key) {
         throw std::runtime_error("Core defaults completed; NVIDIA restoration failed: " + driver_failure);
     std::string text = "Core defaults applied (unsaved); ";
     if (key.empty()) text += nvidia_ ? "NVIDIA defaults restored; " : "NVIDIA defaults not active; ";
-    text += key.empty() && peripheral_hardware_ && p.default_logo
-                ? "model logo defaults restored; other peripheral intent unchanged"
-                : "peripheral intent unchanged";
+    text += logo_defaults ? "model logo defaults restored; other peripheral intent unchanged"
+                          : "peripheral intent unchanged";
     if (thermal_->tripped()) text += "; thermal holds supersede normal defaults";
     if (!curves_supported())
         text += "; unsupported fan curves skipped";
