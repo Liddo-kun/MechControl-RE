@@ -70,13 +70,15 @@ std::future<ControlResult> ControlWorker::request(ControlCommand command, std::u
     }
     return future;
 }
+// Answers the queued commands and accepts no more.
+void ControlWorker::refuse(const char* reason) {
+    std::lock_guard lock(mutex_);
+    closing_ = true;
+    for (auto& p : commands_) p.reply.set_value({1, reason});
+    commands_.clear();
+}
 void ControlWorker::stop() {
-    {
-        std::lock_guard lock(mutex_);
-        closing_ = true;
-        for (auto& p : commands_) p.reply.set_value({1, "Controller stopping"});
-        commands_.clear();
-    }
+    refuse("Controller stopping");
     thread_.request_stop();
     SetEvent(stopping_.get());
     if (thread_.joinable()) thread_.join();
@@ -369,5 +371,6 @@ void ControlWorker::run(std::stop_token stop) {
             delivery_->post({ResultKind::failure, 0, L"EC startup/work failed; see the diagnostic log."});
         }
     }
+    refuse("Controller stopped");
 }
 }

@@ -67,6 +67,7 @@ public:
 
 private:
     void run(std::stop_token stop);
+    void refuse(const char* reason);
     std::shared_ptr<Delivery> delivery_;
     Log& log_;
     WorkerOptions options_;
