@@ -128,8 +128,10 @@ void ControlWorker::run(std::stop_token stop) {
         };
         std::uint64_t samples = 0;
         unsigned failures = 0;
-        auto sample = [&] {
-            auto shared = controller ? controller->tick() : std::optional(session->sample(Detail::rpm));
+        auto sample = [&](bool waiting = false) {
+            auto shared = !controller ? std::optional(session->sample(Detail::rpm))
+                          : waiting   ? controller->wait_tick()
+                                      : controller->tick();
             if (controller)
                 if (auto battery = controller->take_battery()) {
                     ControlResult result;
@@ -224,7 +226,7 @@ void ControlWorker::run(std::stop_token stop) {
                     }
                     if (ready == WAIT_OBJECT_0 + 1 && controller) {
                         try {
-                            sample();
+                            sample(true);
                         } catch (const std::exception& ex) {
                             log_.write(ex.what());
                         }

@@ -217,6 +217,8 @@ public:
     std::vector<std::string> start(); // Returns EC init errors; startup continues with them.
     ControlResult execute(const ControlCommand&);
     std::optional<Sensors> tick(ULONGLONG now = GetTickCount64());
+    // The tick for the worker's wait on a blocking device operation; tick() itself never runs inside one.
+    std::optional<Sensors> wait_tick(ULONGLONG now = GetTickCount64());
     std::optional<config::Json> take_battery();
     const ThermalProtection& thermal() const { return *thermal_; }
     int active_slot() const { return active_slot_; }

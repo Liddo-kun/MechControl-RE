@@ -8,6 +8,14 @@ the UI; it is detached before destruction. Shutdown stops producers and joins
 the worker. Synchronous driver, WMI, NVIDIA and HID calls must return before
 shutdown finishes; there is no guaranteed cancellation timeout.
 
+Blocking NVIDIA, HID and WMI calls run on a helper thread while the worker waits; EC access
+never leaves the worker. During the wait the worker runs only `Controller::wait_tick` and the
+lifecycle notifications. `wait_tick` watches the EC bypass and activation, samples the thermal
+failsafe (a new trip writes its EC holds at once; the driver half follows when the driver is
+free), runs the lighting idle timer and reads telemetry. Everything else waits for the next
+ordinary tick: the resume settle, hold re-verification, slot re-apply after EC recovery, the
+delayed GPU check and linked fans. Other commands stay queued.
+
 Controlling startup acquires `Global\MechControl` before log or hardware access.
 The optional named-pipe server submits to the same worker. It is compiled out by
 default. `--diagnose <file>` is a separate write-free, mutex-exempt EC path, not
