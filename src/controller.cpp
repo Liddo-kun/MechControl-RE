@@ -326,7 +326,6 @@ void Controller::emergency(int action) {
     }
 }
 bool Controller::matches(int action) {
-    if (action == Gpu && nvidia_busy_) return false;
     auto& p = session_.profile;
     std::vector<EcWrite> w;
     if (action == Gpu) {
@@ -869,7 +868,7 @@ UserProfile Controller::capture(int slot) {
     // A group whose feature is unavailable has nothing to read and is saved as null.
     profile.cpu = features_.cpu_power() ? std::optional(cpu()) : std::nullopt;
     profile.gpu = features_.gpu_power() ? std::optional(gpu(true)) : std::nullopt;
-    if (profile.gpu && nvidia_ && !nvidia_busy_) {
+    if (profile.gpu && nvidia_) {
         if (gpu_driver_uncertain_) throw std::runtime_error(nvidia_error_);
         nv::Currents c;
         nvidia_work([&] { c = nvidia_->currents(); });
@@ -1198,7 +1197,6 @@ ControlResult Controller::run(const GpuApply& c) {
         cpu = cpu_writes(session_.profile, *c.cpu);
     }
     const auto& g = c.settings;
-    if (nvidia_busy_) throw std::runtime_error("NVIDIA operation in progress");
     if (c.power) gpu_plan(g);
     // Thermal sampling continues during NVIDIA work; a
     // CPU hold latched there outranks the prepared writes.

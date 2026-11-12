@@ -210,7 +210,7 @@ cli::Reply Controller::cli(const std::vector<std::string>& arguments) {
                 bool power = options.contains("--tgp") || options.contains("--db");
                 if (power) gpu_plan(g);
                 if (options.contains("--nvvdd") || options.contains("--msvdd") || options.contains("--board-input")) {
-                    if (!nvidia_ || nvidia_busy_) return {1, nvidia_unavailable()};
+                    if (!nvidia_) return {1, nvidia_unavailable()};
                     // Read availability first, as the source does; parse each current once.
                     nvidia_work([&] { nvidia_->currents(); });
                     if (auto it = options.find("--nvvdd"); it != options.end()) g.nvvdd_ma = milliamps(it->second);
