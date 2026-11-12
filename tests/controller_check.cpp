@@ -613,10 +613,12 @@ void gpu_integration(const std::filesystem::path& root) {
                             });
     capture_pending = &interrupted_capture;
     interrupted_capture.controller->execute(ProtectionApply{{true, 50, true, true, false}});
-    check(interrupted_capture.controller->execute(SlotSave{1}).code == 1 &&
-              !std::filesystem::exists(root / "gpu-capture-trip/userprofile_1.json") &&
+    auto refused = interrupted_capture.controller->execute(SlotSave{1});
+    check(refused.code == 1 && !std::filesystem::exists(root / "gpu-capture-trip/userprofile_1.json") &&
               interrupted_capture.controller->thermal().complete(),
           "trip during slow NVIDIA capture cannot overwrite a normal slot with emergency settings");
+    check(!refused.partial && refused.text.find("Partial") == std::string::npos,
+          "a command that wrote nothing is not called partial because a trip wrote during its wait");
     Rig* combined_pending = nullptr;
     bool combined_trip = true;
     auto combined_driver = std::make_unique<GpuFixture>();
@@ -1462,6 +1464,7 @@ void waits(const std::filesystem::path& root) {
     auto status = c.execute(slow_read);
     check(status.code == 0 && !w.during && c.thermal().complete() && w.driver->request && *w.driver->request <= 95000,
           "the driver half of the hold follows when the NVIDIA work returns");
+    check(!status.applied, "a status query is not reported as a write because a trip wrote during it");
     w.during = [&] {
         s.bytes[0x751] &= ~64;
         s.writes.clear();
