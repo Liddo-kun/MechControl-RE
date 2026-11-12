@@ -239,20 +239,21 @@ void Controller::check_gpu() {
                 " W on AC; Dynamic Boost may be stuck. Restart NVIDIA Platform Controllers and Framework to restore it.");
     }
 }
-void Controller::unlock_gpu(bool enabled_value) {
+ControlResult Controller::run(const GpuUnlock& c) {
     thermal_->check_before_apply();
     if (thermal_->tripped()) throw std::runtime_error("Reset thermal failsafe before changing NVIDIA BIOS limits");
     auto& driver = open_nvidia();
     if (thermal_->tripped())
         throw std::runtime_error("Thermal protection tripped while connecting NVIDIA; unlock was not changed");
-    if (driver.enabled == enabled_value) return;
+    if (driver.enabled == c.enabled) return {.applied = true};
     nv::ProfilePlan plan;
-    plan.unlock = enabled_value;
+    plan.unlock = c.enabled;
     plan.restart = true;
     configure_gpu(plan);
     auto g = gpu();
     g.tgp = std::clamp(g.tgp, gpu_min(), gpu_max());
     apply_gpu(g);
+    return {.applied = true};
 }
 // DLPPC needs only NVAPI, so unsupported BIOS limits (no nv::Power) do not block it.
 void Controller::open_dlppc() {
@@ -279,7 +280,7 @@ void Controller::write_dlppc(bool active) {
         dlppc_api_->set_dlppc(active);
     diagnostic_(std::string("NVIDIA DLPPC (AI-controlled memory clock) ") + (active ? "enabled" : "disabled"));
 }
-void Controller::dlppc(bool disabled) {
+ControlResult Controller::run(const DlppcApply& c) {
     if (!nvidia_ && nvidia_available_) try {
             open_nvidia();
         } catch (const std::exception&) {
@@ -291,14 +292,15 @@ void Controller::dlppc(bool disabled) {
         nvidia_work([&] {
             if (!read_dlppc()) throw std::runtime_error("This GPU/driver has no DLPPC policy");
             write = true;
-            write_dlppc(!disabled);
+            write_dlppc(!c.disabled);
         });
     } catch (...) {
         writes_started_ |= write;
         throw;
     }
     writes_started_ = true;
-    dlppc_disabled_ = disabled;
-    store_.set_disable_dlppc(disabled); // The store owns preference save and rollback.
+    dlppc_disabled_ = c.disabled;
+    store_.set_disable_dlppc(c.disabled); // The store owns preference save and rollback.
+    return {.applied = true, .saved = true};
 }
 }
