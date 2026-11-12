@@ -48,8 +48,8 @@ Jon's test machine (Intel IDY_7Y, baseboard `YAOSHI Series-X6AR55xY`).
 
 - EC writes can brick the machine. Never write a register without verified ground truth,
   and do not infer new register semantics.
-- All writes go through the central WriteGuard in `src/ec_session.*` (allowlist,
-  clamping and verification).
+- All writes go through the central WriteGuard in `src/ec.*` (allowlist, range
+  checks that refuse a value instead of clamping it, and verification).
 - Use read-modify-write for bitfield registers and keep model-derived encodings and limits.
 - EC reads and other hardware checks are allowed. Never run two hardware-controlling
   instances at once. `MechControl.exe --diagnose <file.json>` is read-only and may run
