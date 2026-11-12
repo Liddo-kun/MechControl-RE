@@ -1489,14 +1489,15 @@ void waits(const std::filesystem::path& root) {
     w.during = [&] {
         // The EC reset: activation and the held values are gone.
         s.bytes[0x741] = 0;
+        s.bytes[0x744] = 45;
         s.bytes[0x783] = 90;
         s.bytes[0x751] &= ~64;
         int sets = w.driver->sets;
         c.wait_tick(later(100000));
         check(s.bytes[0x741] == 1 && !reapplied() && w.driver->sets == sets && c.thermal().lost_alerts() == 0,
               "activation loss during NVIDIA work re-initializes the EC there and leaves the slot for later");
-        check(s.bytes[0x783] == 90 && (s.bytes[0x751] & 64) == 0,
-              "holds the EC forgot stay unwritten until the NVIDIA work returns");
+        check(held(s) && !c.thermal().complete() && w.driver->sets == sets && c.thermal().lost_alerts() == 0,
+              "holds the EC forgot are rewritten there, unverified and without a lost-protection alert");
     };
     c.execute(slow_read);
     c.tick(later(100000));

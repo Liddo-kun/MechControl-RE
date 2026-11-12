@@ -247,7 +247,8 @@ private:
     bool curves_supported() const;
     bool recover(const char* reason);
     void recover_settings();
-    void watchdog(ULONGLONG now);
+    bool watchdog(ULONGLONG now);
+    void rewrite_holds();
     void sample_thermal(Sensors& shared, bool defer_maintenance);
     void poll_battery(ULONGLONG now);
     std::optional<Sensors> telemetry(ULONGLONG now, const Sensors& shared);
