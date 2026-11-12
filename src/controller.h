@@ -133,6 +133,60 @@ using ControlCommand =
                  GpuUnlock, DlppcApply, CliCommand, LightingApply, LightingIdle, DimmingApply, PeripheralRead,
                  CoolerRequest, BatteryPage, UiRead, UiPage, UiPreflight, FanMaster, FanEdit, FanRead, PowerTransition,
                  EcBypassApply, CoolerFlag>;
+// How the worker treats each command. Every command needs an entry: command_traits() fails to compile without one.
+struct CommandTraits {
+    bool notification = false; // Lifecycle event, run even during the wait for a blocking device operation.
+    bool posts = true;         // Its result goes to the UI.
+    bool if_written = false;   // Posts and marks tabs only when it wrote; a CLI query or refusal changes nothing.
+    unsigned stale = 0;        // Tabs to re-read once it writes; any tab here also refreshes the presentation.
+    unsigned fresh = 0;        // Tabs it has just read, when it succeeds.
+    bool catalog = false;      // Changes slot names or contents.
+    bool present = false;      // Refreshes the presentation even without stale tabs.
+};
+// Tabs as bits, in UI order.
+namespace tab {
+inline constexpr unsigned power = 1, fans = 2, failsafe = 4, battery = 8, lighting = 16, all = 0x7f;
+}
+inline CommandTraits traits(const CpuApply&) { return {.stale = tab::power}; }
+inline CommandTraits traits(const GpuApply&) { return {.stale = tab::power}; }
+inline CommandTraits traits(const GpuUnlock&) { return {.stale = tab::power}; }
+inline CommandTraits traits(const DlppcApply&) { return {.stale = tab::power}; }
+inline CommandTraits traits(const EcBypassApply&) { return {.stale = tab::power}; }
+inline CommandTraits traits(const CoolerFlag&) { return {.stale = tab::power}; }
+inline CommandTraits traits(const UiPreflight&) { return {}; }
+inline CommandTraits traits(const FanApply&) { return {.stale = tab::fans}; }
+inline CommandTraits traits(const FanMaster&) { return {.stale = tab::fans}; }
+inline CommandTraits traits(const FanBoost&) { return {.stale = tab::fans}; }
+inline CommandTraits traits(const SwitchApply&) { return {.stale = tab::fans}; }
+inline CommandTraits traits(const FanEdit&) { return {.posts = false}; }
+inline CommandTraits traits(const FanRead&) { return {.fresh = tab::fans}; }
+inline CommandTraits traits(const ProtectionApply&) { return {.stale = tab::failsafe}; }
+inline CommandTraits traits(const BatteryApply&) { return {.stale = tab::battery}; }
+inline CommandTraits traits(const LightingApply&) { return {.stale = tab::lighting}; }
+inline CommandTraits traits(const LightingIdle&) { return {.stale = tab::lighting}; }
+inline CommandTraits traits(const DimmingApply&) { return {.stale = tab::lighting}; }
+inline CommandTraits traits(const PeripheralRead&) { return {}; }
+inline CommandTraits traits(const CoolerRequest&) { return {}; }
+inline CommandTraits traits(const UiRead& c) { return {.fresh = c.page >= 0 ? 1u << c.page : 0}; }
+inline CommandTraits traits(const SlotLoad&) { return {.stale = tab::all, .catalog = true}; }
+inline CommandTraits traits(const SlotSave&) { return {.catalog = true, .present = true}; }
+inline CommandTraits traits(const SlotRename&) { return {.catalog = true}; }
+inline CommandTraits traits(const SlotClear&) { return {.catalog = true}; }
+inline CommandTraits traits(const DefaultsApply&) { return {.stale = tab::all}; }
+inline CommandTraits traits(const ThermalReset&) { return {.stale = tab::all}; }
+inline CommandTraits traits(const ThermalTest&) { return {.stale = tab::all}; }
+inline CommandTraits traits(const CliCommand& c) {
+    return {.if_written = true, .stale = !c.arguments.empty() && c.arguments[0] == "fan" ? tab::fans : tab::power};
+}
+inline CommandTraits traits(const Visibility&) { return {.notification = true, .posts = false}; }
+inline CommandTraits traits(const UiPage&) { return {.notification = true, .posts = false}; }
+inline CommandTraits traits(const BatteryPage&) { return {.notification = true, .posts = false}; }
+inline CommandTraits traits(const Resume&) { return {.notification = true, .posts = false}; }
+inline CommandTraits traits(const PowerTransition&) { return {.notification = true, .posts = false}; }
+inline CommandTraits traits(const AcEvent&) { return {.notification = true}; }
+inline CommandTraits command_traits(const ControlCommand& command) {
+    return std::visit([](const auto& c) { return traits(c); }, command);
+}
 // Status of the current curve/master/link request, not boost/switch, physical cooling or saved state.
 enum class FanApplication { unapplied, applied, partial };
 struct ControlResult {

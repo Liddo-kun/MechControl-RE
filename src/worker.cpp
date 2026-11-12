@@ -213,10 +213,7 @@ void ControlWorker::run(std::stop_token stop) {
                         {
                             std::lock_guard lock(mutex_);
                             for (auto i = commands_.begin(); i != commands_.end();) {
-                                auto& c = i->command;
-                                if (std::holds_alternative<Visibility>(c) || std::holds_alternative<UiPage>(c) ||
-                                    std::holds_alternative<BatteryPage>(c) || std::holds_alternative<AcEvent>(c) ||
-                                    std::holds_alternative<Resume>(c) || std::holds_alternative<PowerTransition>(c)) {
+                                if (command_traits(i->command).notification) {
                                     notifications.push_back(std::move(*i));
                                     i = commands_.erase(i);
                                 } else
@@ -312,54 +309,16 @@ void ControlWorker::run(std::stop_token stop) {
             publish_state();
             // Status/watch is a query, not a UI refresh subscription. Writes,
             // including partial writes, still notify the application owner.
-            if (!std::holds_alternative<FanEdit>(pending->command) &&
-                !std::holds_alternative<Visibility>(pending->command) &&
-                !std::holds_alternative<UiPage>(pending->command) &&
-                !std::holds_alternative<BatteryPage>(pending->command) &&
-                !std::holds_alternative<Resume>(pending->command) &&
-                !std::holds_alternative<PowerTransition>(pending->command) &&
-                (!std::holds_alternative<CliCommand>(pending->command) || result.applied || result.partial))
+            bool wrote = result.applied || result.partial;
+            auto info = command_traits(pending->command);
+            if (info.if_written && !wrote) info = {.posts = false};
+            if (info.posts)
                 delivery_->post({ResultKind::command, pending->sequence, config::wide(result.text), {}, result});
             if (controller) {
-                unsigned changed = std::visit(
-                    [&](const auto& c) -> unsigned {
-                        using T = std::decay_t<decltype(c)>;
-                        if constexpr (std::is_same_v<T, CpuApply> || std::is_same_v<T, GpuApply> ||
-                                      std::is_same_v<T, GpuUnlock> || std::is_same_v<T, DlppcApply> ||
-                                      std::is_same_v<T, EcBypassApply> || std::is_same_v<T, CoolerFlag>)
-                            return 1;
-                        else if constexpr (std::is_same_v<T, FanApply> || std::is_same_v<T, FanMaster> ||
-                                           std::is_same_v<T, FanBoost> || std::is_same_v<T, SwitchApply>)
-                            return 2;
-                        else if constexpr (std::is_same_v<T, ProtectionApply>)
-                            return 4;
-                        else if constexpr (std::is_same_v<T, BatteryApply>)
-                            return 8;
-                        else if constexpr (std::is_same_v<T, LightingApply> || std::is_same_v<T, LightingIdle> ||
-                                           std::is_same_v<T, DimmingApply>)
-                            return 16;
-                        else if constexpr (std::is_same_v<T, SlotLoad> || std::is_same_v<T, DefaultsApply> ||
-                                           std::is_same_v<T, ThermalReset> || std::is_same_v<T, ThermalTest>)
-                            return 0x7f;
-                        else if constexpr (std::is_same_v<T, CliCommand>)
-                            return result.applied || result.partial
-                                       ? (!c.arguments.empty() && c.arguments[0] == "fan" ? 2 : 1)
-                                       : 0;
-                        else
-                            return 0;
-                    },
-                    pending->command);
-                if (result.applied || result.partial) dirty_pages |= changed;
-                if (auto read = std::get_if<UiRead>(&pending->command); read && read->page >= 0)
-                    dirty_pages &= ~(1u << read->page);
-                if (std::holds_alternative<FanRead>(pending->command) && !result.code) dirty_pages &= ~2u;
-                if (std::holds_alternative<SlotSave>(pending->command) ||
-                    std::holds_alternative<SlotLoad>(pending->command) ||
-                    std::holds_alternative<SlotRename>(pending->command) ||
-                    std::holds_alternative<SlotClear>(pending->command))
-                    page_read(-1);
-                if (controller->visible() && (changed || std::holds_alternative<SlotSave>(pending->command)))
-                    presentation();
+                if (wrote) dirty_pages |= info.stale;
+                if (!result.code) dirty_pages &= ~info.fresh;
+                if (info.catalog) page_read(-1);
+                if (controller->visible() && (info.stale || info.present)) presentation();
                 refresh_visible();
             }
         }
