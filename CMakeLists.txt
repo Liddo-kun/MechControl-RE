@@ -24,9 +24,9 @@ FetchContent_MakeAvailable(json)
 add_library(configuration STATIC src/config_json.cpp src/config_text.cpp src/profiles.cpp src/settings.cpp src/identity.cpp)
 target_include_directories(configuration PUBLIC src)
 target_link_libraries(configuration PUBLIC nlohmann_json::nlohmann_json PRIVATE wbemuuid ole32 oleaut32)
-add_library(ec STATIC src/ec.cpp src/ec_session.cpp src/thermal.cpp src/controller.cpp src/controller_cli.cpp
-  src/nvidia_bios.cpp src/nvidia_api.cpp src/nvidia_store.cpp src/nvidia_power.cpp src/controller_gpu.cpp
-  src/peripherals.cpp src/cooler.cpp)
+add_library(ec STATIC src/ec.cpp src/ec_session.cpp src/thermal.cpp src/controller.cpp
+  src/controller_status.cpp src/controller_gpu.cpp src/cli_commands.cpp src/nvidia_bios.cpp src/nvidia_api.cpp
+  src/nvidia_store.cpp src/nvidia_power.cpp src/peripherals.cpp src/cooler.cpp)
 target_include_directories(ec PUBLIC src)
 target_link_libraries(ec PUBLIC configuration PRIVATE setupapi cfgmgr32 shell32 advapi32 hid windowsapp user32)
 
