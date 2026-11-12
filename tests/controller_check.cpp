@@ -85,8 +85,10 @@ struct Rig {
     std::unique_ptr<Controller> controller;
     std::vector<std::string> diagnostics;
     Rig(const std::filesystem::path& path, bool start = true, std::unique_ptr<nv::Power> gpu = {},
-        std::function<void(std::function<void()>)> restart = {}, Lighting::Send send = {}) {
+        std::function<void(std::function<void()>)> restart = {}, Lighting::Send send = {},
+        const std::function<void(State&)>& setup = {}) {
         std::filesystem::create_directories(path);
+        if (setup) setup(*state);
         auto log = [this](const std::string& s) { diagnostics.push_back(s); };
         session = std::make_unique<EcSession>([this](const std::wstring&) { return std::make_unique<Fake>(state); },
                                               log, false, [](unsigned) {}, profiles_directory(),
@@ -1393,6 +1395,158 @@ void x6fr(const std::filesystem::path& root) {
               "PL registers at 0 show the Gaming preset, not 0 W");
     }
 }
+// What the controller does while a device operation is in flight. The fake wait runs `during` once, in place of the
+// worker's nested loop, before the operation itself.
+void waits(const std::filesystem::path& root) {
+    struct Wait {
+        std::function<void()> during;
+        GpuFixture* driver = new GpuFixture;
+        int reports = 0;
+        Rig rig;
+        Wait(const std::filesystem::path& path, const std::function<void(State&)>& setup = {})
+            : rig(
+                  path, true, std::unique_ptr<nv::Power>(driver),
+                  [this](std::function<void()> work) {
+                      if (auto nested = std::exchange(during, {})) nested();
+                      work();
+                  },
+                  [this](int, const HidReport&) { ++reports; }, setup) {}
+    };
+    const ProtectionSettings protect{true, 50, true, true, false};
+    const ControlCommand slow_read = CliCommand{{"status", "--json"}};
+    auto held = [](State& s) { return s.bytes[0x744] == 0 && s.bytes[0x783] == 10 && (s.bytes[0x751] & 64) != 0; };
+    auto later = [](ULONGLONG ms) { return GetTickCount64() + ms; };
+
+    Wait w(root / "wait-nvidia");
+    auto& c = *w.rig.controller;
+    auto& s = *w.rig.state;
+    auto slot = profile();
+    slot.gpu->bios_override_enabled = false;
+    write_json(root / "wait-nvidia/userprofile_1.json", slot, true);
+    c.execute(SlotLoad{1, false});
+    c.execute(ProtectionApply{protect});
+    w.during = [&] {
+        int reads = w.driver->reads, sets = w.driver->sets;
+        s.bytes[0x44F] = 80;
+        for (int i = 0; i < 3; ++i) c.tick();
+        auto live = c.presentation(false, true, 0);
+        check(c.thermal().tripped() && !c.thermal().complete() && held(s) && w.driver->reads == reads &&
+                  w.driver->sets == sets,
+              "a trip during NVIDIA work writes every EC hold before the work returns, without a driver call");
+        check(live["gpuLive"]["nvidia"] == "NVIDIA operation in progress" && w.driver->reads == reads,
+              "the Power tab reports NVIDIA work in progress instead of reading the driver");
+    };
+    auto status = c.execute(slow_read);
+    check(status.code == 0 && !w.during && c.thermal().complete() && w.driver->request && *w.driver->request <= 95000,
+          "the driver half of the hold follows when the NVIDIA work returns");
+    w.during = [&] {
+        s.bytes[0x751] &= ~64;
+        s.writes.clear();
+        for (int i = 0; i < 6; ++i) c.tick();
+        check(s.writes.empty() && c.thermal().complete() && c.thermal().lost_alerts() == 0,
+              "hold re-verification waits for NVIDIA work instead of reporting lost protection");
+    };
+    c.execute(slow_read);
+    check(held(s) && c.thermal().lost_alerts() == 0, "a hold the firmware cleared meanwhile is rewritten afterwards");
+    w.during = [&] {
+        c.execute(Resume{});
+        s.writes.clear();
+        s.reads.clear();
+        c.tick(later(3100));
+        check(s.writes.empty() && s.reads[0x741] == 1 && !c.thermal().complete() && c.thermal().lost_alerts() == 0,
+              "resume during NVIDIA work probes EC activation and leaves the holds for the work's return");
+    };
+    c.execute(slow_read);
+    check(c.thermal().complete() && c.thermal().lost_alerts() == 0,
+          "holds are verified again after a resume during NVIDIA work, without a lost-protection alert");
+    auto reapplied = [&] {
+        return std::ranges::any_of(w.rig.diagnostics,
+                                   [](auto& m) { return m.find("Re-applying slot 1") != std::string::npos; });
+    };
+    w.during = [&] {
+        // The EC reset: activation and the held values are gone.
+        s.bytes[0x741] = 0;
+        s.bytes[0x783] = 90;
+        s.bytes[0x751] &= ~64;
+        int sets = w.driver->sets;
+        c.tick(later(100000));
+        check(s.bytes[0x741] == 1 && !reapplied() && w.driver->sets == sets && c.thermal().lost_alerts() == 0,
+              "activation loss during NVIDIA work re-initializes the EC there and leaves the slot for later");
+        check(s.bytes[0x783] == 90 && (s.bytes[0x751] & 64) == 0,
+              "holds the EC forgot stay unwritten until the NVIDIA work returns");
+    };
+    c.execute(slow_read);
+    c.tick(later(100000));
+    check(reapplied() && held(s) && c.thermal().complete() && c.thermal().lost_alerts() == 0,
+          "the holds and the slot follow after the NVIDIA work, without a lost-protection alert");
+
+    Wait b(root / "wait-bypass", [](State& st) {
+        st.bytes[0x454] = 0x4D;
+        st.bytes[0x6E6] = 1;
+        st.bytes[0x490] = 1;
+    });
+    auto& bc = *b.rig.controller;
+    auto& bs = *b.rig.state;
+    bc.execute(ProtectionApply{protect});
+    const std::vector<std::pair<std::string, std::function<void()>>> events = {
+        {"sleep", [&] { bc.execute(PowerTransition{PowerTransition::suspend}); }},
+        {"AC loss",
+         [&] {
+             bs.bytes[0x490] = 0;
+             bc.tick();
+             bs.bytes[0x490] = 1;
+         }},
+        {"a trip", [&] {
+             bs.bytes[0x44F] = 80;
+             for (int i = 0; i < 3; ++i) bc.tick();
+         }}};
+    for (const auto& event : events) {
+        bool on = bc.execute(EcBypassApply{true}).code == 0 && bs.bytes[0x780] == 0xA2, cleared = false;
+        b.during = [&] {
+            event.second();
+            cleared = bs.bytes[0x780] == 0;
+        };
+        bc.execute(slow_read);
+        check(on && cleared, ("the EC bypass is cleared during NVIDIA work on " + event.first).c_str());
+    }
+
+    Wait h(root / "wait-hid");
+    auto& hc = *h.rig.controller;
+    auto& hs = *h.rig.state;
+    auto wrote = [&](int low, int high) {
+        return std::ranges::any_of(hs.writes, [&](auto x) { return x.first >= low && x.first <= high; });
+    };
+    auto fan = *profile().fan;
+    fan.linked = true;
+    hc.execute(FanApply{fan});
+    hc.execute(ProtectionApply{protect});
+    hc.execute(ThermalTest{});
+    const ControlCommand slow_hid = LightingApply{0, {true, 1, 2, 3, 50}};
+    h.during = [&] {
+        int reads = h.driver->reads;
+        hs.bytes[0x43E] = 70;
+        hs.bytes[0x751] &= ~64;
+        hs.writes.clear();
+        for (int i = 0; i < 5; ++i) hc.tick();
+        check(wrote(0xF00, 0xF5F), "linked fans follow the temperature during a HID operation");
+        check((hs.bytes[0x751] & 64) != 0 && h.driver->reads > reads,
+              "hold re-verification, driver read included, runs during a HID operation");
+    };
+    check(hc.execute(slow_hid).code == 0 && !h.during && held(hs), "the HID operation completes with the holds kept");
+    h.during = [&] {
+        int reports = h.reports;
+        hc.execute(Resume{});
+        hs.writes.clear();
+        hc.tick(later(9000));
+        check(wrote(0x783, 0x783), "the resume settle rewrites the holds during a HID operation");
+        check(h.reports == reports, "lighting restore never starts a second HID operation inside one in flight");
+    };
+    hc.execute(slow_hid);
+    int reports = h.reports;
+    hc.tick(later(9000));
+    check(h.reports > reports && held(hs) && hc.thermal().complete(),
+          "lighting restore and the holds follow after the HID operation");
+}
 void worker(const std::filesystem::path& root) {
     auto path = root / "worker";
     std::filesystem::create_directories(path);
@@ -1603,8 +1757,10 @@ void worker_restart(const std::filesystem::path& root) {
     Sleep(100);
     auto queued = worker.request(CpuApply{{100, 150, 200, 95}});
     auto visibility = worker.request(Visibility{true});
+    auto sleeping = worker.request(PowerTransition{PowerTransition::suspend});
     check(visibility.wait_for(std::chrono::milliseconds(500)) == std::future_status::ready &&
-              visibility.get().code == 0,
+              visibility.get().code == 0 &&
+              sleeping.wait_for(std::chrono::milliseconds(500)) == std::future_status::ready,
           "lifecycle notifications pass an exclusive slow NVIDIA read");
     Sleep(3000);
     messages = delivery->take();
@@ -1812,6 +1968,7 @@ int main(int argc, char** argv) {
         ec_bypass(root);
         monitor(root);
         x6fr(root);
+        waits(root);
         worker(root);
         worker_restart(root);
         worker_hid_delay(root);
