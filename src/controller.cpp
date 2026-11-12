@@ -293,21 +293,11 @@ void Controller::log_cpu(const std::vector<EcWrite>& w) { // PL1, PL2, PL4, temp
                 std::to_string(encoding::decode_cpu_temperature(w[3].value, direct, p.tj_max())) + "C, " +
                 (direct ? std::string("absolute") : "offset, tjMax=" + std::to_string(p.tj_max())) + ")");
 }
-void Controller::peripheral_io(const std::function<void()>& work) {
-    peripheral_busy_ = true;
-    try {
-        run_blocking_(work);
-    } catch (...) {
-        peripheral_busy_ = false;
-        throw;
-    }
-    peripheral_busy_ = false;
-}
 void Controller::dimming(bool value) {
     if (!peripheral_hardware_) throw std::runtime_error("Local dimming hardware unavailable");
     int epoch = epoch_;
     writes_started_ = true;
-    peripheral_io([&] { set_local_dimming(value); });
+    run_blocking_([&] { set_local_dimming(value); });
     if (epoch != epoch_) throw std::runtime_error("EC reactivated during local dimming; reapply required");
     if (((session_.transport().read(0x72B) & 2) != 0) != value)
         throw std::runtime_error("Local dimming EC readback mismatch");
@@ -488,11 +478,10 @@ std::vector<std::string> Controller::start() {
     }
     seed_fans();
     thermal_->enforce(); // Persisted obligations outrank optional NVIDIA startup work.
-    lighting_ = std::make_unique<Lighting>(
-        session_, store_, diagnostic_, peripheral_hardware_, lighting_send_, [this](auto work) { peripheral_io(work); },
-        [this](const auto& writes) { batch(writes); });
+    lighting_ = std::make_unique<Lighting>(session_, store_, diagnostic_, peripheral_hardware_, lighting_send_,
+                                           run_blocking_, [this](const auto& writes) { batch(writes); });
     if (peripheral_hardware_) {
-        peripheral_io([&] { dimming_available_ = local_dimming_available(); });
+        run_blocking_([&] { dimming_available_ = local_dimming_available(); });
         diagnostic_(std::string("Local dimming WMI ") + (dimming_available_ ? "available" : "unavailable"));
         if (session_.hardware.liquid_cooling())
             cooler_ = std::make_unique<Cooler>(store_, diagnostic_, Cooler::Resolver{}, cooler_delivery_);
@@ -938,7 +927,7 @@ UserProfile Controller::capture(int slot) {
         lighting_->capture(*profile.lighting);
     }
     if (peripheral_hardware_) {
-        if (!dimming_available_) peripheral_io([&] { dimming_available_ = local_dimming_available(); });
+        if (!dimming_available_) run_blocking_([&] { dimming_available_ = local_dimming_available(); });
         if (dimming_available_) try {
                 if (!profile.lighting) profile.lighting = LightingSettings{};
                 profile.lighting->local_dimming = (session_.transport().read(0x72B) & 2) != 0;
@@ -1073,7 +1062,7 @@ std::optional<Sensors> Controller::wait_tick(ULONGLONG now) {
     watchdog(now);
     Sensors shared;
     sample_thermal(shared, true);
-    if (lighting_ && !peripheral_busy_) lighting_->tick(now);
+    if (lighting_) lighting_->tick(now);
     poll_battery(now);
     return telemetry(now, shared);
 }
@@ -1350,7 +1339,7 @@ ControlResult Controller::run(const PeripheralRead& c) {
             }
     }
     if (peripheral_hardware_ && !dimming_available_)
-        peripheral_io([&] { dimming_available_ = local_dimming_available(); });
+        run_blocking_([&] { dimming_available_ = local_dimming_available(); });
     j["dimmingAvailable"] = dimming_available_;
     if (dimming_available_) try {
             j["localDimming"] = (session_.transport().read(0x72B) & 2) != 0;

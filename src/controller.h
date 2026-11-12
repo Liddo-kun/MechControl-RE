@@ -253,7 +253,6 @@ private:
     std::optional<Sensors> telemetry(ULONGLONG now, const Sensors& shared);
     void batch(const std::vector<EcWrite>&);
     void log_cpu(const std::vector<EcWrite>&);
-    void peripheral_io(const std::function<void()>&);
     void dimming(bool);
     void explicit_apply(const std::function<void()>&);
     nv::ProfilePlan plan(const config::UserProfile&, bool automatic);
@@ -328,7 +327,7 @@ private:
     std::unique_ptr<Cooler> cooler_;
     std::function<void(config::Json)> cooler_delivery_;
     Lighting::Send lighting_send_;
-    bool peripheral_busy_ = false, battery_page_ = false;
+    bool battery_page_ = false;
     ULONGLONG battery_at_ = 0, budget_at_ = 0;
     std::optional<config::Json> battery_sample_;
     bool peripheral_hardware_ = true, dimming_available_ = false;
