@@ -240,10 +240,10 @@ std::wstring dlppcTip(const Json& detected) {
     return tip + L"\nDetected: PERF_CF policy " + std::to_wstring(detected.value("policy", 0)) + L", controller " +
            controllers + L"; currently " + (detected.value("active", false) ? L"enabled" : L"disabled") + L".";
 }
+// A slider's label, track and value.
 struct Row {
     HWND label = nullptr, control = nullptr, number = nullptr;
-    int id = 0, y = 0, height = 36;
-    bool slider = false;
+    int id = 0;
 };
 struct Text {
     RECT rect;
@@ -257,12 +257,10 @@ struct Support {
     std::wstring reason;
     COLORREF color = GetSysColor(COLOR_BTNTEXT);
 };
-// The Battery page stacks rows; the others paint titled section frames and notes.
-bool framed(int page) { return page >= 0 && page < 7 && page != 3; }
 struct Page {
     HWND window = nullptr;
     std::vector<Row> rows;
-    int height = 0, scroll = 0;
+    int scroll = 0;
     std::vector<std::pair<RECT, const wchar_t*>> frames;
     std::vector<Text> texts;
 };
@@ -464,20 +462,18 @@ private:
             return 0;
         }
         if (message == WM_PARENTNOTIFY && LOWORD(wp) == WM_CREATE) return 0;
-        if (int page = app->index(window); framed(page)) {
-            if (message == WM_ERASEBKGND) return 1;
-            if (message == WM_PAINT) {
-                PAINTSTRUCT ps{};
-                auto dc = BeginPaint(window, &ps);
-                app->paintPage(page, dc, ps.rcPaint);
-                EndPaint(window, &ps);
-                return 0;
-            }
-            // A static is transparent to the mouse; the live table's tooltips need it.
-            if (message == WM_NCHITTEST && page == 0) {
-                auto hit = DefSubclassProc(window, message, wp, lp);
-                return hit == HTTRANSPARENT ? HTCLIENT : hit;
-            }
+        if (message == WM_ERASEBKGND) return 1;
+        if (message == WM_PAINT) {
+            PAINTSTRUCT ps{};
+            auto dc = BeginPaint(window, &ps);
+            app->paintPage(app->index(window), dc, ps.rcPaint);
+            EndPaint(window, &ps);
+            return 0;
+        }
+        // A static is transparent to the mouse; the live table's tooltips need it.
+        if (message == WM_NCHITTEST && window == app->pages_[0].window) {
+            auto hit = DefSubclassProc(window, message, wp, lp);
+            return hit == HTTRANSPARENT ? HTCLIENT : hit;
         }
         return DefSubclassProc(window, message, wp, lp);
     }
@@ -580,35 +576,24 @@ private:
     void place(HWND child, int x, int y, int width, int height) {
         MoveWindow(child, x, y, std::max(0, width), std::max(0, height), TRUE);
     }
-    Row& row(int page, int id, const wchar_t* title, const wchar_t* type, DWORD style, int height = 36) {
-        auto& p = pages_[page];
-        Row r;
-        r.id = id;
-        r.y = p.height;
-        r.height = height;
-        r.control = control(p.window, type, title, style, id);
-        p.rows.push_back(r);
-        p.height += height + 6;
-        return p.rows.back();
-    }
-    void label(int page, int id, const wchar_t* title, int height = 48) {
-        row(page, id, title, L"EDIT", ES_MULTILINE | ES_READONLY | WS_VSCROLL, height);
+    HWND row(int page, int id, const wchar_t* title, const wchar_t* type, DWORD style) {
+        return control(pages_[page].window, type, title, style, id);
     }
     void button(int page, int id, const wchar_t* title) { row(page, id, title, L"BUTTON", WS_TABSTOP | BS_PUSHBUTTON); }
     void check(int page, int id, const wchar_t* title) {
-        row(page, id, title, L"BUTTON", WS_TABSTOP | BS_AUTOCHECKBOX, 28);
+        row(page, id, title, L"BUTTON", WS_TABSTOP | BS_AUTOCHECKBOX);
     }
-    void combo(int page, int id, const wchar_t* title, std::initializer_list<const wchar_t*> choices) {
-        auto& r = row(page, id, L"", WC_COMBOBOXW, WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL);
-        if (*title) r.label = control(pages_[page].window, L"STATIC", title, 0, 0);
-        for (auto choice : choices) SendMessageW(r.control, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(choice));
-        SendMessageW(r.control, CB_SETCURSEL, 0, 0);
+    void combo(int page, int id, std::initializer_list<const wchar_t*> choices) {
+        auto box = row(page, id, L"", WC_COMBOBOXW, WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL);
+        for (auto choice : choices) SendMessageW(box, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(choice));
+        SendMessageW(box, CB_SETCURSEL, 0, 0);
     }
     void slider(int page, int id, const wchar_t* title, int minimum, int maximum, int initial) {
         // Positional sliders have ticks and a formatted value label instead of an edit box.
         bool ticks = positional(id);
-        auto& r = row(page, id, title, TRACKBAR_CLASSW, WS_TABSTOP | (ticks ? TBS_AUTOTICKS : TBS_NOTICKS), 44);
-        r.slider = true;
+        auto& r = pages_[page].rows.emplace_back();
+        r.id = id;
+        r.control = row(page, id, title, TRACKBAR_CLASSW, WS_TABSTOP | (ticks ? TBS_AUTOTICKS : TBS_NOTICKS));
         r.label = control(pages_[page].window, L"STATIC", title, SS_NOPREFIX, 0);
         // A trackbar starts at 0..100; clearing it lets value() set the ticks and page size for that range too.
         if (ticks) {
@@ -730,11 +715,11 @@ private:
         button(2, resetId, L"Reset");
         button(2, testId, L"Test Failsafe");
         row(2, detailsId, L"<a>Safety details and limitations</a>", WC_LINK, WS_TABSTOP | LWS_TRANSPARENT);
-        combo(3, batteryModeId, L"Battery charge mode",
-              {L"High Capacity (Performance)", L"Balanced", L"Stationary (Health)"});
-        button(3, batteryApplyId, L"Apply battery mode");
+        combo(3, batteryModeId, {L"High Capacity (Performance)", L"Balanced", L"Stationary (Health)"});
+        button(3, batteryApplyId, L"Apply");
         support(3, batterySupportId, L"Battery charge mode");
-        label(3, batteryTextId, L"Battery telemetry is read every two seconds only while this page is visible.", 400);
+        row(3, batteryTextId, L"Battery telemetry is read every two seconds only while this page is visible.", L"EDIT",
+            ES_MULTILINE | ES_READONLY);
         support(4, logoSupportId, L"Logo LED control");
         // Zones 0-2 are the keyboard, light bar and logo; the page shows the logo first, as in the reference.
         for (int zone : {2, 0, 1}) {
@@ -746,11 +731,11 @@ private:
             button(4, id + 7, L"Pick Color…");
             if (zone != 2) button(4, id + 6, L"Save to EC");
         }
-        combo(4, idleId, L"",
+        combo(4, idleId,
               {L"Off", L"10 seconds", L"30 seconds", L"1 minute", L"2 minutes", L"5 minutes", L"10 minutes"});
         check(4, dimmingId, L"Enable Local Dimming");
         button(4, lightingReadId, L"Read from EC");
-        combo(5, devicesId, L"", {});
+        combo(5, devicesId, {});
         button(5, scanId, L"Scan");
         button(5, connectId, L"Connect");
         check(5, autoConnectId, L"Auto-connect on startup");
@@ -758,12 +743,12 @@ private:
         slider(5, coolerFanId, L"Fan Duty", 0, 100, 50);
         button(5, coolerFanApplyId, L"Apply");
         check(5, coolerPumpOnId, L"Pump On");
-        combo(5, voltageId, L"", {L"7V", L"8V", L"11V", L"12V"});
+        combo(5, voltageId, {L"7V", L"8V", L"11V", L"12V"});
         slider(5, coolerPumpId, L"Pump Duty", 0, 100, 60);
         button(5, coolerPumpApplyId, L"Apply");
         check(5, coolerRgbOnId, L"LED On");
         rgb(5, coolerRgbOnId);
-        combo(5, rgbModeId, L"", {L"Static", L"Breathe", L"Colorful", L"Breathe Color"});
+        combo(5, rgbModeId, {L"Static", L"Breathe", L"Colorful", L"Breathe Color"});
         button(5, coolerRgbApplyId, L"Apply");
         progress_ = control(window_, PROGRESS_CLASSW, L"Device operation progress", PBS_MARQUEE, 0);
         ShowWindow(progress_, SW_HIDE);
@@ -801,10 +786,7 @@ private:
             SendMessageW(window, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
         }
         for (auto& p : pages_)
-            for (auto& r : p.rows)
-                if (r.label)
-                    SendMessageW(r.label, WM_SETFONT, reinterpret_cast<WPARAM>(framed(index(p.window)) ? bold : font),
-                                 TRUE);
+            for (auto& r : p.rows) SendMessageW(r.label, WM_SETFONT, reinterpret_cast<WPARAM>(bold), TRUE);
         for (int id : {dbOnId, boostId, switchId, curveId, linkId, fanSupportId, protectionId})
             SendMessageW(get(id), WM_SETFONT, reinterpret_cast<WPARAM>(bold), TRUE);
         SendMessageW(tooltip_, TTM_SETMAXTIPWIDTH, 0, ref(600));
@@ -965,57 +947,32 @@ private:
     void layoutPage(Page& p) {
         RECT rc{};
         GetClientRect(p.window, &rc);
-        int m = scale(10), width = rc.right - 2 * m;
-        if (int page = index(p.window); framed(page)) {
-            auto sections = [&](int scroll, bool apply) {
-                Sections s(*this, p, rc.right, scroll, apply);
-                page == 0   ? layoutPower(s)
-                : page == 1 ? layoutFans(s)
-                : page == 2 ? layoutThermal(s)
-                : page == 4 ? layoutLighting(s)
-                : page == 5 ? layoutCooler(s)
-                            : layoutInfo(s);
-                return s.finish();
-            };
-            int content = sections(0, false);
-            p.scroll = std::clamp(p.scroll, 0, std::max(0, content - int(rc.bottom)));
-            SCROLLINFO si{
-                sizeof si, SIF_RANGE | SIF_PAGE | SIF_POS, 0, std::max(0, content - 1), UINT(rc.bottom), p.scroll, 0};
-            SetScrollInfo(p.window, SB_VERT, &si, TRUE);
-            RECT shown{};
-            GetClientRect(p.window, &shown);
-            // The scroll bar changed the width.
-            if (shown.right != rc.right) {
-                layoutPage(p);
-                return;
-            }
-            sections(p.scroll, true);
-            RedrawWindow(p.window, nullptr, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN);
-            return;
-        }
-        int content = scale(p.height);
+        int page = index(p.window);
+        auto sections = [&](int scroll, bool apply) {
+            Sections s(*this, p, rc.right, scroll, apply);
+            page == 0   ? layoutPower(s)
+            : page == 1 ? layoutFans(s)
+            : page == 2 ? layoutThermal(s)
+            : page == 3 ? layoutBattery(s)
+            : page == 4 ? layoutLighting(s)
+            : page == 5 ? layoutCooler(s)
+                        : layoutInfo(s);
+            return s.finish();
+        };
+        int content = sections(0, false);
         p.scroll = std::clamp(p.scroll, 0, std::max(0, content - int(rc.bottom)));
         SCROLLINFO si{sizeof si, SIF_RANGE | SIF_PAGE | SIF_POS, 0, std::max(0, content - 1), UINT(rc.bottom), p.scroll,
                       0};
         SetScrollInfo(p.window, SB_VERT, &si, TRUE);
-        for (auto& r : p.rows) {
-            int y = scale(r.y) + m - p.scroll, h = scale(r.height);
-            if (r.slider) {
-                int label = std::min(scale(255), width / 2), edit = scale(80);
-                place(r.label, m, y, label, h);
-                place(r.control, m + label, y, std::max(scale(60), width - label - edit - scale(8)), h);
-                place(r.number, rc.right - m - edit, y + scale(5), edit, scale(27));
-            } else if (r.label) {
-                int label = std::min(scale(255), width / 2);
-                place(r.label, m, y, label, h);
-                place(r.control, m + label, y, width - label, scale(240));
-            } else {
-                place(r.control, m, y, width, h);
-                // Its note takes the telemetry's place.
-                if (r.id == batteryTextId) place(get(batterySupportId), m, y, width, h);
-            }
+        RECT shown{};
+        GetClientRect(p.window, &shown);
+        // The scroll bar changed the width.
+        if (shown.right != rc.right) {
+            layoutPage(p);
+            return;
         }
-        RedrawWindow(p.window, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
+        sections(p.scroll, true);
+        RedrawWindow(p.window, nullptr, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN);
     }
     Row& find(int id) {
         for (auto& p : pages_)
@@ -1257,6 +1214,29 @@ private:
         s.y += s.button;
         s.close();
         if (s.apply) thermalLive_ = live;
+    }
+    // Battery Charging Mode, which fits its contents, and Battery Telemetry, as in the reference BatteryTab. The
+    // support note takes the telemetry's place.
+    void layoutBattery(Sections& s) {
+        RECT r{};
+        GetWindowRect(get(batteryModeId), &r);
+        auto title = L"Battery Charging Mode";
+        int combo = s.extent(font_, L"High Capacity (Performance)") + ref(50);
+        s.open(title, s.x, s.fit(title, s.x, s.left + combo + ref(15)));
+        s.y += ref(4);
+        s.put(get(batteryModeId), s.left, s.y, combo, ref(300));
+        s.y += r.bottom - r.top + ref(10);
+        s.put(get(batteryApplyId), s.left, s.y, ref(110), s.button);
+        s.y += s.button;
+        s.close();
+        s.open(L"Battery Telemetry");
+        bool telemetry = support_.at(batterySupportId).reason.empty();
+        // Ten lines of readings; the edit control insets its text by a few pixels.
+        s.put(get(batteryTextId), s.left + ref(3), s.y + ref(3), s.end - s.left - ref(3), 10 * s.line + ref(4),
+              telemetry);
+        if (telemetry) s.y += 10 * s.line + ref(7);
+        s.supportNote(batterySupportId, true, errorColor, s.left + s.pad, ref(3), s.end - s.left - 2 * s.pad);
+        s.close();
     }
     // The logo, keyboard and light bar zones, then Idle Timer and Local Dimming, as in the reference LightingTab.
     // The last two sit side by side instead of stacked.
@@ -1859,34 +1839,20 @@ private:
             }
     }
     void reveal(HWND child) {
-        if (int page = index(GetParent(child)); framed(page)) {
-            auto& sections = pages_[page];
-            RECT rc{}, r{};
-            GetClientRect(sections.window, &rc);
-            GetWindowRect(child, &r);
-            MapWindowPoints(nullptr, sections.window, reinterpret_cast<POINT*>(&r), 2);
-            if (r.top < 0)
-                sections.scroll += r.top;
-            else if (r.bottom > rc.bottom)
-                sections.scroll += r.bottom - rc.bottom;
-            else
-                return;
-            layoutPage(sections);
+        int page = index(GetParent(child));
+        if (page < 0) return;
+        auto& p = pages_[page];
+        RECT rc{}, r{};
+        GetClientRect(p.window, &rc);
+        GetWindowRect(child, &r);
+        MapWindowPoints(nullptr, p.window, reinterpret_cast<POINT*>(&r), 2);
+        if (r.top < 0)
+            p.scroll += r.top;
+        else if (r.bottom > rc.bottom)
+            p.scroll += r.bottom - rc.bottom;
+        else
             return;
-        }
-        for (auto& p : pages_)
-            for (auto& r : p.rows)
-                if (r.control == child || r.number == child) {
-                    RECT rc{};
-                    GetClientRect(p.window, &rc);
-                    int top = scale(r.y + 10), bottom = top + scale(r.height);
-                    if (top < p.scroll)
-                        p.scroll = top;
-                    else if (bottom > p.scroll + rc.bottom)
-                        p.scroll = bottom - rc.bottom;
-                    layoutPage(p);
-                    return;
-                }
+        layoutPage(p);
     }
     void selectPage() {
         int page = TabCtrl_GetCurSel(tabs_);
@@ -2607,9 +2573,11 @@ private:
         if (page == 3) {
             bool battery = features.contains("battery");
             for (int id : {batteryModeId, batteryApplyId}) enable(id, battery);
-            explain(batterySupportId, battery ? L"" : disabledReason(L"Battery charge mode and telemetry", "battery"));
-            ShowWindow(get(batterySupportId), battery ? SW_HIDE : SW_SHOW);
-            ShowWindow(get(batteryTextId), battery ? SW_SHOW : SW_HIDE); // The note takes the telemetry's place.
+            auto reason = battery ? std::wstring() : disabledReason(L"Battery charge mode and telemetry", "battery");
+            if (reason != support_.at(batterySupportId).reason) {
+                explain(batterySupportId, reason);
+                layoutPage(pages_[3]);
+            }
             if (state_.contains("batteryMode") && !edited_.contains(batteryModeId))
                 SendMessageW(get(batteryModeId), CB_SETCURSEL, state_["batteryMode"].get<int>(), 0);
         }
