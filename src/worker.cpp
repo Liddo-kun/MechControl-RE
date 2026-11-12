@@ -59,7 +59,9 @@ std::future<ControlResult> ControlWorker::request(ControlCommand command, std::u
     if (closing_ || options_.once || options_.read_only)
         promise.set_value({1, "Controller unavailable or stopping"});
     else {
-        // Clearing the EC bypass before sleep, display off or exit goes ahead of queued commands.
+        // Clearing the EC bypass before sleep, display off or exit goes ahead of queued commands. Known gap: an
+        // EcBypassApply{true} still queued behind a slow operation runs after the clear, so the bypass can come on
+        // with the display off. Nothing clears it then until AC loss, a trip or the EC leaving its running state.
         bool first = std::holds_alternative<PowerTransition>(command);
         Pending pending{std::move(command), std::move(promise), sequence};
         if (first)
