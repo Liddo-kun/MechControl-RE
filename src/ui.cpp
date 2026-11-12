@@ -573,23 +573,6 @@ private:
                                              (*s.also ? L" and " + std::wstring(s.also) : L"") + L".");
         if (reason.empty()) ShowWindow(get(id), SW_HIDE);
     }
-    // Places a framed page's support note below y+top and returns its bottom, or y when it is not shown.
-    int supportNote(int id, bool shown, COLORREF color, int x, int y, int top, int width, bool apply) {
-        auto link = get(id);
-        auto& s = support_.at(id);
-        if (!shown || s.reason.empty()) {
-            if (apply) ShowWindow(link, SW_HIDE);
-            return y;
-        }
-        s.color = color;
-        SIZE ideal{};
-        int height = int(SendMessageW(link, LM_GETIDEALSIZE, width, reinterpret_cast<LPARAM>(&ideal)));
-        if (apply) {
-            ShowWindow(link, SW_SHOW);
-            place(link, x, y + top, width, height);
-        }
-        return y + top + height;
-    }
     int scale(int n) const { return MulDiv(n, dpi_, 96); }
     // Power page metrics are the reference PowerTab's pixel constants, which it drew unscaled on its 144 DPI
     // screen. Scaling them from 144 DPI keeps the same proportions to the text at every DPI.
@@ -843,18 +826,156 @@ private:
         for (int id : {cpuChartId, gpuChartId, debugCpuId, debugGpuId}) SendMessageW(get(id), chartDpiMessage, dpi_, 0);
         layout();
     }
+    // One pass over a framed page: it measures the page and, with apply, also places the controls and keeps the
+    // painted frames and texts. y runs down the scrolled page.
+    struct Sections {
+        Application& app;
+        Page& target;
+        int width, scroll;
+        bool apply;
+        HDC dc;
+        HGDIOBJ previous;
+        int titleHeight, line;
+        // pad: the reference's labels inset their text by about a third of the font's em on each side.
+        int x, right, left, end, y, pad, slider, box, button;
+        std::vector<std::pair<RECT, const wchar_t*>> frames;
+        std::vector<Text> texts;
+
+        Sections(Application& a, Page& p, int pageWidth, int scrolled, bool applying)
+            : app(a), target(p), width(pageWidth), scroll(scrolled), apply(applying), dc(GetDC(p.window)),
+              previous(SelectObject(dc, a.font_)), titleHeight(height(a.title_)), line(height(a.font_)), x(ref(16)),
+              right(width - ref(16)), left(x + ref(15)), end(right - ref(15)), y(ref(6) - scroll), pad(ref(6)),
+              slider(std::max(ref(30), ref(8) + line)), box(line + ref(4)), button(ref(32)) {}
+        ~Sections() {
+            SelectObject(dc, previous);
+            ReleaseDC(target.window, dc);
+        }
+        int ref(int n) const { return app.ref(n); }
+        int height(HFONT font) {
+            SelectObject(dc, font);
+            TEXTMETRICW metrics{};
+            GetTextMetricsW(dc, &metrics);
+            return metrics.tmHeight;
+        }
+        int extent(HFONT font, const std::wstring& s) {
+            SelectObject(dc, font);
+            SIZE size{};
+            GetTextExtentPoint32W(dc, s.c_str(), int(s.size()), &size);
+            return int(size.cx);
+        }
+        void put(HWND child, int cx, int cy, int w, int h, bool shown = true) {
+            if (!apply) return;
+            ShowWindow(child, shown ? SW_SHOW : SW_HIDE);
+            if (shown) app.place(child, cx, cy, w, h);
+        }
+        void open(const wchar_t* title) { open(title, x, right); }
+        void open(const wchar_t* title, int from, int to) {
+            frames.push_back({{from, y, to, 0}, title});
+            y += titleHeight + ref(11);
+        }
+        void close() {
+            y += ref(13);
+            frames.back().first.bottom = y;
+            y += ref(12);
+        }
+        // The right edge of a section that fits its content (to contentRight) or its title, whichever is wider.
+        int fit(const wchar_t* title, int from, int contentRight) {
+            return std::max(contentRight, from + ref(25) + extent(app.title_, title) + ref(15));
+        }
+        // A check box sized to its text.
+        int checkWidth(int id, HFONT font) { return extent(font, text(app.get(id))) + ref(40); }
+        // A check box on its own row, at most widest wide.
+        void check(int id, bool shown, HFONT font, int widest = INT_MAX) {
+            if (shown) y += ref(6);
+            put(app.get(id), left, y, std::min(checkWidth(id, font), widest), box, shown);
+            if (shown) y += box;
+        }
+        // The label and value column widths of sliders that line up.
+        std::pair<int, int> columns(std::initializer_list<int> ids, const wchar_t* widest) {
+            int label = 0;
+            for (int id : ids) label = std::max(label, extent(app.bold_, text(app.find(id).label)));
+            return {label + 2 * pad, extent(app.font_, widest) + 2 * pad};
+        }
+        // A slider row across the section, less inset on each side: its label, track and value.
+        void slide(int id, std::pair<int, int> c, bool shown = true, int inset = 0) {
+            auto& r = app.find(id);
+            int from = left + inset, to = end - inset, track = from + c.first + ref(8);
+            put(r.label, from + pad, y + ref(8), c.first - pad, line, shown);
+            put(r.control, track, y, to - c.second - ref(8) - track, slider, shown);
+            put(r.number, to - c.second + pad, y + ref(8), c.second - pad, line, shown);
+            if (shown) y += slider;
+        }
+        // Painted text wrapped from 'from' to 'to'. Returns its bottom.
+        int paragraph(const std::wstring& s, int from, int top, int to, COLORREF color, HFONT font) {
+            RECT r{from, top, to, top};
+            SelectObject(dc, font);
+            DrawTextW(dc, s.c_str(), -1, &r, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
+            r.right = to;
+            texts.push_back({r, s, color, font});
+            return int(r.bottom);
+        }
+        // Painted text on one line (height 0: the normal font's line). Returns its right edge.
+        int say(const std::wstring& s, int cx, int cy, COLORREF color = GetSysColor(COLOR_BTNTEXT),
+                HFONT font = nullptr, int h = 0) {
+            int to = cx + extent(font ? font : app.font_, s);
+            texts.push_back({{cx, cy, to, cy + (h ? h : line)}, s, color, font});
+            return to;
+        }
+        // A color's R, G and B labels and boxes on a row of the given height, from cx. Returns the right edge.
+        int colors(int base, int cx, int row) {
+            int edit = line + ref(3);
+            for (int n = 1; n <= 3; ++n) {
+                cx += n == 1 ? ref(6) : ref(14);
+                cx = say(n == 1 ? L"R:" : n == 2 ? L"G:" : L"B:", cx, y + (row - line) / 2) + ref(8);
+                if (apply) {
+                    app.place(app.get(base + n + 1000), cx, y + (row - edit) / 2, ref(68), edit);
+                    SendMessageW(app.get(base + n), UDM_SETBUDDY, reinterpret_cast<WPARAM>(app.get(base + n + 1000)),
+                                 0);
+                }
+                cx += ref(68);
+            }
+            return cx;
+        }
+        // Places a support note top below y and moves y to its bottom; a hidden note leaves y.
+        void supportNote(int id, bool shown, COLORREF color, int from, int top, int w) {
+            auto link = app.get(id);
+            auto& s = app.support_.at(id);
+            if (!shown || s.reason.empty()) {
+                if (apply) ShowWindow(link, SW_HIDE);
+                return;
+            }
+            s.color = color;
+            SIZE ideal{};
+            int h = int(SendMessageW(link, LM_GETIDEALSIZE, w, reinterpret_cast<LPARAM>(&ideal)));
+            if (apply) {
+                ShowWindow(link, SW_SHOW);
+                app.place(link, from, y + top, w, h);
+            }
+            y += top + h;
+        }
+        // Keeps what the pass painted and returns the content height.
+        int finish() {
+            if (apply) {
+                target.frames = std::move(frames);
+                target.texts = std::move(texts);
+            }
+            return y + scroll + ref(6);
+        }
+    };
     void layoutPage(Page& p) {
         RECT rc{};
         GetClientRect(p.window, &rc);
         int m = scale(10), width = rc.right - 2 * m;
         if (int page = index(p.window); framed(page)) {
             auto sections = [&](int scroll, bool apply) {
-                return page == 0   ? layoutPower(rc.right, scroll, apply)
-                       : page == 1 ? layoutFans(rc.right, scroll, apply)
-                       : page == 2 ? layoutThermal(rc.right, scroll, apply)
-                       : page == 4 ? layoutLighting(rc.right, scroll, apply)
-                       : page == 5 ? layoutCooler(rc.right, scroll, apply)
-                                   : layoutInfo(scroll, apply);
+                Sections s(*this, p, rc.right, scroll, apply);
+                page == 0   ? layoutPower(s)
+                : page == 1 ? layoutFans(s)
+                : page == 2 ? layoutThermal(s)
+                : page == 4 ? layoutLighting(s)
+                : page == 5 ? layoutCooler(s)
+                            : layoutInfo(s);
+                return s.finish();
             };
             int content = sections(0, false);
             p.scroll = std::clamp(p.scroll, 0, std::max(0, content - int(rc.bottom)));
@@ -902,369 +1023,220 @@ private:
                 if (r.id == id) return r;
         throw std::logic_error("Missing control");
     }
-    // CPU Power, GPU Power, Apply/Read and GPU Limits (live), as in the reference PowerTab. Returns the content height.
-    int layoutPower(int width, int scroll, bool apply) {
-        auto window = pages_[0].window;
-        auto dc = GetDC(window);
-        auto previous = SelectObject(dc, title_);
-        TEXTMETRICW metrics{};
-        GetTextMetricsW(dc, &metrics);
-        int titleHeight = metrics.tmHeight;
-        SelectObject(dc, font_);
-        GetTextMetricsW(dc, &metrics);
-        int line = metrics.tmHeight;
-        auto extent = [&](HFONT font, const std::wstring& s) {
-            SelectObject(dc, font);
-            SIZE size{};
-            GetTextExtentPoint32W(dc, s.c_str(), int(s.size()), &size);
-            return int(size.cx);
-        };
-        // pad: the reference's labels inset their text by about a third of the font's em on each side.
-        int x = ref(16), right = width - ref(16), left = x + ref(15), end = right - ref(15), y = ref(6) - scroll,
-            slider = std::max(ref(30), ref(8) + line), box = line + ref(4), pad = ref(6);
-        int noteLeft = left + ref(3) + pad,
-            wrap = std::max(ref(60), std::min(ref(600) - 2 * pad, end - noteLeft - pad));
+    // CPU Power, GPU Power, Apply/Read and GPU Limits (live), as in the reference PowerTab.
+    void layoutPower(Sections& s) {
+        int noteLeft = s.left + ref(3) + s.pad,
+            wrap = std::max(ref(60), std::min(ref(600) - 2 * s.pad, s.end - noteLeft - s.pad));
         bool cpu = !(state_.contains("cpu") && state_["cpu"].is_null()),
              gpu = !(state_.contains("gpu") && state_["gpu"].is_null());
-        std::vector<std::pair<RECT, const wchar_t*>> frames;
-        std::vector<Text> texts;
-        auto put = [&](HWND child, bool shown, int cx, int cy, int w, int h) {
-            if (!apply) return;
-            ShowWindow(child, shown ? SW_SHOW : SW_HIDE);
-            if (shown) place(child, cx, cy, w, h);
+        auto note = [&](const std::wstring& t, COLORREF color, int top) {
+            if (!t.empty()) s.y = s.paragraph(t, noteLeft, s.y + top, noteLeft + wrap, color, font_);
         };
-        auto open = [&](const wchar_t* title) {
-            frames.push_back({{x, y, right, 0}, title});
-            y += titleHeight + ref(11);
+        auto support = [&](int id, bool shown, COLORREF color, int top) {
+            s.supportNote(id, shown, color, noteLeft, top, wrap);
         };
-        auto close = [&] {
-            y += ref(13);
-            frames.back().first.bottom = y;
-            y += ref(12);
-        };
-        auto note = [&](const std::wstring& s, COLORREF color, int top, int bottom) {
-            if (s.empty()) return;
-            SelectObject(dc, font_);
-            RECT r{noteLeft, y + top, noteLeft + wrap, y + top};
-            DrawTextW(dc, s.c_str(), -1, &r, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
-            r.right = noteLeft + wrap;
-            texts.push_back({r, s, color});
-            y = r.bottom + bottom;
-        };
+        auto muted = GetSysColor(COLOR_GRAYTEXT);
         // Each section sizes its label and value columns to its own contents.
-        auto columns = [&](std::initializer_list<int> ids, const wchar_t* widest) {
-            int label = 0;
-            for (int id : ids) label = std::max(label, extent(bold_, text(find(id).label)));
-            return std::pair(label + 2 * pad, extent(font_, widest) + 2 * pad);
-        };
-        auto slide = [&](int id, bool shown, std::pair<int, int> c) {
-            auto& r = find(id);
-            int track = left + c.first + ref(8), value = end - c.second;
-            put(r.label, shown, left + pad, y + ref(8), c.first - pad, line);
-            put(r.control, shown, track, y, value - ref(8) - track, slider);
-            put(r.number, shown, value + pad, y + ref(8), c.second - pad, line);
-            if (shown) y += slider;
-        };
-        auto check = [&](int id, bool shown, HFONT font) {
-            if (shown) y += ref(6);
-            put(get(id), shown, left, y, extent(font, text(get(id))) + ref(40), box);
-            if (shown) y += box;
-        };
-        open(L"CPU Power");
-        auto c = columns({pl1Id, pl2Id, pl4Id, tempId}, L"000 °C");
-        for (int id : {pl1Id, pl2Id, pl4Id, tempId}) slide(id, cpu, c);
-        y = supportNote(cpuSupportId, true, errorColor, noteLeft, y, 0, wrap, apply);
-        note(cpuNote_, errorColor, 0, 0);
-        note(cpuPreset_, GetSysColor(COLOR_GRAYTEXT), ref(4), 0);
-        close();
-        open(L"GPU Power");
-        c = columns({tgpId, dbId}, L"000 W");
-        slide(tgpId, gpu, c);
-        check(dbOnId, gpu, bold_);
-        slide(dbId, gpu, c);
-        y = supportNote(gpuSupportId, true, errorColor, noteLeft, y, 0, wrap, apply);
-        if (gpu) note(powerHint_, GetSysColor(COLOR_GRAYTEXT), 0, 0);
-        close();
-        y += ref(6);
-        put(get(powerApplyId), true, x, y, ref(110), ref(32));
-        put(get(powerReadId), true, x + ref(120), y, ref(140), ref(32));
-        y += ref(44);
+        s.open(L"CPU Power");
+        auto c = s.columns({pl1Id, pl2Id, pl4Id, tempId}, L"000 °C");
+        for (int id : {pl1Id, pl2Id, pl4Id, tempId}) s.slide(id, c, cpu);
+        support(cpuSupportId, true, errorColor, 0);
+        note(cpuNote_, errorColor, 0);
+        note(cpuPreset_, muted, ref(4));
+        s.close();
+        s.open(L"GPU Power");
+        c = s.columns({tgpId, dbId}, L"000 W");
+        s.slide(tgpId, c, gpu);
+        s.check(dbOnId, gpu, bold_);
+        s.slide(dbId, c, gpu);
+        support(gpuSupportId, true, errorColor, 0);
+        if (gpu) note(powerHint_, muted, 0);
+        s.close();
+        s.y += ref(6);
+        s.put(get(powerApplyId), s.x, s.y, ref(110), s.button);
+        s.put(get(powerReadId), s.x + ref(120), s.y, ref(140), s.button);
+        s.y += ref(44);
         // Collapsed by default. Controls withheld for an unverified model or firmware stay visible, greyed, with the
         // reason; the cooler flag appears only when the EC reports cooler support.
         auto advanced = state_.value("advanced", Json::object());
         bool flag = advanced.value("coolerFlag", Json::object()).value("available", false), expanded = advanced_;
-        put(get(advancedId), true, x + ref(3), y, extent(font_, L"Hide advanced controls") + ref(8), line);
-        y += line + ref(14);
-        auto muted = GetSysColor(COLOR_GRAYTEXT);
-        if (expanded) open(L"Advanced");
-        check(unlockId, expanded && gpu, font_);
-        y = supportNote(unlockSupportId, expanded && gpu, muted, noteLeft, y, ref(2), wrap, apply);
-        check(dlppcId, expanded && gpu, font_);
+        s.put(get(advancedId), s.x + ref(3), s.y, s.extent(font_, L"Hide advanced controls") + ref(8), s.line);
+        s.y += s.line + ref(14);
+        if (expanded) s.open(L"Advanced");
+        s.check(unlockId, expanded && gpu, font_);
+        support(unlockSupportId, expanded && gpu, muted, ref(2));
+        s.check(dlppcId, expanded && gpu, font_);
         // Current limits apply with the Apply button above, like the other GPU settings.
-        if (expanded && gpu) y += ref(6);
-        c = columns({nvId, msId, inputId}, L"000.000 A");
-        for (int id : {nvId, msId, inputId}) slide(id, expanded && gpu, c);
-        y = supportNote(boardSupportId, expanded && gpu, muted, noteLeft, y, ref(2), wrap, apply);
-        check(bypassId, expanded, font_);
+        if (expanded && gpu) s.y += ref(6);
+        c = s.columns({nvId, msId, inputId}, L"000.000 A");
+        for (int id : {nvId, msId, inputId}) s.slide(id, c, expanded && gpu);
+        support(boardSupportId, expanded && gpu, muted, ref(2));
+        s.check(bypassId, expanded, font_);
         if (expanded) {
             note(
                 L"Keeps your PL1/PL2/PL4 under heavy CPU+GPU load instead of the EC lowering them. Fans run at full speed.",
-                muted, ref(2), 0);
-            note(bypassText_, bypassColor_, ref(2), 0);
+                muted, ref(2));
+            note(bypassText_, bypassColor_, ref(2));
         }
-        y = supportNote(bypassSupportId, expanded, muted, noteLeft, y, ref(2), wrap, apply);
-        check(coolerFlagId, expanded && flag, font_);
+        support(bypassSupportId, expanded, muted, ref(2));
+        s.check(coolerFlagId, expanded && flag, font_);
         if (expanded && flag)
             note(
                 L"Switches the EC to its liquid-cooler fan and GPU tables and changes some hardware signals whose purpose is unknown. Does not lift custom or adapter limits.",
-                muted, ref(2), 0);
-        if (expanded) close();
+                muted, ref(2));
+        if (expanded) s.close();
         int liveTop = -1;
         if (gpu) {
-            open(L"GPU Limits (live)");
-            liveTop = y;
-            y += 8 * (ref(6) + line);
-            auto gray = GetSysColor(COLOR_GRAYTEXT);
-            if (!liveReason_.empty()) note(L"-- (" + liveReason_ + L")", gray, ref(6), 0);
+            s.open(L"GPU Limits (live)");
+            liveTop = s.y;
+            s.y += 8 * (ref(6) + s.line);
+            if (!liveReason_.empty()) note(L"-- (" + liveReason_ + L")", muted, ref(6));
             // Measured on an RTX 5090 Laptop: current = rail power / a fixed voltage, so it reads high.
             note(
                 L"NVVDD and MSVDD currents are calculated by the driver from rail power, not measured, and can read well above the real current. The limits use the same calculated values.",
-                gray, 0, 0);
+                muted, 0);
             note(
                 L"When software shunt modding, tune the NVVDD, MSVDD and board input current limits so that they are all solid green 99% of the time, and not any higher.",
-                gray, ref(6), 0);
-            close();
+                muted, ref(6));
+            s.close();
         }
-        SelectObject(dc, previous);
-        ReleaseDC(window, dc);
-        if (apply) {
-            pages_[0].frames = std::move(frames);
-            pages_[0].texts = std::move(texts);
-            liveTable_ = {left, liveTop, width, liveTop + 8 * (ref(6) + line)};
+        if (s.apply) {
+            liveTable_ = {s.left, liveTop, s.width, liveTop + 8 * (ref(6) + s.line)};
             if (liveTop < 0)
                 for (UINT_PTR i = 1; i <= std::size(liveTips); ++i) {
                     TOOLINFOW tool{sizeof tool};
-                    tool.hwnd = window;
+                    tool.hwnd = pages_[0].window;
                     tool.uId = i;
                     SendMessageW(tooltip_, TTM_NEWTOOLRECTW, 0, reinterpret_cast<LPARAM>(&tool));
                 }
         }
-        return y + scroll + ref(6);
     }
     // Fan Boost, Fan Switch Speed, Custom Fan Curve and, while Link Fans runs, the curves it writes, as in the
-    // reference FanTab. Returns the content height.
-    int layoutFans(int width, int scroll, bool apply) {
-        auto window = pages_[1].window;
-        auto dc = GetDC(window);
-        auto previous = SelectObject(dc, title_);
-        TEXTMETRICW metrics{};
-        GetTextMetricsW(dc, &metrics);
-        int titleHeight = metrics.tmHeight;
-        SelectObject(dc, font_);
-        GetTextMetricsW(dc, &metrics);
-        int line = metrics.tmHeight;
-        auto extent = [&](HFONT font, const std::wstring& s) {
-            SelectObject(dc, font);
-            SIZE size{};
-            GetTextExtentPoint32W(dc, s.c_str(), int(s.size()), &size);
-            return int(size.cx);
-        };
-        int x = ref(16), right = width - ref(16), left = x + ref(15), end = right - ref(15), y = ref(6) - scroll,
-            slider = std::max(ref(30), ref(8) + line), box = ref(28), button = ref(32), chart = ref(320), pad = ref(6);
+    // reference FanTab.
+    void layoutFans(Sections& s) {
+        int box = ref(28), chart = ref(320);
         bool fans = state_.value("enabled", std::set<std::string>{}).contains("fanControl"),
              supported = state_.value("curvesSupported", false), hasGpu = state_.value("hasGpuFan", false);
         bool linkable = state_.value("linkAvailable", false),
              linked = supported && linkable && state_.value("linked", false);
-        std::vector<std::pair<RECT, const wchar_t*>> frames;
-        std::vector<Text> texts;
         RECT bar{};
-        auto put = [&](HWND child, bool shown, int cx, int cy, int w, int h) {
-            if (!apply) return;
-            ShowWindow(child, shown ? SW_SHOW : SW_HIDE);
-            if (shown) place(child, cx, cy, w, h);
-        };
-        auto open = [&](const wchar_t* title) {
-            frames.push_back({{x, y, right, 0}, title});
-            y += titleHeight + ref(11);
-        };
-        auto close = [&] {
-            y += ref(13);
-            frames.back().first.bottom = y;
-            y += ref(12);
-        };
         // The reference sizes check boxes to their bold text.
-        auto check = [&](int id) { return extent(bold_, text(get(id))) + ref(38); };
+        auto check = [&](int id) { return s.extent(bold_, text(get(id))) + ref(38); };
         // The CPU and GPU curves share the width, with a small gap between them.
         auto charts = [&](int cpu, int gpu, int from, int to, bool shown) {
             int half = (to - from) / 2;
-            put(get(cpu), shown, from, y, (hasGpu ? half : to - from) - ref(4), chart);
-            put(get(gpu), shown && hasGpu, from + half + ref(4), y, to - from - half - ref(4), chart);
+            s.put(get(cpu), from, s.y, (hasGpu ? half : to - from) - ref(4), chart, shown);
+            s.put(get(gpu), from + half + ref(4), s.y, to - from - half - ref(4), chart, shown && hasGpu);
         };
-        open(L"Fan Boost");
+        s.open(L"Fan Boost");
         int boost = check(boostId);
-        put(get(boostId), true, left, y + ref(6), boost, box);
-        put(get(boostApplyId), true, left + boost + ref(16), y, ref(110), button);
-        y += ref(34);
-        close();
-        frames.back().first.right = left + boost + ref(141); // This section fits its contents, not the page.
-        open(L"Fan Switch Speed");
-        put(get(switchId), true, left, y + ref(4), check(switchId), box);
-        y += ref(35);
-        auto& speed = find(switchMsId);
-        int from = left + ref(3), to = end - ref(3), label = extent(bold_, text(speed.label)) + 2 * pad,
-            value = extent(font_, L"12700 ms") + 2 * pad, track = from + label + ref(8);
-        put(speed.label, true, from + pad, y + ref(8), label - pad, line);
-        put(speed.control, true, track, y, to - value - ref(8) - track, slider);
-        put(speed.number, true, to - value + pad, y + ref(8), value - pad, line);
-        y += slider + ref(9);
-        put(get(switchApplyId), true, left, y, ref(110), button);
-        y += button;
-        close();
-        open(L"Custom Fan Curve");
+        s.put(get(boostId), s.left, s.y + ref(6), boost, box);
+        s.put(get(boostApplyId), s.left + boost + ref(16), s.y, ref(110), s.button);
+        s.y += ref(34);
+        s.close();
+        s.frames.back().first.right = s.left + boost + ref(141); // This section fits its contents, not the page.
+        s.open(L"Fan Switch Speed");
+        s.put(get(switchId), s.left, s.y + ref(4), check(switchId), box);
+        s.y += ref(35);
+        s.slide(switchMsId, s.columns({switchMsId}, L"12700 ms"), true, ref(3));
+        s.y += ref(9);
+        s.put(get(switchApplyId), s.left, s.y, ref(110), s.button);
+        s.y += s.button;
+        s.close();
+        s.open(L"Custom Fan Curve");
         int curve = check(curveId), link = check(linkId);
-        put(get(curveId), true, left, y + ref(4), curve, box);
-        put(get(linkId), linkable, left + curve + ref(24), y + ref(4), link, box);
-        if (linked) bar = {left + curve + link + ref(48), y + ref(2), end, y + ref(31)};
-        y += ref(39);
-        charts(cpuChartId, gpuChartId, left, end, supported);
+        s.put(get(curveId), s.left, s.y + ref(4), curve, box);
+        s.put(get(linkId), s.left + curve + ref(24), s.y + ref(4), link, box, linkable);
+        if (linked) bar = {s.left + curve + link + ref(48), s.y + ref(2), s.end, s.y + ref(31)};
+        s.y += ref(39);
+        charts(cpuChartId, gpuChartId, s.left, s.end, supported);
         explain(fanSupportId, fans ? L"" : disabledReason(L"Fan controls", "fanControl"));
         if (supported)
-            y += chart + ref(6);
+            s.y += chart + ref(6);
         else if (fans) {
             auto warning = L"Fan curve editing is not available (format: " +
                            w(state_.value("fanFormat", std::string{})) +
                            L"). Only fan boost and curve enable are supported.";
-            RECT r{left + pad, y + ref(6), end - pad, y + ref(6)};
-            SelectObject(dc, bold_);
-            DrawTextW(dc, warning.c_str(), -1, &r, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
-            r.right = end - pad;
-            texts.push_back({r, warning, warnColor, bold_});
-            y += ref(94);
-        } else
-            y = std::max(y + ref(94), supportNote(fanSupportId, true, errorColor, left + pad, y, ref(6),
-                                                  end - left - 2 * pad, apply) +
-                                          ref(6));
-        y += ref(3);
-        put(get(fanApplyId), true, left + ref(3), y + ref(6), ref(110), button);
-        put(get(fanReadId), true, left + ref(123), y + ref(6), ref(140), button);
-        int footer = ref(6) + button;
-        if (supported) {
-            RECT r{left + ref(273) + pad, y + ref(14), end, y + ref(14)};
-            SelectObject(dc, font_);
-            DrawTextW(dc, fanValidation_.c_str(), -1, &r, DT_CALCRECT | DT_NOPREFIX);
-            texts.push_back({r, fanValidation_, fanValidation_ == L"Valid" ? okColor : errorColor});
-            footer = std::max(footer, int(r.bottom) - y + ref(1));
+            s.paragraph(warning, s.left + s.pad, s.y + ref(6), s.end - s.pad, warnColor, bold_);
+            s.y += ref(94);
+        } else {
+            int top = s.y;
+            s.supportNote(fanSupportId, true, errorColor, s.left + s.pad, ref(6), s.end - s.left - 2 * s.pad);
+            s.y = std::max(top + ref(94), s.y + ref(6));
         }
-        y += footer + ref(3);
-        close();
+        s.y += ref(3);
+        s.put(get(fanApplyId), s.left + ref(3), s.y + ref(6), ref(110), s.button);
+        s.put(get(fanReadId), s.left + ref(123), s.y + ref(6), ref(140), s.button);
+        int footer = ref(6) + s.button;
+        if (supported) {
+            // One line per problem, unwrapped.
+            RECT r{s.left + ref(273) + s.pad, s.y + ref(14), s.end, s.y + ref(14)};
+            SelectObject(s.dc, font_);
+            DrawTextW(s.dc, fanValidation_.c_str(), -1, &r, DT_CALCRECT | DT_NOPREFIX);
+            s.texts.push_back({r, fanValidation_, fanValidation_ == L"Valid" ? okColor : errorColor});
+            footer = std::max(footer, int(r.bottom) - s.y + ref(1));
+        }
+        s.y += footer + ref(3);
+        s.close();
         if (linked) {
-            open(L"Fan Curves Written to EC (Live)");
-            y += ref(3);
-            charts(debugCpuId, debugGpuId, left - ref(3), end + ref(3), true);
-            y += chart + ref(3);
-            close();
+            s.open(L"Fan Curves Written to EC (Live)");
+            s.y += ref(3);
+            charts(debugCpuId, debugGpuId, s.left - ref(3), s.end + ref(3), true);
+            s.y += chart + ref(3);
+            s.close();
         } else
             charts(debugCpuId, debugGpuId, 0, 0, false);
-        SelectObject(dc, previous);
-        ReleaseDC(window, dc);
-        if (apply) {
-            pages_[1].frames = std::move(frames);
-            pages_[1].texts = std::move(texts);
-            linkedBar_ = bar;
-        }
-        return y + scroll + ref(6);
+        if (s.apply) linkedBar_ = bar;
     }
-    // GPU Thermal Failsafe and its Status, as in the reference FailsafeTab. Returns the content height.
-    int layoutThermal(int width, int scroll, bool apply) {
-        auto window = pages_[2].window;
-        auto dc = GetDC(window);
-        auto previous = SelectObject(dc, title_);
-        TEXTMETRICW metrics{};
-        GetTextMetricsW(dc, &metrics);
-        int titleHeight = metrics.tmHeight;
-        SelectObject(dc, font_);
-        GetTextMetricsW(dc, &metrics);
-        int line = metrics.tmHeight;
-        auto extent = [&](HFONT font, const std::wstring& s) {
-            SelectObject(dc, font);
-            SIZE size{};
-            GetTextExtentPoint32W(dc, s.c_str(), int(s.size()), &size);
-            return int(size.cx);
-        };
-        int x = ref(16), right = width - ref(16), left = x + ref(15), end = right - ref(15), y = ref(6) - scroll,
-            slider = std::max(ref(30), ref(8) + line), box = line + ref(4), button = ref(32), pad = ref(6);
+    // GPU Thermal Failsafe and its Status, as in the reference FailsafeTab.
+    void layoutThermal(Sections& s) {
         COLORREF gray = GetSysColor(COLOR_GRAYTEXT), black = GetSysColor(COLOR_BTNTEXT);
-        std::vector<std::pair<RECT, const wchar_t*>> frames;
-        std::vector<Text> texts;
         RECT live{};
-        auto put = [&](HWND child, int cx, int cy, int w, int h) {
-            if (apply) place(child, cx, cy, w, h);
-        };
-        auto open = [&](const wchar_t* title) {
-            frames.push_back({{x, y, right, 0}, title});
-            y += titleHeight + ref(11);
-        };
-        auto close = [&] {
-            y += ref(13);
-            frames.back().first.bottom = y;
-            y += ref(12);
-        };
         // Text wrapped from 'from' to the section's edge. Returns its bottom.
-        auto paragraph = [&](const std::wstring& s, int from, int top, COLORREF color, bool bold) {
-            RECT r{from, top, end - pad, top};
-            SelectObject(dc, bold ? bold_ : font_);
-            DrawTextW(dc, s.c_str(), -1, &r, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
-            r.right = end - pad;
-            texts.push_back({r, s, color, bold ? bold_ : font_});
-            return int(r.bottom);
+        auto paragraph = [&](const std::wstring& t, int from, int top, COLORREF color, HFONT font) {
+            return s.paragraph(t, from, top, s.end - s.pad, color, font);
         };
-        auto note = [&](const std::wstring& s) { y = paragraph(s, left + pad, y + ref(3), gray, false) + ref(3); };
-        auto check = [&](int id, HFONT font) {
-            y += ref(6);
-            put(get(id), left, y, std::min(extent(font, text(get(id))) + ref(40), end - left), box);
-            y += box;
+        auto note = [&](const std::wstring& t) {
+            s.y = paragraph(t, s.left + s.pad, s.y + ref(3), gray, font_) + ref(3);
         };
-        open(L"GPU Thermal Failsafe");
+        s.open(L"GPU Thermal Failsafe");
         note(thermalDescription);
         bool unavailable = state_.contains("thermalActions") && !(state_["thermalActions"].get<int>() & Gpu);
         explain(thermalSupportId,
                 unavailable ? L"Thermal failsafe unavailable: " + w(state_.value("thermalReason", std::string{})) + L"."
                             : L"",
                 state_.value("enabled", std::set<std::string>{}).contains("gpuPower"));
-        y = supportNote(thermalSupportId, true, errorColor, left + pad, y, ref(3), end - left - 2 * pad, apply);
-        check(protectionId, bold_);
-        auto& trigger = find(thresholdId);
-        int label = extent(bold_, text(trigger.label)) + 2 * pad, value = extent(font_, L"00 °C") + 2 * pad,
-            track = left + label + ref(8);
-        y += ref(6);
-        put(trigger.label, left + pad, y + ref(8), label - pad, line);
-        put(trigger.control, track, y, end - value - ref(8) - track, slider);
-        put(trigger.number, end - value + pad, y + ref(8), value - pad, line);
-        y += slider;
-        for (int id : {reduceId, fanBoostId, showWindowId}) check(id, font_);
-        y += ref(3);
+        s.supportNote(thermalSupportId, true, errorColor, s.left + s.pad, ref(3), s.end - s.left - 2 * s.pad);
+        s.check(protectionId, true, bold_, s.end - s.left);
+        s.y += ref(6);
+        s.slide(thresholdId, s.columns({thresholdId}, L"00 °C"));
+        for (int id : {reduceId, fanBoostId, showWindowId}) s.check(id, true, font_, s.end - s.left);
+        s.y += ref(3);
         note(thermalText_[0]);
-        y += ref(6);
-        put(get(protectionApplyId), left, y, ref(110), button);
-        paragraph(thermalText_[1], left + ref(120) + pad, y + (button - line) / 2,
-                  thermalText_[1] == L"Settings match saved profile" ? gray : warnColor, false);
-        y += button + ref(3);
+        s.y += ref(6);
+        s.put(get(protectionApplyId), s.left, s.y, ref(110), s.button);
+        paragraph(thermalText_[1], s.left + ref(120) + s.pad, s.y + (s.button - s.line) / 2,
+                  thermalText_[1] == L"Settings match saved profile" ? gray : warnColor, font_);
+        s.y += s.button + ref(3);
         note(
             L"Applies to the current profile. Apply takes effect now; use the profile bar's Save button to keep these settings.");
-        put(get(detailsId), left + pad, y + ref(3), extent(font_, L"Safety details and limitations") + ref(4), line);
-        y += line + ref(6);
+        s.put(get(detailsId), s.left + s.pad, s.y + ref(3), s.extent(font_, L"Safety details and limitations") + ref(4),
+              s.line);
+        s.y += s.line + ref(6);
         if (thermalDetails_) note(thermalDetails);
-        close();
-        open(L"Status");
+        s.close();
+        s.open(L"Status");
         const wchar_t* captions[]{L"State:", L"GPU temperature (EC):", L"Peak since armed:", L"Last trip:",
                                   L"Configuration:"};
         int column = 0;
-        for (auto c : captions) column = std::max(column, extent(bold_, c));
-        column += left + pad + ref(16);
-        auto row = [&](int i, const std::wstring& s, COLORREF color, bool bold) {
-            int top = y + ref(3);
-            texts.push_back({{left + pad, top, column, top + line}, captions[i], black, bold_});
-            y = (s.empty() ? top + line : std::max(top + line, paragraph(s, column, top, color, bold))) + ref(3);
+        for (auto c : captions) column = std::max(column, s.extent(bold_, c));
+        column += s.left + s.pad + ref(16);
+        auto row = [&](int i, const std::wstring& t, COLORREF color, bool bold) {
+            int top = s.y + ref(3);
+            s.texts.push_back({{s.left + s.pad, top, column, top + s.line}, captions[i], black, bold_});
+            s.y = (t.empty() ? top + s.line
+                             : std::max(top + s.line, paragraph(t, column, top, color, bold ? bold_ : font_))) +
+                  ref(3);
         };
         bool enabled = state_.value("protection", Json::object()).value("enabled", false);
         row(0, thermalText_[2],
@@ -1273,327 +1245,164 @@ private:
             : state_.value("temperature", Json(nullptr)).is_null() ? warnColor
                                                                    : okColor,
             tripped_);
-        live = {column, y, end - pad, 0};
+        live = {column, s.y, s.end - s.pad, 0};
         row(1, L"", black, false);
         row(2, L"", black, false);
-        live.bottom = y; // Readings are painted as they arrive.
+        live.bottom = s.y; // Readings are painted as they arrive.
         row(3, thermalText_[3], black, false);
         if (!thermalText_[4].empty()) row(4, thermalText_[4], warnColor, false);
-        y += ref(6);
-        put(get(resetId), left, y, ref(110), button);
-        put(get(testId), left + ref(120), y, ref(140), button);
-        y += button;
-        close();
-        SelectObject(dc, previous);
-        ReleaseDC(window, dc);
-        if (apply) {
-            pages_[2].frames = std::move(frames);
-            pages_[2].texts = std::move(texts);
-            thermalLive_ = live;
-        }
-        return y + scroll + ref(6);
+        s.y += ref(6);
+        s.put(get(resetId), s.left, s.y, ref(110), s.button);
+        s.put(get(testId), s.left + ref(120), s.y, ref(140), s.button);
+        s.y += s.button;
+        s.close();
+        if (s.apply) thermalLive_ = live;
     }
     // The logo, keyboard and light bar zones, then Idle Timer and Local Dimming, as in the reference LightingTab.
-    // The last two sit side by side instead of stacked. Returns the content height.
-    int layoutLighting(int width, int scroll, bool apply) {
-        auto window = pages_[4].window;
-        auto dc = GetDC(window);
-        auto previous = SelectObject(dc, title_);
-        TEXTMETRICW metrics{};
-        GetTextMetricsW(dc, &metrics);
-        int titleHeight = metrics.tmHeight;
-        SelectObject(dc, font_);
-        GetTextMetricsW(dc, &metrics);
-        int line = metrics.tmHeight;
-        auto extent = [&](HFONT font, const std::wstring& s) {
-            SelectObject(dc, font);
-            SIZE size{};
-            GetTextExtentPoint32W(dc, s.c_str(), int(s.size()), &size);
-            return int(size.cx);
-        };
-        int x = ref(16), right = width - ref(16), left = x + ref(15), end = right - ref(15), y = ref(6) - scroll,
-            slider = std::max(ref(30), ref(8) + line), box = line + ref(4), button = ref(32), pad = ref(6),
-            row = ref(36);
-        std::vector<std::pair<RECT, const wchar_t*>> frames;
-        std::vector<Text> texts;
+    // The last two sit side by side instead of stacked.
+    void layoutLighting(Sections& s) {
+        int row = ref(36);
         std::array<RECT, 3> swatches{};
-        auto put = [&](HWND child, int cx, int cy, int w, int h) {
-            if (apply) place(child, cx, cy, w, h);
-        };
-        auto open = [&](const wchar_t* title, int from, int to) {
-            frames.push_back({{from, y, to, 0}, title});
-            y += titleHeight + ref(11);
-        };
-        auto close = [&] {
-            y += ref(13);
-            frames.back().first.bottom = y;
-            y += ref(12);
-        };
-        // Painted text; returns its right edge.
-        auto say = [&](const wchar_t* s, int cx, int cy) {
-            int to = cx + extent(font_, s);
-            texts.push_back({{cx, cy, to, cy + line}, s, GetSysColor(COLOR_BTNTEXT)});
-            return to;
-        };
-        int label = extent(bold_, L"Brightness") + 2 * pad, value = extent(font_, L"100 %") + 2 * pad,
-            track = left + label + ref(8);
         const wchar_t* titles[]{L"Keyboard Backlight", L"Light Bar (Front)", L"Logo LED (Rear Cover)"};
         for (int zone : {2, 0, 1}) {
             int base = zoneBaseId + zone * 16;
-            auto& brightness = find(base + 4);
-            open(titles[zone], x, right);
-            if (zone == 2) y = supportNote(logoSupportId, true, errorColor, left, y, 0, end - left, apply);
-            y += ref(4);
-            put(get(base), left, y, extent(font_, L"Enabled") + ref(40), box);
-            y += box + ref(6);
-            put(brightness.label, left + pad, y + ref(8), label - pad, line);
-            put(brightness.control, track, y, end - value - ref(8) - track, slider);
-            put(brightness.number, end - value + pad, y + ref(8), value - pad, line);
-            y += slider + ref(6);
-            int cx = colorRow(dc, texts, base, left, y, row, apply);
-            swatches[zone] = {cx + ref(12), y + ref(2), cx + ref(44), y + ref(34)};
-            y += row + ref(6);
-            put(get(base + 5), left, y, ref(110), button);
-            put(get(base + 7), left + ref(120), y, ref(110), button);
-            if (zone != 2) put(get(base + 6), left + ref(240), y, ref(120), button);
-            y += button;
-            close();
+            s.open(titles[zone]);
+            if (zone == 2) s.supportNote(logoSupportId, true, errorColor, s.left, 0, s.end - s.left);
+            s.y += ref(4);
+            s.put(get(base), s.left, s.y, s.checkWidth(base, font_), s.box);
+            s.y += s.box + ref(6);
+            s.slide(base + 4, s.columns({base + 4}, L"100 %"));
+            s.y += ref(6);
+            int cx = s.colors(base, s.left, row);
+            swatches[zone] = {cx + ref(12), s.y + ref(2), cx + ref(44), s.y + ref(34)};
+            s.y += row + ref(6);
+            s.put(get(base + 5), s.left, s.y, ref(110), s.button);
+            s.put(get(base + 7), s.left + ref(120), s.y, ref(110), s.button);
+            if (zone != 2) s.put(get(base + 6), s.left + ref(240), s.y, ref(120), s.button);
+            s.y += s.button;
+            s.close();
         }
         // Both sections fit their content or title, whichever is wider.
-        auto fit = [&](const wchar_t* title, int from, int content) {
-            return std::max(content + ref(15), from + ref(25) + extent(title_, title) + ref(15));
-        };
         const wchar_t *idleTitle = L"Idle Timer (Keyboard + Light Bar)", *dimmingTitle = L"Local Dimming (Mini-LED)";
-        int top = y, combo = left + pad + extent(font_, L"Turn off after:") + ref(16),
-            idle = fit(idleTitle, x, combo + ref(140));
-        int dimmingX = idle + ref(12), dimmingLeft = dimmingX + ref(15),
-            check = extent(font_, text(get(dimmingId))) + ref(40);
-        open(idleTitle, x, idle);
-        say(L"Turn off after:", left + pad, y + ref(6));
-        put(get(idleId), combo, y + ref(2), ref(140), ref(300));
-        put(get(dimmingId), dimmingLeft, y + (row - box) / 2, check, box);
-        y += row;
-        close();
-        frames.push_back({{dimmingX, top, fit(dimmingTitle, dimmingX, dimmingLeft + check), frames.back().first.bottom},
-                          dimmingTitle});
-        put(get(lightingReadId), x, y, ref(140), button);
-        y += button;
-        SelectObject(dc, previous);
-        ReleaseDC(window, dc);
-        if (apply) {
-            pages_[4].frames = std::move(frames);
-            pages_[4].texts = std::move(texts);
-            swatches_ = swatches;
-        }
-        return y + scroll + ref(6);
-    }
-    // A color's R, G and B labels and boxes on a row, from cx. Returns the right edge.
-    int colorRow(HDC dc, std::vector<Text>& texts, int base, int cx, int y, int row, bool apply) {
-        TEXTMETRICW metrics{};
-        SelectObject(dc, font_);
-        GetTextMetricsW(dc, &metrics);
-        int line = metrics.tmHeight, edit = line + ref(3);
-        for (int n = 1; n <= 3; ++n) {
-            const wchar_t* name = n == 1 ? L"R:" : n == 2 ? L"G:" : L"B:";
-            SIZE size{};
-            GetTextExtentPoint32W(dc, name, 2, &size);
-            cx += n == 1 ? ref(6) : ref(14);
-            texts.push_back({{cx, y + (row - line) / 2, cx + size.cx, y + (row - line) / 2 + line},
-                             name,
-                             GetSysColor(COLOR_BTNTEXT)});
-            cx += size.cx + ref(8);
-            if (apply) {
-                place(get(base + n + 1000), cx, y + (row - edit) / 2, ref(68), edit);
-                SendMessageW(get(base + n), UDM_SETBUDDY, reinterpret_cast<WPARAM>(get(base + n + 1000)), 0);
-            }
-            cx += ref(68);
-        }
-        return cx;
+        int top = s.y, combo = s.left + s.pad + s.extent(font_, L"Turn off after:") + ref(16),
+            idle = s.fit(idleTitle, s.x, combo + ref(140) + ref(15));
+        int dimmingX = idle + ref(12), dimmingLeft = dimmingX + ref(15), check = s.checkWidth(dimmingId, font_);
+        s.open(idleTitle, s.x, idle);
+        s.say(L"Turn off after:", s.left + s.pad, s.y + ref(6));
+        s.put(get(idleId), combo, s.y + ref(2), ref(140), ref(300));
+        s.put(get(dimmingId), dimmingLeft, s.y + (row - s.box) / 2, check, s.box);
+        s.y += row;
+        s.close();
+        s.frames.push_back({{dimmingX, top, s.fit(dimmingTitle, dimmingX, dimmingLeft + check + ref(15)),
+                             s.frames.back().first.bottom},
+                            dimmingTitle});
+        s.put(get(lightingReadId), s.x, s.y, ref(140), s.button);
+        s.y += s.button;
+        if (s.apply) swatches_ = swatches;
     }
     // The connection, Radiator Fan, Pump and LED sections, as in the reference LiquidCoolerTab. The LED section fits
-    // its contents. Returns the content height.
-    int layoutCooler(int width, int scroll, bool apply) {
-        auto window = pages_[5].window;
-        auto dc = GetDC(window);
-        auto previous = SelectObject(dc, title_);
-        TEXTMETRICW metrics{};
-        GetTextMetricsW(dc, &metrics);
-        int titleHeight = metrics.tmHeight;
-        SelectObject(dc, font_);
-        GetTextMetricsW(dc, &metrics);
-        int line = metrics.tmHeight;
-        auto extent = [&](HFONT font, const std::wstring& s) {
-            SelectObject(dc, font);
-            SIZE size{};
-            GetTextExtentPoint32W(dc, s.c_str(), int(s.size()), &size);
-            return int(size.cx);
-        };
-        int x = ref(16), right = width - ref(16), left = x + ref(15), end = right - ref(15), y = ref(6) - scroll,
-            slider = std::max(ref(30), ref(8) + line), box = line + ref(4), button = ref(32), pad = ref(6),
-            row = ref(36);
+    // its contents.
+    void layoutCooler(Sections& s) {
+        int row = ref(36);
         RECT r{};
         GetWindowRect(get(devicesId), &r);
         int field = r.bottom - r.top; // A closed drop-down list is as tall as its font needs.
-        COLORREF black = GetSysColor(COLOR_BTNTEXT), gray = GetSysColor(COLOR_GRAYTEXT);
-        std::vector<std::pair<RECT, const wchar_t*>> frames;
-        std::vector<Text> texts;
+        COLORREF gray = GetSysColor(COLOR_GRAYTEXT);
         RECT swatch{};
-        auto put = [&](HWND child, int cx, int cy, int w, int h) {
-            if (apply) place(child, cx, cy, w, h);
-        };
-        auto open = [&](const wchar_t* title) {
-            frames.push_back({{x, y, right, 0}, title});
-            y += titleHeight + ref(11);
-        };
-        auto close = [&] {
-            y += ref(13);
-            frames.back().first.bottom = y;
-            y += ref(12);
-        };
-        // Painted text; returns its right edge.
-        auto say = [&](const std::wstring& s, int cx, int cy, COLORREF color) {
-            int to = cx + extent(font_, s);
-            texts.push_back({{cx, cy, to, cy + line}, s, color});
-            return to;
-        };
         // A check box sized to its text; returns its right edge.
         auto check = [&](int id, int cy) {
-            int to = left + extent(font_, text(get(id))) + ref(40);
-            put(get(id), left, cy, to - left, box);
+            int to = s.left + s.checkWidth(id, font_);
+            s.put(get(id), s.left, cy, to - s.left, s.box);
             return to;
         };
         auto duty = [&](int id) {
-            auto& d = find(id);
-            int label = extent(bold_, text(d.label)) + 2 * pad, value = extent(font_, L"100 %") + 2 * pad,
-                track = left + label + ref(8);
-            put(d.label, left + pad, y + ref(8), label - pad, line);
-            put(d.control, track, y, end - value - ref(8) - track, slider);
-            put(d.number, end - value + pad, y + ref(8), value - pad, line);
-            y += slider + ref(6);
+            s.slide(id, s.columns({id}, L"100 %"));
+            s.y += ref(6);
         };
         // The latest connection status: green while connected, amber while connecting or scanning, red for a problem.
-        auto has = [&](const wchar_t* s) { return coolerStatus_.find(s) != std::wstring::npos; };
+        auto has = [&](const wchar_t* t) { return coolerStatus_.find(t) != std::wstring::npos; };
         COLORREF tone = has(L"failed") || has(L"lost") || has(L"unavailable") ? errorColor
                         : coolerConnected_                                    ? okColor
                         : has(L"Connecting") || has(L"Scanning")              ? warnColor
                                                                               : gray;
-        open(L"Liquid Cooler (BLE)");
-        RECT status{left + pad, y + ref(4), end - pad, y + ref(4)};
-        SelectObject(dc, bold_);
-        DrawTextW(dc, coolerStatus_.c_str(), -1, &status, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
-        status.right = end - pad;
-        texts.push_back({status, coolerStatus_, tone, bold_});
-        y = status.bottom + ref(6);
-        int connect = end - ref(100), scan = connect - ref(92), height = std::max(field, button);
-        put(get(devicesId), left, y + (height - field) / 2, scan - ref(12) - left, ref(300));
-        put(get(scanId), scan, y + (height - button) / 2, ref(80), button);
-        put(get(connectId), connect, y + (height - button) / 2, ref(100), button);
-        y += height + ref(6);
-        int to = check(autoConnectId, y);
-        if (!coolerFirmware_.empty()) say(coolerFirmware_, to + ref(16), y + (box - line) / 2, gray);
-        y += box;
-        close();
-        open(L"Radiator Fan");
-        y += ref(4);
-        check(coolerFanOnId, y);
-        y += box + ref(6);
+        s.open(L"Liquid Cooler (BLE)");
+        s.y = s.paragraph(coolerStatus_, s.left + s.pad, s.y + ref(4), s.end - s.pad, tone, bold_) + ref(6);
+        int connect = s.end - ref(100), scan = connect - ref(92), height = std::max(field, s.button);
+        s.put(get(devicesId), s.left, s.y + (height - field) / 2, scan - ref(12) - s.left, ref(300));
+        s.put(get(scanId), scan, s.y + (height - s.button) / 2, ref(80), s.button);
+        s.put(get(connectId), connect, s.y + (height - s.button) / 2, ref(100), s.button);
+        s.y += height + ref(6);
+        int to = check(autoConnectId, s.y);
+        if (!coolerFirmware_.empty()) s.say(coolerFirmware_, to + ref(16), s.y + (s.box - s.line) / 2, gray);
+        s.y += s.box;
+        s.close();
+        s.open(L"Radiator Fan");
+        s.y += ref(4);
+        check(coolerFanOnId, s.y);
+        s.y += s.box + ref(6);
         duty(coolerFanId);
-        put(get(coolerFanApplyId), left, y, ref(110), button);
-        y += button;
-        close();
-        open(L"Pump");
-        y += ref(2);
-        height = std::max(field, box);
-        to = say(L"Voltage:", check(coolerPumpOnId, y + (height - box) / 2) + ref(24), y + (height - line) / 2, black);
-        put(get(voltageId), to + ref(16), y + (height - field) / 2, ref(80), ref(300));
-        y += height + ref(6);
+        s.put(get(coolerFanApplyId), s.left, s.y, ref(110), s.button);
+        s.y += s.button;
+        s.close();
+        s.open(L"Pump");
+        s.y += ref(2);
+        height = std::max(field, s.box);
+        to = s.say(L"Voltage:", check(coolerPumpOnId, s.y + (height - s.box) / 2) + ref(24),
+                   s.y + (height - s.line) / 2);
+        s.put(get(voltageId), to + ref(16), s.y + (height - field) / 2, ref(80), ref(300));
+        s.y += height + ref(6);
         duty(coolerPumpId);
-        put(get(coolerPumpApplyId), left, y, ref(110), button);
-        y += button;
-        close();
-        open(L"LED");
-        y += ref(4);
-        check(coolerRgbOnId, y);
-        y += box + ref(6);
-        int cx = colorRow(dc, texts, coolerRgbOnId, left, y, row, apply);
-        swatch = {cx + ref(12), y + ref(2), cx + ref(44), y + ref(34)};
-        cx = say(L"Mode:", swatch.right + ref(19), y + (row - line) / 2, black) + ref(12);
-        put(get(rgbModeId), cx, y + (row - field) / 2, ref(120), ref(300));
-        y += row + ref(6);
-        put(get(coolerRgbApplyId), left, y, ref(110), button);
-        y += button;
-        close();
-        frames.back().first.right = cx + ref(135);
-        SelectObject(dc, previous);
-        ReleaseDC(window, dc);
-        if (apply) {
-            pages_[5].frames = std::move(frames);
-            pages_[5].texts = std::move(texts);
-            coolerSwatch_ = swatch;
-        }
-        return y + scroll + ref(6);
+        s.put(get(coolerPumpApplyId), s.left, s.y, ref(110), s.button);
+        s.y += s.button;
+        s.close();
+        s.open(L"LED");
+        s.y += ref(4);
+        check(coolerRgbOnId, s.y);
+        s.y += s.box + ref(6);
+        int cx = s.colors(coolerRgbOnId, s.left, row);
+        swatch = {cx + ref(12), s.y + ref(2), cx + ref(44), s.y + ref(34)};
+        cx = s.say(L"Mode:", swatch.right + ref(19), s.y + (row - s.line) / 2) + ref(12);
+        s.put(get(rgbModeId), cx, s.y + (row - field) / 2, ref(120), ref(300));
+        s.y += row + ref(6);
+        s.put(get(coolerRgbApplyId), s.left, s.y, ref(110), s.button);
+        s.y += s.button;
+        s.close();
+        s.frames.back().first.right = cx + ref(135);
+        if (s.apply) coolerSwatch_ = swatch;
     }
     // System Identity, Temperatures and Power Delivery, as in the reference SystemInfoTab. Each section fits its
-    // contents; the readings are painted into their cells. Returns the content height.
-    int layoutInfo(int scroll, bool apply) {
-        auto window = pages_[6].window;
-        auto dc = GetDC(window);
-        auto previous = SelectObject(dc, title_);
-        TEXTMETRICW metrics{};
-        GetTextMetricsW(dc, &metrics);
-        int titleHeight = metrics.tmHeight;
-        SelectObject(dc, header_);
-        GetTextMetricsW(dc, &metrics);
-        int headerHeight = metrics.tmHeight;
-        SelectObject(dc, font_);
-        GetTextMetricsW(dc, &metrics);
-        int line = metrics.tmHeight;
-        auto extent = [&](HFONT font, const std::wstring& s) {
-            SelectObject(dc, font);
-            SIZE size{};
-            GetTextExtentPoint32W(dc, s.c_str(), int(s.size()), &size);
-            return int(size.cx);
-        };
-        int x = ref(16), left = x + ref(21), y = ref(6) - scroll, right = 0;
-        std::vector<std::pair<RECT, const wchar_t*>> frames;
-        std::vector<Text> texts;
+    // contents; the readings are painted into their cells.
+    void layoutInfo(Sections& s) {
+        int left = s.x + ref(21), right = 0;
+        COLORREF black = GetSysColor(COLOR_BTNTEXT);
         std::array<RECT, 8> cells{};
-        // Painted text; returns its right edge.
-        auto say = [&](const std::wstring& s, HFONT font, int cy, int height) {
-            int to = left + extent(font, s);
-            texts.push_back({{left, cy, to, cy + height}, s, GetSysColor(COLOR_BTNTEXT), font});
-            return to;
-        };
         auto open = [&](const wchar_t* title) {
-            frames.push_back({{x, y, 0, 0}, title});
-            y += titleHeight + ref(11);
+            s.open(title, s.x, 0);
             right = 0;
         };
         auto close = [&] {
-            auto& [r, title] = frames.back();
-            r.right = std::max(right + ref(21), x + ref(25) + extent(title_, title) + ref(15));
-            y += ref(13);
-            r.bottom = y;
-            y += ref(12);
+            auto& [r, title] = s.frames.back();
+            r.right = s.fit(title, s.x, right + ref(21));
+            s.close();
         };
         // Bold captions and their readings' cells. Index -1 is a source heading.
         auto table = [&](const wchar_t* title, const std::vector<std::pair<int, std::wstring>>& rows) {
             open(title);
             int column = 0;
             for (auto& [i, c] : rows)
-                if (i >= 0) column = std::max(column, extent(bold_, c));
+                if (i >= 0) column = std::max(column, s.extent(bold_, c));
             column += left + ref(16);
             for (auto& [i, c] : rows) {
                 if (i < 0) {
-                    if (&c != &rows.front().second) y += ref(8);
-                    right = std::max(right, say(c, heading_, y, line));
-                    y += line;
+                    if (&c != &rows.front().second) s.y += ref(8);
+                    right = std::max(right, s.say(c, left, s.y, black, heading_));
+                    s.y += s.line;
                     continue;
                 }
-                say(c, bold_, y + ref(3), line);
-                cells[i] = {column, y + ref(3), column + infoWidth(dc, i), y + ref(3) + line};
+                s.say(c, left, s.y + ref(3), black, bold_);
+                cells[i] = {column, s.y + ref(3), column + infoWidth(s.dc, i), s.y + ref(3) + s.line};
                 right = std::max(right, int(cells[i].right));
-                y += line + ref(6);
+                s.y += s.line + ref(6);
             }
             close();
         };
@@ -1602,20 +1411,21 @@ private:
         if (!board.empty() || !cpu.empty()) {
             open(L"System Identity");
             if (!board.empty()) {
-                right = say(board, header_, y, headerHeight);
-                y += headerHeight + ref(4);
+                int headerHeight = s.height(header_);
+                right = s.say(board, left, s.y, black, header_, headerHeight);
+                s.y += headerHeight + ref(4);
             }
             if (!cpu.empty()) {
-                right = std::max(right, say(cpu, font_, y, line));
-                y += line;
+                right = std::max(right, s.say(cpu, left, s.y, black, font_));
+                s.y += s.line;
             }
             close();
         }
         // Temperature registers come from the model profile; the other readings use fixed registers.
         auto reg = [&](const char* key) {
-            wchar_t s[16]{};
-            if (state_.contains(key)) swprintf_s(s, L" [0x%03X]", state_[key].get<int>());
-            return std::wstring(s);
+            wchar_t t[16]{};
+            if (state_.contains(key)) swprintf_s(t, L" [0x%03X]", state_[key].get<int>());
+            return std::wstring(t);
         };
         table(L"Temperatures", {{0, L"CPU Temperature" + reg("cpuTempRegister") + L":"},
                                 {1, L"GPU Temperature" + reg("gpuTempRegister") + L":"}});
@@ -1629,14 +1439,7 @@ private:
             power.insert(power.end(), {{-1, L"NVIDIA Driver"}, {6, L"GPU Budget F7:"}, {7, L"CPU+GPU Budget TPP:"}});
         }
         table(L"Power Delivery", power);
-        SelectObject(dc, previous);
-        ReleaseDC(window, dc);
-        if (apply) {
-            pages_[6].frames = std::move(frames);
-            pages_[6].texts = std::move(texts);
-            infoCells_ = cells;
-        }
-        return y + scroll + ref(6);
+        if (s.apply) infoCells_ = cells;
     }
     void paintPage(int index, HDC target, const RECT& area) {
         auto& p = pages_[index];
