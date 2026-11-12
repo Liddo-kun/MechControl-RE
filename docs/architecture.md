@@ -29,7 +29,15 @@ bit 6 as a power-button request. Other profiles write the whole byte.
 `ec.*` and `ec_session.*` own the OEM transport, activation and central WriteGuard.
 The guard admits one fixed set of addresses on every model, plus the EC bypass
 register of a profile that declares it.
-`controller*` coordinates power, fans, presets and partial outcomes. Thermal
+`controller*` coordinates power, fans, presets and partial outcomes. Each command in
+`ControlCommand` has one `run()` handler; `execute` adds the shared thermal check, failure
+text and partial-application accounting. Its `traits()` entry beside the command structs
+tells the worker whether it is a lifecycle notification (allowed during the wait for a
+blocking device operation), whether its result reaches the UI, which tabs it makes stale
+and whether it changes the slot catalogue. `controller_status.cpp` builds the UI
+presentation and status JSON. `cli_commands.cpp` turns `mcctl` arguments into the same
+typed commands and formats the replies; it is always built because the worker runs
+`CliCommand`, while the pipe server and `mcctl` stay optional. Thermal
 enforcement runs before linked fans and telemetry. Held actions constrain later
 writes, and acquisitions during waits win. `thermal.*` persists existing Stage
 2/Held obligations; startup combines committed and pending settings. An enabled
