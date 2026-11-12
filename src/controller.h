@@ -5,6 +5,7 @@
 #include "nvidia.h"
 #include "peripherals.h"
 #include "ble.h"
+#include <algorithm>
 #include <variant>
 
 namespace mech {
@@ -176,7 +177,8 @@ inline CommandTraits traits(const DefaultsApply&) { return {.stale = tab::all}; 
 inline CommandTraits traits(const ThermalReset&) { return {.stale = tab::all}; }
 inline CommandTraits traits(const ThermalTest&) { return {.stale = tab::all}; }
 inline CommandTraits traits(const CliCommand& c) {
-    return {.if_written = true, .stale = !c.arguments.empty() && c.arguments[0] == "fan" ? tab::fans : tab::power};
+    auto group = std::ranges::find_if(c.arguments, [](const std::string& a) { return a != "--json"; });
+    return {.if_written = true, .stale = group != c.arguments.end() && *group == "fan" ? tab::fans : tab::power};
 }
 inline CommandTraits traits(const Visibility&) { return {.notification = true, .posts = false}; }
 inline CommandTraits traits(const UiPage&) { return {.notification = true, .posts = false}; }

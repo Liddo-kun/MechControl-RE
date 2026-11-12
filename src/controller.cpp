@@ -1062,8 +1062,16 @@ ControlResult Controller::execute(const ControlCommand& command) {
     ControlResult result;
     // Lifecycle notifications may pass the exclusive NVIDIA wait. They and page reads skip the shared bookkeeping
     // below, so they do not reset the pending command's partial-application accounting.
-    if (command_traits(command).notification || std::holds_alternative<UiRead>(command))
+    if (command_traits(command).notification)
         result = handle();
+    else if (std::holds_alternative<UiRead>(command))
+        try {
+            result = handle();
+        } catch (const std::exception& ex) {
+            // A failed tab read must not end the worker, which also runs the thermal failsafe.
+            result = {1, std::string("Read failed: ") + ex.what()};
+            diagnostic_(result.text);
+        }
     else {
         writes_started_ = false;
         application_completed_ = false;
