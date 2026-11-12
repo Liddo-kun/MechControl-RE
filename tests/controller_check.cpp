@@ -1424,7 +1424,13 @@ void waits(const std::filesystem::path& root) {
             : rig(
                   path, true, std::unique_ptr<nv::Power>(driver),
                   [this](std::function<void()> work) {
-                      if (auto nested = std::exchange(during, {})) nested();
+                      // The controller would absorb a failed check thrown through its own call.
+                      if (auto nested = std::exchange(during, {})) try {
+                              nested();
+                          } catch (const std::exception& ex) {
+                              std::cerr << "FAIL " << ex.what() << '\n';
+                              std::exit(1);
+                          }
                       work();
                   },
                   [this](int, const HidReport&) { ++reports; }, setup) {}
