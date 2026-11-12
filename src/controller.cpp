@@ -413,30 +413,24 @@ bool Controller::recover(const char* reason) {
     else
         diagnostic_("EC activation lost (0x741 = " + hex_text(state) + ", detected via " + reason +
                     "); re-running EC init");
-    recovering_ = true;
+    Raised scope(recovering_);
     ++epoch_;
     thermal_->invalidate();
     last_duty_ = -1;
     fan_application_ = FanApplication::unapplied;
-    try {
-        // Reinitialization restores the custom CPU gates even if this clear failed and keeps retrying.
-        clear_bypass("EC reinitialization");
-        std::vector<std::string> errors;
-        if (!initialize(errors)) throw std::runtime_error(errors.back());
-        recovering_ = false;
-        reapply_ = true;
-        watchdog_ = GetTickCount64() + 30000;
-        return true;
-    } catch (...) {
-        recovering_ = false;
-        throw;
-    }
+    // Reinitialization restores the custom CPU gates even if this clear failed and keeps retrying.
+    clear_bypass("EC reinitialization");
+    std::vector<std::string> errors;
+    if (!initialize(errors)) throw std::runtime_error(errors.back());
+    reapply_ = true;
+    watchdog_ = GetTickCount64() + 30000;
+    return true;
 }
 std::vector<std::string> Controller::start() {
     std::vector<std::string> init_errors;
-    recovering_ = true;
     // As in the source, a missing acknowledgement is only a warning here; the watchdog retries it.
-    try {
+    {
+        Raised scope(recovering_);
         // The bypass never survives a restart: a value left by a crash is cleared before EC init.
         if (bypass_supported_ && session_.transport().read(session_.profile.reg("ecBypass")) ==
                                      uint8_t(hex(session_.profile.ec_bypass->value))) {
@@ -444,11 +438,7 @@ std::vector<std::string> Controller::start() {
             clear_bypass("left set by a previous run");
         }
         initialize(init_errors);
-    } catch (...) {
-        recovering_ = false;
-        throw;
     }
-    recovering_ = false;
     watchdog_ = GetTickCount64() + 30000;
     auto& ft = session_.profile.fan_table;
     int profile_active = ft.active;

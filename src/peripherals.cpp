@@ -79,17 +79,11 @@ bool Lighting::open() {
     return found;
 }
 void Lighting::io(const std::function<void()>& work) {
-    io_busy_ = true;
-    try {
-        if (run_io_)
-            run_io_(work);
-        else
-            work();
-    } catch (...) {
-        io_busy_ = false;
-        throw;
-    }
-    io_busy_ = false;
+    Raised busy(io_busy_);
+    if (run_io_)
+        run_io_(work);
+    else
+        work();
 }
 bool Lighting::open_device() {
     for (auto& h : handles_) h.reset();
