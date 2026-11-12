@@ -202,12 +202,8 @@ Json Controller::gpu_status(bool presentation) {
          {"ceilingWatts", "enforcedWatts", "requestedWatts", "nvvdd", "msvdd", "boardInput", "currentCapMhz",
           "powerCapMhz", "maxClockMhz", "clockMhz", "gpuPowerMw", "corePowerMw", "boardInputLimiterActivity"})
         g[key] = nullptr;
-    // This guard precedes EVERY driver read, including below-EC-floor readback.
+    // These guards precede EVERY driver read, including below-EC-floor readback.
     // gpu() above uses EC plus our retained request, never ReadPowerLimits.
-    if (nvidia_busy_) {
-        g["nvidia"] = "NVIDIA operation in progress";
-        return g;
-    }
     if (gpu_driver_uncertain_) {
         g["nvidia"] = nvidia_error_;
         return g;

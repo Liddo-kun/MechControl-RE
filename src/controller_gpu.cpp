@@ -14,7 +14,6 @@ bool Controller::gpu_extend() const {
 int Controller::gpu_min() const { return gpu_unlocked_ && gpu_extend() ? gpu_unlock_min() : limits_.tgp.min; }
 int Controller::gpu_max() const { return gpu_unlocked_ && gpu_extend() ? gpu_unlock_max() : limits_.tgp.max; }
 std::string Controller::nvidia_unavailable() const {
-    if (nvidia_busy_) return "NVIDIA operation in progress; try again in a few seconds";
     if (!nvidia_error_.empty()) return nvidia_error_;
     if (!nvidia_available_) return "No NVIDIA GPU control on this machine";
     return gpu_extend()
@@ -22,6 +21,7 @@ std::string Controller::nvidia_unavailable() const {
                : "NVIDIA not connected; current limits need the GPU unlock, which is unavailable on this model";
 }
 nv::Power& Controller::open_nvidia() {
+    // Checked here because the catch below would take a busy driver for an unavailable one.
     if (nvidia_busy_) throw std::runtime_error("NVIDIA operation in progress; try again in a few seconds");
     if (gpu_driver_uncertain_) throw std::runtime_error(nvidia_error_);
     if (nvidia_) return *nvidia_;
@@ -46,8 +46,8 @@ nv::Power& Controller::open_nvidia() {
     }
 }
 void Controller::nvidia_work(const std::function<void()>& work) {
-    if (nvidia_busy_)
-        throw std::runtime_error("NVIDIA operation in progress; EC minimum applied, driver verification pending");
+    // A backstop: nothing that runs during a device-operation wait may call the driver.
+    if (nvidia_busy_) throw std::runtime_error("NVIDIA operation in progress");
     if (nvidia_) nvidia_->modified = false;
     nvidia_busy_ = true;
     auto complete = [&] {
@@ -79,7 +79,6 @@ std::vector<EcWrite> Controller::gpu_plan(const GpuSettings& g) {
 }
 nv::ProfilePlan Controller::plan_gpu(const GpuSettings& settings, bool automatic) {
     if (gpu_driver_uncertain_) throw std::runtime_error(nvidia_error_);
-    if (nvidia_busy_) throw std::runtime_error("NVIDIA operation in progress");
     const auto& l = limits_.tgp;
     int lo = gpu_unlock_min(), hi = gpu_unlock_max();
     bool unlocked = nvidia_ && nvidia_->enabled;
@@ -146,7 +145,7 @@ void Controller::configure_gpu(const nv::ProfilePlan& plan) {
 void Controller::validate_currents(const GpuSettings& g) {
     if (!g.nvvdd_ma && !g.msvdd_ma && !g.board_input_ma) return;
     if (gpu_driver_uncertain_) throw std::runtime_error(nvidia_error_);
-    if (nvidia_busy_ || !nvidia_) throw std::runtime_error(nvidia_unavailable());
+    if (!nvidia_) throw std::runtime_error(nvidia_unavailable());
     nv::Currents c;
     nvidia_work([&] { c = nvidia_->currents(); });
     bool unlock = nvidia_->enabled;
@@ -198,8 +197,7 @@ void Controller::apply_gpu(GpuSettings g) {
     thermal_->enforce(true);
 }
 void Controller::check_gpu() {
-    if (!nvidia_ || nvidia_busy_ || gpu_driver_uncertain_ || !nvidia_->awake())
-        return; // All delayed reads are sleep-gated too.
+    if (!nvidia_ || gpu_driver_uncertain_ || !nvidia_->awake()) return; // All delayed reads are sleep-gated too.
     if (dlppc_disabled_) try {
             nvidia_work([&] {
                 auto d = nvidia_->dlppc();
