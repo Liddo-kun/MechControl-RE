@@ -308,6 +308,12 @@ void Controller::emergency(int action) {
     clear_bypass("thermal failsafe trip");
     // Emergency reductions proceed even while a failed bypass clear refuses normal writes.
     Raised scope(emergency_);
+    // A hold is the failsafe's write. A command it interrupts, or a status query that enforces it, wrote nothing.
+    struct Restore {
+        bool& flag;
+        bool value = flag;
+        ~Restore() { flag = value; }
+    } accounting{writes_started_};
 
     if (action == Gpu) {
         if (!gpu_minimum_) throw std::runtime_error("Model-specific GPU minimum unavailable");
@@ -1089,6 +1095,7 @@ ControlResult Controller::execute(const ControlCommand& command) {
     else {
         writes_started_ = false;
         application_completed_ = false;
+        bool was_tripped = thermal_->tripped();
         try {
             result = handle();
             thermal_->enforce(true);
@@ -1106,7 +1113,8 @@ ControlResult Controller::execute(const ControlCommand& command) {
             std::string_view name = std::visit([](const auto& c) { return typeid(c).name(); }, command);
             if (name.starts_with("struct mech::")) name.remove_prefix(13);
             diagnostic_("Controller command not completed (" + std::string(name) + "): " + result.text);
-            if (thermal_->tripped() && writes_started_) thermal_->enforce();
+            // The command may have overwritten a hold, or a trip during its wait left one unverified.
+            if (thermal_->tripped() && (writes_started_ || !was_tripped)) thermal_->enforce();
         }
     }
     if (result.text.empty())
