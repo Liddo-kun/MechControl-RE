@@ -175,7 +175,8 @@ void Controller::apply_gpu(GpuSettings g) {
         }
     };
     held();
-    if (!nvidia_busy_ && gpu_unlocked_) {
+    // A held minimum is below any budget, and a driver that cannot be read must not keep it from the EC.
+    if (!nvidia_busy_ && gpu_unlocked_ && !thermal_->holds(Gpu)) {
         nvidia_work([&] { nvidia_->budget(); });
         held(); // Qualify the live budget before EC writes, including a reduced Dynamic Boost-off budget.
     }

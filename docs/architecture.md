@@ -79,7 +79,8 @@ and closed around each reading, because its handles crash when used after a GPU 
 acceptance is not completed cooler Apply or saved state. Unlocked GPU power writes
 qualify and maintain the live F7 laptop budget, which can fall below the VBIOS
 maximum when Dynamic Boost is off. Independent usable GPU features survive
-unsupported F7 data; unlocked power writes do not.
+unsupported F7 data; unlocked power writes do not, except a thermal hold's minimum,
+which is written without reading the budget.
 
 Settings, five slots, peripheral state and logs live beside the executable.
 Settings/slots use flushed temporary-file replacement; slot temporaries are not

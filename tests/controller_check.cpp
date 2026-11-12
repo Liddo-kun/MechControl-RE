@@ -539,6 +539,23 @@ void gpu_integration(const std::filesystem::path& root) {
           "failed restart cannot authorize or report normal GPU application");
     check(failed.controller->execute(ThermalTest{}).code == 0 && failed_gpu->request && *failed_gpu->request <= 95000,
           "uncertain restart still attempts and verifies both EC and driver emergency minimum");
+    for (bool asleep : {false, true}) {
+        auto unreadable = std::make_unique<GpuFixture>();
+        auto blind_gpu = unreadable.get();
+        (asleep ? unreadable->sleeping : unreadable->fail_budget) = true;
+        Rig blind(root / (asleep ? "gpu-hold-asleep" : "gpu-hold-no-budget"), true, std::move(unreadable));
+        auto& held = *blind.controller;
+        held.execute(ProtectionApply{{false, 50, true, true, false}});
+        held.execute(ThermalTest{});
+        bool written = blind.state->bytes[0x744] == 0 && blind.state->bytes[0x745] == 0;
+        check(written && held.thermal().complete() == !asleep,
+              asleep ? "a hold reaches the EC and stays unverified while the unlocked driver cannot be read"
+                     : "a failed budget read keeps a hold from neither the EC nor the driver");
+        blind_gpu->sleeping = false;
+        for (int i = 0; i < 5; ++i) held.tick();
+        check(held.thermal().complete() && blind_gpu->request && *blind_gpu->request <= 95000,
+              "the driver half of a hold is retried until it verifies");
+    }
     auto untouched = std::make_unique<GpuFixture>();
     untouched->enabled = false;
     bool allocation_failure = true;
