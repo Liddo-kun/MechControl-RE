@@ -971,6 +971,57 @@ void Controller::recover_settings() {
         }
     }
 }
+void Controller::watchdog(ULONGLONG now) {
+    if (now < watchdog_) return;
+    watchdog_ = now + 30000;
+    try {
+        recover("watchdog");
+    } catch (const std::exception& ex) {
+        diagnostic_(ex.what());
+    }
+    ensure_cooler_flag("watchdog check");
+}
+void Controller::sample_thermal(Sensors& shared, bool defer_maintenance) {
+    if (!thermal_->monitoring() && !linked_) return;
+    shared.gpu_temp = temperature("gpuTemp").value_or(0);
+    thermal_->sample(shared.gpu_temp, defer_maintenance);
+}
+void Controller::poll_battery(ULONGLONG now) {
+    if (!visible_ || !battery_page_ || !features_.battery() || now < battery_at_) return;
+    battery_at_ = now + 2000;
+    try {
+        battery_sample_ = battery_telemetry(session_.transport());
+    } catch (const std::exception&) {
+        // Source telemetry is best effort.
+    }
+}
+std::optional<Sensors> Controller::telemetry(ULONGLONG now, const Sensors& shared) {
+    bool subscribed = thermal_->monitoring() || linked_;
+    if (monitor_stopped_ && !subscribed) {
+        if (now < restart_at_) return {};
+        monitor_stopped_ = false;
+        telemetry_failures_ = 0;
+    }
+    try {
+        auto detail = !visible_       ? Detail::rpm
+                      : ui_page_ == 6 ? Detail::full
+                      : ui_page_ == 1 ? Detail::temperatures
+                                      : Detail::monitor;
+        auto s = read_sensors(session_.transport(), session_.profile, detail, shared);
+        telemetry_failures_ = 0;
+        monitor_stopped_ = false;
+        return s;
+    } catch (const std::exception& ex) {
+        ++telemetry_failures_;
+        if (telemetry_failures_ <= 5 || telemetry_failures_ % 60 == 0)
+            diagnostic_(std::string("EC telemetry failed: ") + ex.what());
+        if (telemetry_failures_ >= 5 && !subscribed) {
+            monitor_stopped_ = true;
+            restart_at_ = now + 60000;
+        }
+        return {};
+    }
+}
 std::optional<Sensors> Controller::tick(ULONGLONG now) {
     watch_bypass();
     if (resume_at_ && now >= resume_at_ && !nvidia_busy_) { // In-flight NVIDIA work cannot verify the GPU hold.
@@ -983,21 +1034,9 @@ std::optional<Sensors> Controller::tick(ULONGLONG now) {
         }
         ensure_cooler_flag("resume");
     }
-    if (now >= watchdog_) {
-        watchdog_ = now + 30000;
-        try {
-            recover("watchdog");
-        } catch (const std::exception& ex) {
-            diagnostic_(ex.what());
-        }
-        ensure_cooler_flag("watchdog check");
-    }
+    watchdog(now);
     Sensors shared;
-    bool safety = thermal_->monitoring();
-    if (safety || linked_) {
-        shared.gpu_temp = temperature("gpuTemp").value_or(0);
-        thermal_->sample(shared.gpu_temp, nvidia_busy_);
-    }
+    sample_thermal(shared, nvidia_busy_);
     if (lighting_ && !peripheral_busy_) lighting_->tick(now);
     if (reapply_ && !nvidia_busy_ && !peripheral_busy_) try {
             recover_settings();
@@ -1013,19 +1052,7 @@ std::optional<Sensors> Controller::tick(ULONGLONG now) {
         }
         thermal_->enforce(true);
     }
-    if (visible_ && battery_page_ && features_.battery() && now >= battery_at_) {
-        battery_at_ = now + 2000;
-        try {
-            battery_sample_ = battery_telemetry(session_.transport());
-        } catch (const std::exception&) {
-            // Source telemetry is best effort.
-        }
-    }
-    if (monitor_stopped_ && !thermal_->monitoring() && !linked_) {
-        if (now < restart_at_) return {};
-        monitor_stopped_ = false;
-        telemetry_failures_ = 0;
-    }
+    poll_battery(now);
     if (linked_ && !nvidia_busy_) { // Only emergency writes may interleave with exclusive NVIDIA work.
         shared.cpu_temp = temperature("cpuTemp").value_or(0);
         try {
@@ -1036,25 +1063,7 @@ std::optional<Sensors> Controller::tick(ULONGLONG now) {
             linked_error_ = ex.what();
         }
     }
-    try {
-        auto detail = !visible_       ? Detail::rpm
-                      : ui_page_ == 6 ? Detail::full
-                      : ui_page_ == 1 ? Detail::temperatures
-                                      : Detail::monitor;
-        auto s = read_sensors(session_.transport(), session_.profile, detail, shared);
-        telemetry_failures_ = 0;
-        monitor_stopped_ = false;
-        return s;
-    } catch (const std::exception& ex) {
-        ++telemetry_failures_;
-        if (telemetry_failures_ <= 5 || telemetry_failures_ % 60 == 0)
-            diagnostic_(std::string("EC telemetry failed: ") + ex.what());
-        if (telemetry_failures_ >= 5 && !safety && !linked_) {
-            monitor_stopped_ = true;
-            restart_at_ = now + 60000;
-        }
-        return {};
-    }
+    return telemetry(now, shared);
 }
 std::optional<Json> Controller::take_battery() { return std::exchange(battery_sample_, {}); }
 ControlResult Controller::execute(const ControlCommand& command) {

@@ -245,6 +245,10 @@ private:
     bool curves_supported() const;
     bool recover(const char* reason);
     void recover_settings();
+    void watchdog(ULONGLONG now);
+    void sample_thermal(Sensors& shared, bool defer_maintenance);
+    void poll_battery(ULONGLONG now);
+    std::optional<Sensors> telemetry(ULONGLONG now, const Sensors& shared);
     void batch(const std::vector<EcWrite>&);
     void log_cpu(const std::vector<EcWrite>&);
     void peripheral_io(const std::function<void()>&);
