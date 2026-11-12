@@ -258,7 +258,16 @@ private:
     void boost(bool);
     void battery(int);
     void speed(bool, int);
-    std::string defaults(const std::string&);
+    // One handler per command; execute() adds the shared bookkeeping.
+    ControlResult run(const CpuApply&), run(const GpuApply&), run(const FanApply&), run(const FanBoost&),
+        run(const BatteryApply&), run(const SwitchApply&), run(const ProtectionApply&), run(const SlotLoad&),
+        run(const SlotSave&), run(const SlotRename&), run(const SlotClear&), run(const DefaultsApply&),
+        run(const ThermalReset&), run(const ThermalTest&), run(const Visibility&), run(const Resume&),
+        run(const AcEvent&), run(const GpuUnlock&), run(const DlppcApply&), run(const CliCommand&),
+        run(const LightingApply&), run(const LightingIdle&), run(const DimmingApply&), run(const PeripheralRead&),
+        run(const CoolerRequest&), run(const BatteryPage&), run(const UiRead&), run(const UiPage&),
+        run(const UiPreflight&), run(const FanMaster&), run(const FanEdit&), run(const FanRead&),
+        run(const PowerTransition&), run(const EcBypassApply&), run(const CoolerFlag&);
     cli::Reply cli(const std::vector<std::string>&);
     config::Json status();
     config::Json cpu_status(), gpu_status(bool presentation = false), fans_status(), gpu_telemetry(), gpu_budget();
@@ -277,8 +286,6 @@ private:
     void apply_gpu(config::GpuSettings);
     void validate_currents(const config::GpuSettings&);
     void check_gpu();
-    void unlock_gpu(bool);
-    void dlppc(bool);
     void bypass(bool);
     bool clear_bypass(const std::string& reason);
     void watch_bypass();

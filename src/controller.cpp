@@ -1058,365 +1058,499 @@ std::optional<Sensors> Controller::tick(ULONGLONG now) {
 }
 std::optional<Json> Controller::take_battery() { return std::exchange(battery_sample_, {}); }
 ControlResult Controller::execute(const ControlCommand& command) {
-    auto state = [&](ControlResult result = ControlResult{0, "Completed"}) {
-        result.active_slot = active_slot_;
-        result.fan_application = fan_application_;
-        result.fan_review_required = fan_review_required_;
-        result.linked = linked_;
-        return result;
-    };
-    // Lifecycle notifications may pass the exclusive NVIDIA wait. They do not
-    // reset the pending command's partial-application accounting or call NVIDIA.
-    if (auto c = std::get_if<Visibility>(&command)) {
-        visible_ = c->visible;
-        battery_at_ = GetTickCount64() + 2000;
-        budget_at_ = 0;
-        if (c->visible) {
-            monitor_stopped_ = false;
-            telemetry_failures_ = 0;
-        } else
-            battery_sample_.reset();
-        return state();
-    }
-    if (auto c = std::get_if<BatteryPage>(&command)) {
-        battery_page_ = c->active;
-        battery_at_ = GetTickCount64() + 2000;
-        if (!c->active) battery_sample_.reset();
-        return state();
-    }
-    if (auto c = std::get_if<UiPage>(&command)) {
-        ui_page_ = c->page;
-        budget_at_ = 0;
-        return state();
-    }
-    if (auto c = std::get_if<UiRead>(&command)) {
-        auto r = state();
-        Json data = Json::object();
-        if (c->page == 4) data = *execute(PeripheralRead{}).peripherals;
-        if (c->page == 3 && features_.battery()) try {
-                data["battery"] = battery_telemetry(session_.transport());
-            } catch (const std::exception& e) {
-                data["batteryError"] = e.what();
-            }
-        if (c->page == 5) {
-            data["coolerAvailable"] = bool(cooler_);
-            if (cooler_) {
-                data["cooler"] = cooler_->snapshot();
-                if (data["cooler"]["bluetoothAvailable"].is_null()) cooler_->request({CoolerAction::availability});
-            }
-        }
-        data["ui"] = presentation(true, false, c->page);
-        r.peripherals = std::move(data);
-        return r;
-    }
-    if (auto c = std::get_if<AcEvent>(&command)) {
-        if (!c->on_ac) clear_bypass("AC power lost");
-        if (on_ac_ != c->on_ac) {
-            on_ac_ = c->on_ac;
-            gpu_check_at_ = GetTickCount64() + 5000;
-        }
-        return state();
-    }
-    if (auto c = std::get_if<PowerTransition>(&command)) {
-        auto r = state();
-        if (!clear_bypass(c->kind == PowerTransition::display_off ? "display off"
-                          : c->kind == PowerTransition::suspend   ? "sleep"
-                                                                  : "exit or Windows shutdown")) {
-            r.code = 1;
-            r.text = bypass_status_;
-        }
-        return r;
-    }
-    if (std::holds_alternative<Resume>(command)) {
-        clear_bypass("resume");
-        thermal_->invalidate();
-        ++epoch_;
-        fan_application_ = FanApplication::unapplied;
-        resume_at_ = GetTickCount64() + 3000;
-        watchdog_ = resume_at_;
-        gpu_check_at_ = GetTickCount64() + 8000;
-        if (lighting_) lighting_->resume(GetTickCount64());
-        return state();
-    }
+    auto handle = [&] { return std::visit([&](const auto& c) { return run(c); }, command); };
     ControlResult result;
-    writes_started_ = false;
-    application_completed_ = false;
-    try {
-        std::visit(
-            [&](const auto& c) {
-                using T = std::decay_t<decltype(c)>;
-                auto& p = session_.profile;
-                if constexpr (std::is_same_v<T, CpuApply>) {
-                    if (!features_.cpu_power()) throw std::runtime_error("CPU control unavailable");
-                    auto s = c.settings;
-                    auto w = cpu_writes(p, s);
-                    explicit_apply([&] {
-                        log_cpu(w);
-                        batch(w);
-                    });
-                    result.applied = true;
-                } else if constexpr (std::is_same_v<T, GpuApply>) {
-                    if (!features_.gpu_power()) throw std::runtime_error("GPU control unavailable");
-                    std::vector<EcWrite> cpu;
-                    if (c.cpu) {
-                        if (!features_.cpu_power()) throw std::runtime_error("CPU control unavailable");
-                        auto v = *c.cpu;
-                        cpu = cpu_writes(p, v);
-                    }
-                    auto g = c.settings;
-                    if (nvidia_busy_) throw std::runtime_error("NVIDIA operation in progress");
-                    if (c.power) gpu_plan(g);
-                    // Thermal sampling continues during NVIDIA work; a
-                    // CPU hold latched there outranks the prepared writes.
-                    auto cpu_apply = [&] {
-                        if (!cpu.empty() && !thermal_->holds(Cpu)) {
-                            log_cpu(cpu);
-                            batch(cpu);
-                        }
-                    };
-                    if (c.restart_confirmed) {
-                        auto plan = plan_gpu(g, false);
-                        explicit_apply([&] {
-                            configure_gpu(plan);
-                            cpu_apply();
-                            if (c.power) apply_gpu(g);
-                        });
-                    } else {
-                        validate_currents(g);
-                        explicit_apply([&] {
-                            if (g.nvvdd_ma || g.msvdd_ma || g.board_input_ma)
-                                nvidia_work([&] { nvidia_->configure(gpu_unlocked_, g, false); });
-                            cpu_apply();
-                            if (c.power) apply_gpu(g);
-                        });
-                    }
-                    result.applied = true;
-                } else if constexpr (std::is_same_v<T, UiPreflight>) {
-                    if (c.cpu && features_.cpu_power()) {
-                        auto v = *c.cpu;
-                        cpu_writes(p, v);
-                    }
-                    std::optional<UserProfile> profile;
-                    if (c.slot) {
-                        profile = store_.load(c.slot);
-                        if (!profile) throw std::runtime_error("Requested slot is missing");
-                    }
-                    auto g = profile ? profile->gpu : c.gpu;
-                    if (!profile && !g) throw std::runtime_error("GPU intent unavailable");
-                    auto value = !features_.gpu_power() ? nv::ProfilePlan{}
-                                 : profile              ? plan(*profile, false)
-                                                        : plan_gpu(*g, false);
-                    result.peripherals = Json{{"plan",
-                                               {{"restart", value.restart},
-                                                {"unlock", value.unlock},
-                                                {"wasUnlocked", gpu_unlocked_},
-                                                {"slot", c.slot},
-                                                {"gpu", nullable(g)},
-                                                {"stockWatts", nvidia_ ? nvidia_->stock_watts() : 0}}}};
-                } else if constexpr (std::is_same_v<T, GpuUnlock>) {
-                    unlock_gpu(c.enabled);
-                    result.applied = true;
-                } else if constexpr (std::is_same_v<T, DlppcApply>) {
-                    dlppc(c.disabled);
-                    result.applied = true;
-                    result.saved = true;
-                } else if constexpr (std::is_same_v<T, EcBypassApply>) {
-                    if (c.enabled)
-                        explicit_apply([&] { bypass(true); });
-                    else
-                        bypass(false);
-                    result.applied = true;
-                    result.text = c.enabled ? "EC power-limit bypass on (not saved)" : "EC power-limit bypass off";
-                } else if constexpr (std::is_same_v<T, CoolerFlag>) {
-                    cooler_flag(c.connected);
-                    result.applied = true;
-                } else if constexpr (std::is_same_v<T, FanBoost>) {
-                    if (!c.enabled) {
-                        thermal_->check_before_apply();
-                        if (thermal_->holds(Fan)) throw std::runtime_error("Fan boost is held by thermal protection");
-                    }
-                    boost(c.enabled);
-                    result.applied = true;
-                } else if constexpr (std::is_same_v<T, FanMaster>) {
-                    if (!features_.fan_control()) throw std::runtime_error("Fan control unavailable");
-                    auto mask = p.bitfields.at("fanCurveEnable").get_mask();
-                    batch({{p.reg("fanCurveEnable"), uint8_t(c.enabled ? mask : 0), mask}});
-                    fan_intent_.curve = c.enabled;
-                    result.applied = true;
-                } else if constexpr (std::is_same_v<T, FanEdit>) {
-                    if (!linked_ || !curves_supported()) throw std::runtime_error("Linked editor is not active");
-                    if (!c.settings.cpu_curve || !c.settings.gpu_curve)
-                        throw std::runtime_error("Linked editor curves are null");
-                    auto cpu = active_curve(*c.settings.cpu_curve, p.fan_table.entries),
-                         gpu = active_curve(*c.settings.gpu_curve, p.fan_table.entries);
-                    fan_intent_.cpu_curve = std::move(cpu);
-                    fan_intent_.gpu_curve = std::move(gpu);
-                    fan_application_ = FanApplication::unapplied;
-                } else if constexpr (std::is_same_v<T, FanRead>) {
-                    if (linked_) throw std::runtime_error("Disable linked fans before reading EC tables");
-                    if (curves_supported()) {
-                        auto snapshot = read_fans(session_.transport(), p.fan_table);
-                        if (!snapshot.valid())
-                            throw std::runtime_error("Current EC fan table is invalid; editor unchanged");
-                        auto cpu = active_curve(snapshot.cpu, p.fan_table.entries);
-                        std::optional<Curve> gpu;
-                        if (p.fan_table.has_gpu) gpu = active_curve(snapshot.gpu, p.fan_table.entries);
-                        fan_intent_.cpu_curve = std::move(cpu);
-                        if (gpu) fan_intent_.gpu_curve = std::move(gpu);
-                        fan_intent_.curve = snapshot.custom_mode(latch_mask_);
-                    }
-                    result.peripherals = Json{{"ui", presentation(true, false, 1)}};
-                } else if constexpr (std::is_same_v<T, FanApply>) {
-                    fans(c.settings);
-                    result.applied = true;
-                } else if constexpr (std::is_same_v<T, BatteryApply>) {
-                    battery(c.mode);
-                    result.applied = true;
-                } else if constexpr (std::is_same_v<T, SwitchApply>) {
-                    speed(c.enabled, c.milliseconds);
-                    result.applied = true;
-                } else if constexpr (std::is_same_v<T, LightingApply>) {
-                    if (!lighting_) throw std::runtime_error("Lighting owner unavailable");
-                    if (c.zone == 3 && !features_.lighting())
-                        throw std::runtime_error("Logo control is disabled: " +
-                                                 session_.validation.disabled.at("lighting"));
-                    if (!lighting_->available(c.zone)) throw std::runtime_error("HID lighting zone unavailable");
-                    writes_started_ = true;
-                    lighting_->change(c.zone, c.settings, c.flash, c.color_only);
-                    result.applied = true;
-                    result.text = "Lighting applied; intent updated, persistence failures are logged";
-                } else if constexpr (std::is_same_v<T, LightingIdle>) {
-                    if (!lighting_) throw std::runtime_error("Lighting owner unavailable");
-                    lighting_->idle(c.seconds);
-                    store_.save_lighting(lighting_->intent());
-                    result.text = "Lighting idle intent updated; persistence failures are logged";
-                } else if constexpr (std::is_same_v<T, DimmingApply>) {
-                    dimming(c.enabled);
-                    result.applied = true;
-                } else if constexpr (std::is_same_v<T, PeripheralRead>) {
-                    Json j = {{"dimmingAvailable", dimming_available_}, {"coolerAvailable", bool(cooler_)}};
-                    if (lighting_) {
-                        j["lightingIntent"] = lighting_->intent();
-                        j["zones"] = {lighting_->available(0), lighting_->available(2), lighting_->available(3)};
-                        if (features_.lighting()) try {
-                                j["logo"] = lighting_->logo();
-                            } catch (const std::exception& e) {
-                                j["logoError"] = e.what();
-                            }
-                    }
-                    if (peripheral_hardware_ && !dimming_available_)
-                        peripheral_io([&] { dimming_available_ = local_dimming_available(); });
-                    j["dimmingAvailable"] = dimming_available_;
-                    if (dimming_available_) try {
-                            j["localDimming"] = (session_.transport().read(0x72B) & 2) != 0;
-                        } catch (const std::exception& e) {
-                            j["dimmingError"] = e.what();
-                        }
-                    if (cooler_) j["cooler"] = cooler_->snapshot();
-                    if (c.battery && features_.battery()) try {
-                            j["battery"] = battery_telemetry(session_.transport());
-                        } catch (const std::exception& e) {
-                            j["batteryError"] = e.what();
-                        }
-                    result.peripherals = std::move(j);
-                } else if constexpr (std::is_same_v<T, CoolerRequest>) {
-                    if (!cooler_) throw std::runtime_error("Model/runtime cooler support unavailable");
-                    cooler_->request(c);
-                    result.text = "Cooler request queued; hardware completion is asynchronous";
-                } else if constexpr (std::is_same_v<T, ProtectionApply>) {
-                    thermal_->configure(c.settings);
-                    thermal_->check_before_apply();
-                    result.applied = true;
-                } else if constexpr (std::is_same_v<T, SlotLoad>) {
-                    load_slot(c.slot, c.deliberate);
-                    result.applied = true;
-                    result.saved = c.deliberate;
-                    result.text =
-                        thermal_->tripped()
-                            ? "Profile applied with thermal-held substitutions; normal held power intent was not applied"
-                            : "Profile applied; peripheral errors are log-only, BLE completion is asynchronous";
-                    if (!gpu_notice_.empty()) result.text += "; " + gpu_notice_;
-                    if (auto unsaved = unsaved_groups(*saved_profile_); !unsaved.empty())
-                        result.text += "; not saved in this profile, left unchanged: " + unsaved;
-                } else if constexpr (std::is_same_v<T, SlotSave>) {
-                    int slot = c.slot ? c.slot : 1;
-                    auto profile = capture(slot);
-                    if (c.editor_fan && curves_supported()) {
-                        if (!c.editor_fan->cpu_curve || (p.fan_table.has_gpu && !c.editor_fan->gpu_curve))
-                            throw std::runtime_error("Editor fan curves are null");
-                        profile.fan->cpu_curve = saved_curve(*c.editor_fan->cpu_curve, p.fan_table);
-                        if (p.fan_table.has_gpu)
-                            profile.fan->gpu_curve = saved_curve(*c.editor_fan->gpu_curve, p.fan_table);
-                        profile.fan->linked = c.editor_fan->linked && p.fan_table.has_gpu && p.fan_table.entries >= 10;
-                    }
-                    if (c.editor_cooler && cooler_) profile.cooler = *c.editor_cooler;
-                    profile.name = store_.settings().names.at(slot - 1);
-                    store_.save(slot, profile);
-                    saved_profile_ = profile;
-                    active_slot_ = slot;
-                    result.saved = true;
-                    result.slot_committed = true;
-                    diagnostic_("Saved settings to slot " + std::to_string(slot));
-                    result.text =
-                        "Settings saved; peripheral reads are best effort, failures are logged; unavailable target intent preserved";
-                } else if constexpr (std::is_same_v<T, SlotRename>) {
-                    store_.rename(c.slot, c.name);
-                    result.saved = true;
-                } else if constexpr (std::is_same_v<T, SlotClear>) {
-                    store_.clear(c.slot);
-                    if (active_slot_ == c.slot) {
-                        active_slot_ = 0;
-                        saved_profile_.reset();
-                    }
-                    result.saved = true;
-                    diagnostic_("Cleared slot " + std::to_string(c.slot));
-                } else if constexpr (std::is_same_v<T, ThermalReset>) {
-                    thermal_->reset();
-                    if (active_slot_) load_slot(active_slot_, false, true);
-                    result.applied = true;
-                } else if constexpr (std::is_same_v<T, ThermalTest>) {
-                    if (c.expected && Json(*c.expected) != Json(thermal_->settings()))
-                        throw std::runtime_error(
-                            "Applied settings changed during confirmation; review the actions and test again");
-                    thermal_->test();
-                    result.applied = thermal_->complete();
-                    if (!result.applied) {
-                        result.code = 1;
-                        result.text = thermal_->status();
-                    }
-                } else if constexpr (std::is_same_v<T, DefaultsApply>) {
-                    result.text = defaults(c.mode);
-                    result.applied = true;
-                } else if constexpr (std::is_same_v<T, CliCommand>) {
-                    auto reply = cli(c.arguments);
-                    result.code = reply.code;
-                    result.text = reply.text;
-                    result.applied = reply.code == 0 && writes_started_;
-                    result.partial = reply.code != 0 && writes_started_;
-                }
-            },
-            command);
-        thermal_->enforce(true);
-        if (result.text.empty())
-            result.text = result.applied && thermal_->tripped()
-                              ? "Completed with current thermal holds; normal held settings were not applied"
-                              : "Completed";
-    } catch (const std::exception& ex) {
-        result.code = 1;
-        result.partial = writes_started_;
-        result.text = (writes_started_ ? "Partial application possible: " : "") + std::string(ex.what());
-        if (dynamic_cast<const SlotSelectionSaveError*>(&ex)) {
-            result.slot_committed = true;
-            result.partial = true;
+    // Lifecycle notifications may pass the exclusive NVIDIA wait. They and page reads skip the shared bookkeeping
+    // below, so they do not reset the pending command's partial-application accounting.
+    if (command_traits(command).notification || std::holds_alternative<UiRead>(command))
+        result = handle();
+    else {
+        writes_started_ = false;
+        application_completed_ = false;
+        try {
+            result = handle();
+            thermal_->enforce(true);
+        } catch (const std::exception& ex) {
+            result.code = 1;
+            result.partial = writes_started_;
+            result.text = (writes_started_ ? "Partial application possible: " : "") + std::string(ex.what());
+            if (dynamic_cast<const SlotSelectionSaveError*>(&ex)) {
+                result.slot_committed = true;
+                result.partial = true;
+            }
+            if (std::holds_alternative<SlotLoad>(command) && application_completed_) result.applied = true;
+            if (std::holds_alternative<DefaultsApply>(command))
+                result.text = "Defaults not fully completed: " + result.text;
+            std::string_view name = std::visit([](const auto& c) { return typeid(c).name(); }, command);
+            if (name.starts_with("struct mech::")) name.remove_prefix(13);
+            diagnostic_("Controller command not completed (" + std::string(name) + "): " + result.text);
+            if (thermal_->tripped() && writes_started_) thermal_->enforce();
         }
-        if (std::holds_alternative<SlotLoad>(command) && application_completed_) result.applied = true;
-        if (std::holds_alternative<DefaultsApply>(command))
-            result.text = "Defaults not fully completed: " + result.text;
-        std::string_view name = std::visit([](const auto& c) { return typeid(c).name(); }, command);
-        if (name.starts_with("struct mech::")) name.remove_prefix(13);
-        diagnostic_("Controller command not completed (" + std::string(name) + "): " + result.text);
-        if (thermal_->tripped() && writes_started_) thermal_->enforce();
     }
-    return state(std::move(result));
+    if (result.text.empty())
+        result.text = result.applied && thermal_->tripped()
+                          ? "Completed with current thermal holds; normal held settings were not applied"
+                          : "Completed";
+    result.active_slot = active_slot_;
+    result.fan_application = fan_application_;
+    result.fan_review_required = fan_review_required_;
+    result.linked = linked_;
+    return result;
+}
+ControlResult Controller::run(const Visibility& c) {
+    visible_ = c.visible;
+    battery_at_ = GetTickCount64() + 2000;
+    budget_at_ = 0;
+    if (c.visible) {
+        monitor_stopped_ = false;
+        telemetry_failures_ = 0;
+    } else
+        battery_sample_.reset();
+    return {};
+}
+ControlResult Controller::run(const BatteryPage& c) {
+    battery_page_ = c.active;
+    battery_at_ = GetTickCount64() + 2000;
+    if (!c.active) battery_sample_.reset();
+    return {};
+}
+ControlResult Controller::run(const UiPage& c) {
+    ui_page_ = c.page;
+    budget_at_ = 0;
+    return {};
+}
+ControlResult Controller::run(const UiRead& c) {
+    Json data = Json::object();
+    if (c.page == 4) data = *execute(PeripheralRead{}).peripherals;
+    if (c.page == 3 && features_.battery()) try {
+            data["battery"] = battery_telemetry(session_.transport());
+        } catch (const std::exception& e) {
+            data["batteryError"] = e.what();
+        }
+    if (c.page == 5) {
+        data["coolerAvailable"] = bool(cooler_);
+        if (cooler_) {
+            data["cooler"] = cooler_->snapshot();
+            if (data["cooler"]["bluetoothAvailable"].is_null()) cooler_->request({CoolerAction::availability});
+        }
+    }
+    data["ui"] = presentation(true, false, c.page);
+    return {.peripherals = std::move(data)};
+}
+ControlResult Controller::run(const AcEvent& c) {
+    if (!c.on_ac) clear_bypass("AC power lost");
+    if (on_ac_ != c.on_ac) {
+        on_ac_ = c.on_ac;
+        gpu_check_at_ = GetTickCount64() + 5000;
+    }
+    return {};
+}
+ControlResult Controller::run(const PowerTransition& c) {
+    if (clear_bypass(c.kind == PowerTransition::display_off ? "display off"
+                     : c.kind == PowerTransition::suspend   ? "sleep"
+                                                            : "exit or Windows shutdown"))
+        return {};
+    return {1, bypass_status_};
+}
+ControlResult Controller::run(const Resume&) {
+    clear_bypass("resume");
+    thermal_->invalidate();
+    ++epoch_;
+    fan_application_ = FanApplication::unapplied;
+    resume_at_ = GetTickCount64() + 3000;
+    watchdog_ = resume_at_;
+    gpu_check_at_ = GetTickCount64() + 8000;
+    if (lighting_) lighting_->resume(GetTickCount64());
+    return {};
+}
+ControlResult Controller::run(const CpuApply& c) {
+    if (!features_.cpu_power()) throw std::runtime_error("CPU control unavailable");
+    auto w = cpu_writes(session_.profile, c.settings);
+    explicit_apply([&] {
+        log_cpu(w);
+        batch(w);
+    });
+    return {.applied = true};
+}
+ControlResult Controller::run(const GpuApply& c) {
+    if (!features_.gpu_power()) throw std::runtime_error("GPU control unavailable");
+    std::vector<EcWrite> cpu;
+    if (c.cpu) {
+        if (!features_.cpu_power()) throw std::runtime_error("CPU control unavailable");
+        cpu = cpu_writes(session_.profile, *c.cpu);
+    }
+    const auto& g = c.settings;
+    if (nvidia_busy_) throw std::runtime_error("NVIDIA operation in progress");
+    if (c.power) gpu_plan(g);
+    // Thermal sampling continues during NVIDIA work; a
+    // CPU hold latched there outranks the prepared writes.
+    auto cpu_apply = [&] {
+        if (!cpu.empty() && !thermal_->holds(Cpu)) {
+            log_cpu(cpu);
+            batch(cpu);
+        }
+    };
+    if (c.restart_confirmed) {
+        auto plan = plan_gpu(g, false);
+        explicit_apply([&] {
+            configure_gpu(plan);
+            cpu_apply();
+            if (c.power) apply_gpu(g);
+        });
+    } else {
+        validate_currents(g);
+        explicit_apply([&] {
+            if (g.nvvdd_ma || g.msvdd_ma || g.board_input_ma)
+                nvidia_work([&] { nvidia_->configure(gpu_unlocked_, g, false); });
+            cpu_apply();
+            if (c.power) apply_gpu(g);
+        });
+    }
+    return {.applied = true};
+}
+ControlResult Controller::run(const UiPreflight& c) {
+    if (c.cpu && features_.cpu_power()) cpu_writes(session_.profile, *c.cpu);
+    std::optional<UserProfile> profile;
+    if (c.slot) {
+        profile = store_.load(c.slot);
+        if (!profile) throw std::runtime_error("Requested slot is missing");
+    }
+    auto g = profile ? profile->gpu : c.gpu;
+    if (!profile && !g) throw std::runtime_error("GPU intent unavailable");
+    auto value = !features_.gpu_power() ? nv::ProfilePlan{} : profile ? plan(*profile, false) : plan_gpu(*g, false);
+    return {.peripherals = Json{{"plan",
+                                 {{"restart", value.restart},
+                                  {"unlock", value.unlock},
+                                  {"wasUnlocked", gpu_unlocked_},
+                                  {"slot", c.slot},
+                                  {"gpu", nullable(g)},
+                                  {"stockWatts", nvidia_ ? nvidia_->stock_watts() : 0}}}}};
+}
+ControlResult Controller::run(const EcBypassApply& c) {
+    if (c.enabled)
+        explicit_apply([&] { bypass(true); });
+    else
+        bypass(false);
+    return {.text = c.enabled ? "EC power-limit bypass on (not saved)" : "EC power-limit bypass off", .applied = true};
+}
+ControlResult Controller::run(const CoolerFlag& c) {
+    cooler_flag(c.connected);
+    return {.applied = true};
+}
+ControlResult Controller::run(const FanBoost& c) {
+    if (!c.enabled) {
+        thermal_->check_before_apply();
+        if (thermal_->holds(Fan)) throw std::runtime_error("Fan boost is held by thermal protection");
+    }
+    boost(c.enabled);
+    return {.applied = true};
+}
+ControlResult Controller::run(const FanMaster& c) {
+    if (!features_.fan_control()) throw std::runtime_error("Fan control unavailable");
+    auto& p = session_.profile;
+    auto mask = p.bitfields.at("fanCurveEnable").get_mask();
+    batch({{p.reg("fanCurveEnable"), uint8_t(c.enabled ? mask : 0), mask}});
+    fan_intent_.curve = c.enabled;
+    return {.applied = true};
+}
+ControlResult Controller::run(const FanEdit& c) {
+    if (!linked_ || !curves_supported()) throw std::runtime_error("Linked editor is not active");
+    if (!c.settings.cpu_curve || !c.settings.gpu_curve) throw std::runtime_error("Linked editor curves are null");
+    auto entries = session_.profile.fan_table.entries;
+    auto cpu = active_curve(*c.settings.cpu_curve, entries), gpu = active_curve(*c.settings.gpu_curve, entries);
+    fan_intent_.cpu_curve = std::move(cpu);
+    fan_intent_.gpu_curve = std::move(gpu);
+    fan_application_ = FanApplication::unapplied;
+    return {};
+}
+ControlResult Controller::run(const FanRead&) {
+    if (linked_) throw std::runtime_error("Disable linked fans before reading EC tables");
+    if (curves_supported()) {
+        auto& table = session_.profile.fan_table;
+        auto snapshot = read_fans(session_.transport(), table);
+        if (!snapshot.valid()) throw std::runtime_error("Current EC fan table is invalid; editor unchanged");
+        auto cpu = active_curve(snapshot.cpu, table.entries);
+        std::optional<Curve> gpu;
+        if (table.has_gpu) gpu = active_curve(snapshot.gpu, table.entries);
+        fan_intent_.cpu_curve = std::move(cpu);
+        if (gpu) fan_intent_.gpu_curve = std::move(gpu);
+        fan_intent_.curve = snapshot.custom_mode(latch_mask_);
+    }
+    return {.peripherals = Json{{"ui", presentation(true, false, 1)}}};
+}
+ControlResult Controller::run(const FanApply& c) {
+    fans(c.settings);
+    return {.applied = true};
+}
+ControlResult Controller::run(const BatteryApply& c) {
+    battery(c.mode);
+    return {.applied = true};
+}
+ControlResult Controller::run(const SwitchApply& c) {
+    speed(c.enabled, c.milliseconds);
+    return {.applied = true};
+}
+ControlResult Controller::run(const LightingApply& c) {
+    if (!lighting_) throw std::runtime_error("Lighting owner unavailable");
+    if (c.zone == 3 && !features_.lighting())
+        throw std::runtime_error("Logo control is disabled: " + session_.validation.disabled.at("lighting"));
+    if (!lighting_->available(c.zone)) throw std::runtime_error("HID lighting zone unavailable");
+    writes_started_ = true;
+    lighting_->change(c.zone, c.settings, c.flash, c.color_only);
+    return {.text = "Lighting applied; intent updated, persistence failures are logged", .applied = true};
+}
+ControlResult Controller::run(const LightingIdle& c) {
+    if (!lighting_) throw std::runtime_error("Lighting owner unavailable");
+    lighting_->idle(c.seconds);
+    store_.save_lighting(lighting_->intent());
+    return {.text = "Lighting idle intent updated; persistence failures are logged"};
+}
+ControlResult Controller::run(const DimmingApply& c) {
+    dimming(c.enabled);
+    return {.applied = true};
+}
+ControlResult Controller::run(const PeripheralRead& c) {
+    Json j = {{"dimmingAvailable", dimming_available_}, {"coolerAvailable", bool(cooler_)}};
+    if (lighting_) {
+        j["lightingIntent"] = lighting_->intent();
+        j["zones"] = {lighting_->available(0), lighting_->available(2), lighting_->available(3)};
+        if (features_.lighting()) try {
+                j["logo"] = lighting_->logo();
+            } catch (const std::exception& e) {
+                j["logoError"] = e.what();
+            }
+    }
+    if (peripheral_hardware_ && !dimming_available_)
+        peripheral_io([&] { dimming_available_ = local_dimming_available(); });
+    j["dimmingAvailable"] = dimming_available_;
+    if (dimming_available_) try {
+            j["localDimming"] = (session_.transport().read(0x72B) & 2) != 0;
+        } catch (const std::exception& e) {
+            j["dimmingError"] = e.what();
+        }
+    if (cooler_) j["cooler"] = cooler_->snapshot();
+    if (c.battery && features_.battery()) try {
+            j["battery"] = battery_telemetry(session_.transport());
+        } catch (const std::exception& e) {
+            j["batteryError"] = e.what();
+        }
+    return {.peripherals = std::move(j)};
+}
+ControlResult Controller::run(const CoolerRequest& c) {
+    if (!cooler_) throw std::runtime_error("Model/runtime cooler support unavailable");
+    cooler_->request(c);
+    return {.text = "Cooler request queued; hardware completion is asynchronous"};
+}
+ControlResult Controller::run(const ProtectionApply& c) {
+    thermal_->configure(c.settings);
+    thermal_->check_before_apply();
+    return {.applied = true};
+}
+ControlResult Controller::run(const SlotLoad& c) {
+    load_slot(c.slot, c.deliberate);
+    std::string text = thermal_->tripped()
+                           ? "Profile applied with thermal-held substitutions; normal held power intent was not applied"
+                           : "Profile applied; peripheral errors are log-only, BLE completion is asynchronous";
+    if (!gpu_notice_.empty()) text += "; " + gpu_notice_;
+    if (auto unsaved = unsaved_groups(*saved_profile_); !unsaved.empty())
+        text += "; not saved in this profile, left unchanged: " + unsaved;
+    return {.text = text, .applied = true, .saved = c.deliberate};
+}
+ControlResult Controller::run(const SlotSave& c) {
+    auto& table = session_.profile.fan_table;
+    int slot = c.slot ? c.slot : 1;
+    auto profile = capture(slot);
+    if (c.editor_fan && curves_supported()) {
+        if (!c.editor_fan->cpu_curve || (table.has_gpu && !c.editor_fan->gpu_curve))
+            throw std::runtime_error("Editor fan curves are null");
+        profile.fan->cpu_curve = saved_curve(*c.editor_fan->cpu_curve, table);
+        if (table.has_gpu) profile.fan->gpu_curve = saved_curve(*c.editor_fan->gpu_curve, table);
+        profile.fan->linked = c.editor_fan->linked && table.has_gpu && table.entries >= 10;
+    }
+    if (c.editor_cooler && cooler_) profile.cooler = *c.editor_cooler;
+    profile.name = store_.settings().names.at(slot - 1);
+    store_.save(slot, profile);
+    saved_profile_ = profile;
+    active_slot_ = slot;
+    diagnostic_("Saved settings to slot " + std::to_string(slot));
+    return {
+        .text =
+            "Settings saved; peripheral reads are best effort, failures are logged; unavailable target intent preserved",
+        .saved = true,
+        .slot_committed = true};
+}
+ControlResult Controller::run(const SlotRename& c) {
+    store_.rename(c.slot, c.name);
+    return {.saved = true};
+}
+ControlResult Controller::run(const SlotClear& c) {
+    store_.clear(c.slot);
+    if (active_slot_ == c.slot) {
+        active_slot_ = 0;
+        saved_profile_.reset();
+    }
+    diagnostic_("Cleared slot " + std::to_string(c.slot));
+    return {.saved = true};
+}
+ControlResult Controller::run(const ThermalReset&) {
+    thermal_->reset();
+    if (active_slot_) load_slot(active_slot_, false, true);
+    return {.applied = true};
+}
+ControlResult Controller::run(const ThermalTest& c) {
+    if (c.expected && Json(*c.expected) != Json(thermal_->settings()))
+        throw std::runtime_error("Applied settings changed during confirmation; review the actions and test again");
+    thermal_->test();
+    if (thermal_->complete()) return {.applied = true};
+    return {1, thermal_->status()};
+}
+// An empty mode restores firmware defaults.
+ControlResult Controller::run(const DefaultsApply& request) {
+    const auto& key = request.mode;
+    auto& p = session_.profile;
+    std::vector<EcWrite> w;
+    auto append = [&](const std::vector<EcWrite>& more) { w.insert(w.end(), more.begin(), more.end()); };
+    std::optional<FanSettings> fan;
+    std::optional<GpuSettings> gpu_default;
+    bool full_curves = false;
+    if (!key.empty()) {
+        if (!p.modes || !p.modes->contains(key))
+            throw std::runtime_error("Requested defaults unavailable for this model");
+        auto m = p.modes->at(key);
+        if (features_.cpu_power()) {
+            auto c = cpu();
+            auto cw = cpu_writes(p, {m.pl1, m.pl2, m.pl4.value_or(c.pl4), m.tcc_offset.value_or(c.temp_limit)});
+            log_cpu(cw);
+            append(cw);
+        }
+        if (features_.gpu_power() && m.ctgp) {
+            GpuSettings g;
+            g.tgp = *m.ctgp;
+            g.dynamic_boost_enabled = m.dynamic_boost.value_or(0) > 0;
+            g.dynamic_boost_watts = m.dynamic_boost.value_or(0);
+            gpu_plan(g);
+            gpu_default = g;
+        }
+        if (curves_supported() && m.fan_curve && m.fan_curve->cpu) {
+            auto c = active_curve(*m.fan_curve->cpu, p.fan_table.entries);
+            std::optional<Curve> g;
+            if (p.fan_table.has_gpu && m.fan_curve->gpu) g = active_curve(*m.fan_curve->gpu, p.fan_table.entries);
+            append(fan_curve_writes(p, c, g, true, latch_mask_));
+            fan = fan_intent_;
+            fan->cpu_curve = c;
+            if (g) fan->gpu_curve = g;
+            fan->curve = true;
+            fan->linked = false;
+            full_curves = !p.fan_table.has_gpu || g.has_value();
+        }
+    } else {
+        if (features_.cpu_power()) {
+            int temp = limits_.cpu_temperature.max;
+            w = {{p.reg("PL1"), 0},
+                 {p.reg("PL2"), 0},
+                 {p.reg("PL4"), 0},
+                 {p.reg("cpuTempLimitWrite"),
+                  encoding::cpu_temperature(temp, session_.profile.cpu_direct(), p.tj_max())}};
+        }
+        if (features_.gpu_power()) {
+            auto mask = p.bitfields.at("dynamicBoostEn").get_mask();
+            append(
+                {{p.reg("tgpDbCtrl"), 0, mask}, {p.reg("tgp"), 0}, {p.reg("dbTotalPower"), 0}, {p.reg("dbMaxTgp"), 0}});
+        }
+        if (features_.fan_control()) {
+            append({fan_boost_write(p, false), {p.reg("fanCurveEnable"), 0, 128}});
+            fan = fan_intent_;
+            fan->linked = false;
+            fan->curve = false;
+        }
+        if (curves_supported() && p.default_fan && p.default_fan->cpu && p.default_fan->gpu) {
+            fan->cpu_curve = active_curve(*p.default_fan->cpu, p.fan_table.entries);
+            auto g = active_curve(*p.default_fan->gpu, p.fan_table.entries);
+            if (p.fan_table.has_gpu) fan->gpu_curve = g;
+            append(fan_curve_writes(p, *fan->cpu_curve, p.fan_table.has_gpu ? std::optional(g) : std::nullopt, false,
+                                    latch_mask_));
+            full_curves = true;
+        }
+        if (features_.battery())
+            append({{p.reg("batteryMode"), encoding::battery(0, *session_.battery_bit3),
+                     p.bitfields.at("batteryMode").get_mask()}});
+    }
+    for (auto x : w) session_.guard->admit(x.address);
+    explicit_apply([&] {
+        if (fan) {
+            // Stop linked tracking before the first write, including partial failure.
+            linked_ = false;
+            last_duty_ = -1;
+            fan_intent_ = *fan;
+            fan_application_ = FanApplication::unapplied;
+        }
+        try {
+            batch(w);
+            if (fan && (full_curves || !fan->curve)) fan_application_ = FanApplication::applied;
+        } catch (...) {
+            if (fan) fan_application_ = FanApplication::partial;
+            throw;
+        }
+        // Disabling custom mode alone does not qualify an editable generic seed.
+        if (full_curves) fan_review_required_ = false;
+        if (gpu_default) apply_gpu(*gpu_default);
+    });
+    // Match source ordering: finish the EC restore before attempting NVIDIA.
+    // There are no normal EC writes after a potentially slow driver operation.
+    std::string driver_failure;
+    if (key.empty() && nvidia_) {
+        try {
+            thermal_->check_before_apply();
+            if (thermal_->holds(Gpu))
+                throw std::runtime_error("NVIDIA defaults not applied: GPU held by thermal protection");
+            if (gpu_unlocked_) {
+                nv::ProfilePlan plan;
+                plan.restart = true;
+                configure_gpu(plan);
+            } else {
+                nv::Currents c;
+                nvidia_work([&] { c = nvidia_->currents(); });
+                if (thermal_->holds(Gpu))
+                    throw std::runtime_error("NVIDIA defaults not applied: GPU held by thermal protection");
+                GpuSettings g;
+                g.nvvdd_ma = c.nv.def;
+                if (c.ms) g.msvdd_ma = c.ms->def;
+                if (c.input) g.board_input_ma = c.input->def;
+                nvidia_work([&] { nvidia_->configure(false, g, false); });
+            }
+            driver_watts_ = {};
+            last_gpu_ = {};
+        } catch (const std::exception& e) {
+            thermal_->enforce();
+            driver_failure = e.what();
+            diagnostic_("NVIDIA defaults failed independently: " + driver_failure);
+        }
+        thermal_->enforce();
+    }
+    bool logo_defaults = key.empty() && peripheral_hardware_ && p.default_logo && features_.lighting();
+    if (logo_defaults) {
+        // No held CPU/GPU/fan setting is rewritten after the slow NVIDIA wait.
+        thermal_->enforce();
+        auto logo = *p.default_logo;
+        batch({{p.reg("logoTrigger"), 0},
+               {p.reg("logoR"), logo.r},
+               {p.reg("logoG"), logo.g},
+               {p.reg("logoB"), logo.b},
+               {p.reg("logoOnOff"), logo.on_off, 0x80}});
+    }
+    if (!driver_failure.empty())
+        throw std::runtime_error("Core defaults completed; NVIDIA restoration failed: " + driver_failure);
+    std::string text = "Core defaults applied (unsaved); ";
+    if (key.empty()) text += nvidia_ ? "NVIDIA defaults restored; " : "NVIDIA defaults not active; ";
+    text += logo_defaults ? "model logo defaults restored; other peripheral intent unchanged"
+                          : "peripheral intent unchanged";
+    if (thermal_->tripped()) text += "; thermal holds supersede normal defaults";
+    if (!curves_supported())
+        text += "; unsupported fan curves skipped";
+    else if (fan && fan->curve && !full_curves)
+        text += "; preset has no GPU curve, GPU table unchanged and full fan intent not applied";
+    if (fan_review_required_) text += "; editable fan seed still requires review";
+    diagnostic_((key.empty() ? std::string("Firmware") : key) + " defaults: " + text);
+    return {.text = text, .applied = true};
 }
 }
