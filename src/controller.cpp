@@ -1024,7 +1024,7 @@ std::optional<Sensors> Controller::telemetry(ULONGLONG now, const Sensors& share
 }
 std::optional<Sensors> Controller::tick(ULONGLONG now) {
     watch_bypass();
-    if (resume_at_ && now >= resume_at_ && !nvidia_busy_) { // In-flight NVIDIA work cannot verify the GPU hold.
+    if (resume_at_ && now >= resume_at_) {
         resume_at_ = 0;
         watchdog_ = now + 30000;
         try {
@@ -1036,14 +1036,14 @@ std::optional<Sensors> Controller::tick(ULONGLONG now) {
     }
     watchdog(now);
     Sensors shared;
-    sample_thermal(shared, nvidia_busy_);
-    if (lighting_ && !peripheral_busy_) lighting_->tick(now);
-    if (reapply_ && !nvidia_busy_ && !peripheral_busy_) try {
+    sample_thermal(shared, false);
+    if (lighting_) lighting_->tick(now);
+    if (reapply_) try {
             recover_settings();
         } catch (const std::exception& ex) {
             diagnostic_(std::string("Recovery not applied: ") + ex.what());
         }
-    if (gpu_check_at_ && now >= gpu_check_at_ && !nvidia_busy_ && !peripheral_busy_) {
+    if (gpu_check_at_ && now >= gpu_check_at_) {
         gpu_check_at_ = 0;
         try {
             check_gpu();
@@ -1053,7 +1053,7 @@ std::optional<Sensors> Controller::tick(ULONGLONG now) {
         thermal_->enforce(true);
     }
     poll_battery(now);
-    if (linked_ && !nvidia_busy_) { // Only emergency writes may interleave with exclusive NVIDIA work.
+    if (linked_) {
         shared.cpu_temp = temperature("cpuTemp").value_or(0);
         try {
             link(shared.cpu_temp, shared.gpu_temp);
@@ -1063,6 +1063,18 @@ std::optional<Sensors> Controller::tick(ULONGLONG now) {
             linked_error_ = ex.what();
         }
     }
+    return telemetry(now, shared);
+}
+// All that runs while a device operation is in flight on the helper thread: safety and telemetry. The resume
+// settle, hold re-verification, slot re-apply, delayed GPU check and linked fans wait for tick(), because they
+// write normal settings or need the device that is busy. A new trip still writes its EC holds from here.
+std::optional<Sensors> Controller::wait_tick(ULONGLONG now) {
+    watch_bypass();
+    watchdog(now);
+    Sensors shared;
+    sample_thermal(shared, true);
+    if (lighting_ && !peripheral_busy_) lighting_->tick(now);
+    poll_battery(now);
     return telemetry(now, shared);
 }
 std::optional<Json> Controller::take_battery() { return std::exchange(battery_sample_, {}); }

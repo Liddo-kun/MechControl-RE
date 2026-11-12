@@ -244,7 +244,7 @@ void peripheral_regressions(const std::filesystem::path& root) {
         [&](auto work) {
             if (simulate_gpu) {
                 simulate_gpu = false;
-                pending->tick(GetTickCount64() + 9000);
+                pending->wait_tick(GetTickCount64() + 9000);
             }
             work();
         },
@@ -510,9 +510,9 @@ void gpu_integration(const std::filesystem::path& root) {
         trip_pending = false;
         auto& ctrl = *pending->controller;
         pending->state->bytes[0x44F] = 80;
-        ctrl.tick();
-        ctrl.tick();
-        ctrl.tick();
+        ctrl.wait_tick();
+        ctrl.wait_tick();
+        ctrl.wait_tick();
         check(ctrl.thermal().tripped(), "thermal sampling continues while restart work is outstanding");
         check(std::none_of(pending->state->writes.begin(), pending->state->writes.end(),
                            [](auto w) { return w.first >= 0xF00 && w.first < 0xF60; }),
@@ -571,7 +571,7 @@ void gpu_integration(const std::filesystem::path& root) {
             check(s.bytes[0x783] == 0 && s.bytes[0x744] == 0 && (s.bytes[0x751] & 64) == 0,
                   "firmware EC defaults finish before slow NVIDIA restoration begins");
             s.bytes[0x44F] = 80;
-            for (int i = 0; i < 3; ++i) defaults_pending->controller->tick();
+            for (int i = 0; i < 3; ++i) defaults_pending->controller->wait_tick();
         }
         work();
     });
@@ -590,7 +590,7 @@ void gpu_integration(const std::filesystem::path& root) {
                                 if (capture_pending && capture_trip) {
                                     capture_trip = false;
                                     capture_pending->state->bytes[0x44F] = 80;
-                                    for (int i = 0; i < 3; ++i) capture_pending->controller->tick();
+                                    for (int i = 0; i < 3; ++i) capture_pending->controller->wait_tick();
                                 }
                                 work();
                             });
@@ -611,7 +611,7 @@ void gpu_integration(const std::filesystem::path& root) {
         if (combined_pending && combined_trip && combined_gpu->sets > sets) {
             combined_trip = false;
             combined_pending->state->bytes[0x44F] = 80;
-            for (int i = 0; i < 3; ++i) combined_pending->controller->tick();
+            for (int i = 0; i < 3; ++i) combined_pending->controller->wait_tick();
             trip_writes = combined_pending->state->writes.size();
         }
     });
@@ -1428,7 +1428,7 @@ void waits(const std::filesystem::path& root) {
     w.during = [&] {
         int reads = w.driver->reads, sets = w.driver->sets;
         s.bytes[0x44F] = 80;
-        for (int i = 0; i < 3; ++i) c.tick();
+        for (int i = 0; i < 3; ++i) c.wait_tick();
         auto live = c.presentation(false, true, 0);
         check(c.thermal().tripped() && !c.thermal().complete() && held(s) && w.driver->reads == reads &&
                   w.driver->sets == sets,
@@ -1442,7 +1442,7 @@ void waits(const std::filesystem::path& root) {
     w.during = [&] {
         s.bytes[0x751] &= ~64;
         s.writes.clear();
-        for (int i = 0; i < 6; ++i) c.tick();
+        for (int i = 0; i < 6; ++i) c.wait_tick();
         check(s.writes.empty() && c.thermal().complete() && c.thermal().lost_alerts() == 0,
               "hold re-verification waits for NVIDIA work instead of reporting lost protection");
     };
@@ -1452,7 +1452,7 @@ void waits(const std::filesystem::path& root) {
         c.execute(Resume{});
         s.writes.clear();
         s.reads.clear();
-        c.tick(later(3100));
+        c.wait_tick(later(3100));
         check(s.writes.empty() && s.reads[0x741] == 1 && !c.thermal().complete() && c.thermal().lost_alerts() == 0,
               "resume during NVIDIA work probes EC activation and leaves the holds for the work's return");
     };
@@ -1469,7 +1469,7 @@ void waits(const std::filesystem::path& root) {
         s.bytes[0x783] = 90;
         s.bytes[0x751] &= ~64;
         int sets = w.driver->sets;
-        c.tick(later(100000));
+        c.wait_tick(later(100000));
         check(s.bytes[0x741] == 1 && !reapplied() && w.driver->sets == sets && c.thermal().lost_alerts() == 0,
               "activation loss during NVIDIA work re-initializes the EC there and leaves the slot for later");
         check(s.bytes[0x783] == 90 && (s.bytes[0x751] & 64) == 0,
@@ -1493,12 +1493,12 @@ void waits(const std::filesystem::path& root) {
         {"AC loss",
          [&] {
              bs.bytes[0x490] = 0;
-             bc.tick();
+             bc.wait_tick();
              bs.bytes[0x490] = 1;
          }},
         {"a trip", [&] {
              bs.bytes[0x44F] = 80;
-             for (int i = 0; i < 3; ++i) bc.tick();
+             for (int i = 0; i < 3; ++i) bc.wait_tick();
          }}};
     for (const auto& event : events) {
         bool on = bc.execute(EcBypassApply{true}).code == 0 && bs.bytes[0x780] == 0xA2, cleared = false;
@@ -1527,25 +1527,32 @@ void waits(const std::filesystem::path& root) {
         hs.bytes[0x43E] = 70;
         hs.bytes[0x751] &= ~64;
         hs.writes.clear();
-        for (int i = 0; i < 5; ++i) hc.tick();
-        check(wrote(0xF00, 0xF5F), "linked fans follow the temperature during a HID operation");
-        check((hs.bytes[0x751] & 64) != 0 && h.driver->reads > reads,
-              "hold re-verification, driver read included, runs during a HID operation");
+        for (int i = 0; i < 5; ++i) hc.wait_tick();
+        check(!wrote(0xF00, 0xF5F), "linked fans wait for a HID operation");
+        check((hs.bytes[0x751] & 64) == 0 && h.driver->reads == reads,
+              "hold re-verification waits for a HID operation and nests no driver read in it");
     };
-    check(hc.execute(slow_hid).code == 0 && !h.during && held(hs), "the HID operation completes with the holds kept");
+    check(hc.execute(slow_hid).code == 0 && !h.during && held(hs),
+          "a hold the firmware cleared during a HID operation is rewritten when it returns");
+    hs.writes.clear();
+    hc.tick();
+    check(wrote(0xF00, 0xF5F), "linked fans catch up on the first tick after a HID operation");
     h.during = [&] {
         int reports = h.reports;
         hc.execute(Resume{});
         hs.writes.clear();
-        hc.tick(later(9000));
-        check(wrote(0x783, 0x783), "the resume settle rewrites the holds during a HID operation");
+        hs.reads.clear();
+        hc.wait_tick(later(9000));
+        check(!wrote(0x783, 0x783) && hs.reads[0x741] == 1,
+              "the resume settle waits for a HID operation; the activation probe does not");
         check(h.reports == reports, "lighting restore never starts a second HID operation inside one in flight");
     };
     hc.execute(slow_hid);
     int reports = h.reports;
+    hs.writes.clear();
     hc.tick(later(9000));
-    check(h.reports > reports && held(hs) && hc.thermal().complete(),
-          "lighting restore and the holds follow after the HID operation");
+    check(h.reports > reports && wrote(0x783, 0x783) && held(hs) && hc.thermal().complete(),
+          "the resume settle and the lighting restore follow after the HID operation");
 }
 void worker(const std::filesystem::path& root) {
     auto path = root / "worker";
