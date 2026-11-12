@@ -949,15 +949,30 @@ void Controller::recover_settings() {
         }
     }
 }
-void Controller::watchdog(ULONGLONG now) {
-    if (now < watchdog_) return;
+// True when it re-initialized the EC.
+bool Controller::watchdog(ULONGLONG now) {
+    if (now < watchdog_) return false;
     watchdog_ = now + 30000;
+    bool recovered = false;
     try {
-        recover("watchdog");
+        recovered = recover("watchdog");
     } catch (const std::exception& ex) {
         diagnostic_(ex.what());
     }
     ensure_cooler_flag("watchdog check");
+    return recovered;
+}
+// A re-initialized EC has lost the holds, and recover_settings waits for the device operation. With the driver
+// free they are enforced as usual. With it busy the GPU hold cannot verify, and an enforcement would report
+// protection lost, so the EC requests are only written; recover_settings verifies them afterwards.
+void Controller::rewrite_holds() {
+    if (!nvidia_busy_) return thermal_->enforce();
+    for (int action : {Gpu, Fan, Cpu})
+        if (thermal_->holds(action)) try {
+                emergency(action);
+            } catch (const std::exception& ex) {
+                diagnostic_(std::string("[Thermal] Hold rewritten after EC re-activation, unverified: ") + ex.what());
+            }
 }
 void Controller::sample_thermal(Sensors& shared, bool defer_maintenance) {
     if (!thermal_->monitoring() && !linked_) return;
@@ -1048,7 +1063,7 @@ std::optional<Sensors> Controller::tick(ULONGLONG now) {
 // write normal settings or need the device that is busy. A new trip still writes its EC holds from here.
 std::optional<Sensors> Controller::wait_tick(ULONGLONG now) {
     watch_bypass();
-    watchdog(now);
+    if (watchdog(now)) rewrite_holds();
     Sensors shared;
     sample_thermal(shared, true);
     if (lighting_) lighting_->tick(now);
