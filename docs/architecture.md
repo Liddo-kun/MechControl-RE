@@ -12,9 +12,10 @@ Blocking NVIDIA, HID and WMI calls run on a helper thread while the worker waits
 never leaves the worker. During the wait the worker runs only `Controller::wait_tick` and the
 lifecycle notifications. `wait_tick` watches the EC bypass and activation, samples the thermal
 failsafe (a new trip, or an EC re-activation while tripped, writes the EC holds at once; the
-driver half and its verification follow when the driver is free), runs the lighting idle timer and reads telemetry. Everything else waits for the next
-ordinary tick: the resume settle, hold re-verification, slot re-apply after EC recovery, the
-delayed GPU check and linked fans. Other commands stay queued.
+driver half and its verification follow when the driver is free), runs the lighting idle timer
+and reads telemetry. Everything else waits for the next ordinary tick: the resume settle, hold
+re-verification, slot re-apply after EC recovery, the delayed GPU check and linked fans. Other
+commands stay queued.
 
 Controlling startup acquires `Global\MechControl` before log or hardware access.
 The optional named-pipe server submits to the same worker. It is compiled out by

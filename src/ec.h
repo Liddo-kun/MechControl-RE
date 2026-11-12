@@ -57,11 +57,12 @@ private:
     std::function<void(unsigned)> wait_;
 };
 // Complete, model-range-checked EC groups. NVIDIA/thermal policy is the caller's responsibility.
-// Raises a flag for the enclosing scope.
+// Raises a flag for the enclosing scope. A scope nested in another leaves the outer one raised.
 struct Raised {
     bool& flag;
-    explicit Raised(bool& f) : flag(f) { flag = true; }
-    ~Raised() { flag = false; }
+    bool outer;
+    explicit Raised(bool& f) : flag(f), outer(f) { flag = true; }
+    ~Raised() { flag = outer; }
 };
 config::Limit control_limit(const config::MachineProfile&, const std::string& key);
 // Every control's limit, resolved once for the controller.
