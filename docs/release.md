@@ -38,6 +38,20 @@ Files last saved by a C# release older than v1.6.0 may not carry over. A profile
 with a failsafe trigger below 50 C does not load and has to be saved again, and a
 thermal trip recorded in the older format is not restored.
 
+## Battery charge limit
+
+**Battery > Charge Limit** stops charging at the level you choose and resumes five points
+below it. It is offered where the EC firmware is recognized as having a charge hold. The
+EC keeps charging blocked for up to a week while MechControl is not running, so the limit
+holds while the laptop is off and plugged in. Unplugging the adapter lifts the block. The limit
+is software-controlled, so in rare cases the battery will not charge while MechControl is
+not running, such as when the laptop is put into deep sleep while plugged in, then
+unplugged, allowed to drain, and plugged in again without being woken. A
+laptop that was running on battery and is plugged in while it is off charges to full,
+because nothing is running to stop it. One plugged in while asleep may do the same. Set the limit to
+**Off** before you remove MechControl; otherwise charging stays blocked until that week
+runs out.
+
 ## Command line
 
 The `-cli` archive includes `mcctl.exe`. From an elevated shell it reads and changes

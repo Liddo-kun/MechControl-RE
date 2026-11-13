@@ -66,11 +66,13 @@ uint32_t EcTransport::spec(int index) {
     const int32_t input = std::bit_cast<int32_t>(0xBBu | (static_cast<uint32_t>(index) << 8));
     return channel_->ioctl(ecSpecIoctl, {&input, 1}); // Reference does not reconnect SMAPC calls.
 }
-// Every address the app may write, on any model: EC initialization, the feature registers and the fan tables.
+// Every address the app may write, on any model: EC initialization, the feature registers, the fan tables and
+// the charge hold.
 // A profile adds only the EC bypass register it declares.
 static std::set<int> writable(const config::MachineProfile& p) {
     std::set<int> r = {0x706, 0x708, 0x709, 0x726, 0x727, 0x741, 0x748, 0x7C5, 0x7C6, 0x7C7, 0x743, 0x744, 0x745, 0x746,
                        0x751, 0x767, 0x769, 0x76A, 0x76B, 0x783, 0x784, 0x785, 0x786, 0x787, 0x78C, 0x7A6, 0x7AB};
+    r.insert({charge_hold::timer, charge_hold::timer + 1, charge_hold::target});
     for (int a = 0xF00; a <= 0xF5F; ++a) r.insert(a);
     if (p.ec_bypass && p.registers.contains("ecBypass")) r.insert(p.reg("ecBypass"));
     return r;
@@ -182,6 +184,13 @@ std::vector<EcWrite> gpu_writes(const config::MachineProfile& p, int tgp, bool d
 EcWrite fan_boost_write(const config::MachineProfile& p, bool enabled) {
     auto mask = p.bitfields.at("fanBoost").get_mask();
     return {p.reg("fanControlMode"), static_cast<uint8_t>(enabled ? mask : 0), mask};
+}
+std::vector<EcWrite> charge_hold_writes(int minutes) {
+    using namespace charge_hold;
+    if (minutes < 0 || minutes > 0xFFFF) throw std::out_of_range("Charge hold minutes cannot be encoded");
+    if (!minutes) return {{timer + 1, 0}, {timer, 0}};
+    // The target goes first: with minutes left and no target the EC uses 30 %, and would discharge to it.
+    return {{target, 100}, {timer, static_cast<uint8_t>(minutes >> 8)}, {timer + 1, static_cast<uint8_t>(minutes)}};
 }
 std::vector<EcWrite> fan_curve_writes(const config::MachineProfile& p, const config::Curve& cpu,
                                       const std::optional<config::Curve>& gpu, bool enabled, uint8_t latch_mask) {

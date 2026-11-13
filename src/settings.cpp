@@ -231,7 +231,10 @@ void to_json(Json& j, const ThermalState& v) {
     OPT("LastTrip", last_trip);
 }
 void to_json(Json& j, const Settings& v) {
-    j = {{"lastProfile", v.last_slot}, {"disableDlppc", v.disable_dlppc}, {"thermalProtection", v.thermal}};
+    j = {{"lastProfile", v.last_slot},
+         {"disableDlppc", v.disable_dlppc},
+         {"chargeLimit", v.charge_limit},
+         {"thermalProtection", v.thermal}};
     j["profileNames"] = Json::array();
     for (const auto& n : v.names) j["profileNames"].push_back(nullable(n));
 }
@@ -334,6 +337,11 @@ void ProfileStore::load_settings() {
             }
             read_field(root, "profileNames", s.names);
             read_field(root, "disableDlppc", s.disable_dlppc);
+            read_field(root, "chargeLimit", s.charge_limit);
+            if (s.charge_limit < charge_limit_min || s.charge_limit > 100) {
+                s.charge_limit = 100;
+                warn("Invalid chargeLimit; the battery charge limit is off.");
+            }
             if (auto i = root.find("thermalProtection"); i != root.end()) {
                 object(*i);
                 auto& t = s.thermal;
@@ -402,6 +410,18 @@ void ProfileStore::set_disable_dlppc(bool value) {
         save_settings();
     } catch (...) {
         settings_.disable_dlppc = old;
+        throw;
+    }
+}
+void ProfileStore::set_charge_limit(int value) {
+    if (value < charge_limit_min || value > 100)
+        throw std::out_of_range("Charge limit must be " + std::to_string(charge_limit_min) + "-100");
+    int old = settings_.charge_limit;
+    settings_.charge_limit = value;
+    try {
+        save_settings();
+    } catch (...) {
+        settings_.charge_limit = old;
         throw;
     }
 }

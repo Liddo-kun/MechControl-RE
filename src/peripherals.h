@@ -44,4 +44,18 @@ bool local_dimming_available();
 void set_local_dimming(bool);
 void ensure_uefi_flags(const std::function<void(const std::string&)>&);
 config::Json battery_telemetry(EcTransport&);
+// What the EC's charge-voltage routine keeps (re/register_reference.md 11.6.1): the voltage the pack requests, the
+// lower one the EC gives the charger, and the cell count. No profile or version number says which firmware has
+// the routine and the charge hold beside it; these readings following its arithmetic do.
+struct ChargeVoltage {
+    int request_mv = 0, target_mv = 0, cells = 0;
+    // A lithium pack's request, lowered by one of the routine's 50 mV-per-cell steps.
+    bool recognized() const {
+        int cell = cells ? request_mv / cells : 0, cut = request_mv - target_mv;
+        return cell >= 3500 && cell <= 4600 && cut >= 0 && cut <= 250 * cells && cut % (50 * cells) == 0;
+    }
+};
+ChargeVoltage charge_voltage(EcTransport&);
+// Why the machine last powered down, as the EC recorded it. Empty when the EC does not record it this way.
+std::string power_off_cause(EcTransport&);
 }

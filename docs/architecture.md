@@ -66,6 +66,17 @@ flag (0x7C7 bit 1) is saved in profile slots like the other live settings, writt
 bit-only and reapplied after resume and EC recovery. `mcctl` changes neither
 persistently.
 
+The battery charge limit is an application setting in `settings.json`, not part of a
+slot. The EC's own percentage limit works on few models, so `Controller::charge_limit`
+uses its timed charge hold (0x7F4-0x7F6, target always 100): every 30 s it arms a
+week-long hold once the charge reaches the limit on the adapter, and ends it five points
+below. Losing the adapter ends it at once, so no hold is left armed on battery. The hold
+stays in the EC while the app is not running. No profile enables this. Reads of the EC's
+charge-voltage variables recognize the firmware family, and each run's first hold is a
+two-minute one that the EC must count down before it is trusted. Where those variables are recognized, the Battery page
+shows them and says what the battery modes do to the charge voltage. System Info shows the
+EC's record of the last power-off.
+
 `nvidia_*` owns NVAPI, ROM parsing and verified override records. Originals are
 shared at `%ProgramData%/MechControl/NvidiaOverrides/originals.txt`; they are not
 per-release settings and must not be replaced by an old backup during rollback.

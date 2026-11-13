@@ -74,6 +74,13 @@ std::vector<EcWrite> cpu_writes(const config::MachineProfile&, const config::Cpu
 std::vector<EcWrite> gpu_writes(const config::MachineProfile&, int tgp, bool dynamic_boost, int db,
                                 std::optional<int> maximum = {});
 EcWrite fan_boost_write(const config::MachineProfile&, bool enabled);
+// The EC's timed charge hold (re/register_reference.md 11.6.1). While minutes are left the EC does not charge a
+// battery at or below the target, and runs the machine from a battery above it. The only target written is 100,
+// which no charge exceeds, so these writes can stop charging and never start a discharge.
+namespace charge_hold {
+inline constexpr int timer = 0x7F4, target = 0x7F6; // Minutes left: high byte, then low. The EC counts them down.
+}
+std::vector<EcWrite> charge_hold_writes(int minutes); // 0 ends the hold.
 // Curves contain active entries only, with raw 0..200 duty as in saved profiles.
 // The caller qualifies latch_mask: 0x04 for shared-bit firmware, 0xFF for the
 // reference whole-byte latch. There is deliberately no universal default.

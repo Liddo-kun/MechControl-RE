@@ -91,11 +91,13 @@ struct ThermalState {
 };
 ThermalState recover(const std::optional<ThermalState>& committed, const std::optional<ThermalState>& pending,
                      bool unreadable, bool gpu_supported);
+inline constexpr int charge_limit_min = 20;
 struct Settings {
     int last_slot = 0;
     std::vector<std::optional<std::string>> names = {"Profile 1", "Profile 2", "Profile 3", "Profile 4", "Profile 5"};
 
     bool disable_dlppc = false;
+    int charge_limit = 100; // Percent at which charging stops; 100 is no limit.
     ThermalState thermal;
 };
 #define MECH_JSON(Type)                 \
@@ -130,6 +132,7 @@ public:
     const std::string& warning() const { return warning_; }
     void select(int slot);
     void set_disable_dlppc(bool disabled);
+    void set_charge_limit(int percent);
     void rename(int slot, const std::string& name);
     void clear(int slot);
     bool exists(int slot) const;

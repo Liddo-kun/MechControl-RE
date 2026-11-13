@@ -71,6 +71,20 @@ Curve linked_curve(int duty, int ramp) {
     }
     return c;
 }
+// The EC charge hold as Controller::charge_limit uses it.
+namespace {
+constexpr int hold_minutes = 7 * 24 * 60, probe_minutes = 2, hold_band = 5;
+struct HoldRegisters {
+    int minutes;
+    uint8_t target;
+    bool ours() const { return minutes > 0 && minutes <= hold_minutes && target == 100; }
+    bool idle() const { return !minutes && (!target || target == 100); }
+};
+HoldRegisters read_hold(EcTransport& ec) {
+    using namespace charge_hold;
+    return {ec.read(timer) << 8 | ec.read(timer + 1), ec.read(target)};
+}
+}
 Controller::Controller(EcSession& session, std::filesystem::path directory,
                        std::function<void(const std::string&)> diagnostic, std::function<void(unsigned)> wait,
                        std::function<void(std::function<void()>)> run_blocking, bool nvidia_hardware,
@@ -446,6 +460,25 @@ std::vector<std::string> Controller::start() {
         initialize(init_errors);
     }
     watchdog_ = GetTickCount64() + 30000;
+    try {
+        auto& ec = session_.transport();
+        power_off_ = power_off_cause(ec);
+        if (!power_off_.empty()) diagnostic_("Last power-off, from the EC: " + power_off_);
+        if (auto v = charge_voltage(ec); v.recognized())
+            diagnostic_("Battery charge voltage: " + std::to_string(v.target_mv) + " mV, " +
+                        std::to_string((v.request_mv - v.target_mv) / v.cells) + " mV per cell below the " +
+                        std::to_string(v.request_mv) + " mV the pack requests; charge limit " +
+                        (store_.settings().charge_limit < 100 ? std::to_string(store_.settings().charge_limit) + "%"
+                                                              : std::string("off")));
+        // A hold left in the EC by a run whose limit has since been lost would block charging with nothing to
+        // explain it.
+        if (store_.settings().charge_limit >= 100 && charge_unavailable().empty() && read_hold(ec).ours()) {
+            batch(charge_hold_writes(0));
+            diagnostic_("[Charge limit] Off: ended the hold left in the EC");
+        }
+    } catch (const std::exception& ex) {
+        diagnostic_(std::string("Battery startup check failed: ") + ex.what());
+    }
     auto& ft = session_.profile.fan_table;
     int profile_active = ft.active;
     bool profile_gpu = ft.has_gpu;
@@ -673,6 +706,112 @@ void Controller::battery(int mode) {
     auto& p = session_.profile;
     batch({{p.reg("batteryMode"), encoding::battery(mode, *session_.battery_bit3),
             p.bitfields.at("batteryMode").get_mask()}});
+}
+// Charge limit. This firmware family has no percentage limit a host can use, but it has a timed hold that blocks
+// charging (charge_hold in ec.h). The hold is armed when the battery reaches the limit on the adapter, and ended
+// five points below it or when the adapter goes. It lasts a week, renewed hourly, so the battery does not fill
+// while the machine is off, and it lapses by itself if the app never returns.
+// No profile or EC version says which firmware has the hold. The EC's charge-voltage readings identify the
+// family before anything is written, and each run's first hold is a two-minute one that the EC must be seen
+// counting down. Firmware that does not count gets its registers back and no further writes.
+// Why no hold can be armed, from reads alone. Empty when one can.
+std::string Controller::charge_unavailable() {
+    if (!features_.battery()) return "battery control is disabled";
+    if (hold_ == Hold::unsupported) return charge_reason_;
+    if (hold_ != Hold::unknown) return {};
+    auto& ec = session_.transport();
+    if ((ec.read(0x490) & 6) != 6) return "no working battery is detected";
+    if (!charge_voltage(ec).recognized())
+        return "the EC's charge-voltage readings do not match the firmware known to have a charge hold";
+    // A hold armed by an earlier run is as expected as none. It does not replace the checks above: other
+    // firmware could hold the same values there by chance.
+    if (auto hold = read_hold(ec); !hold.ours() && !hold.idle())
+        return "the EC's charge hold registers hold other values";
+    return {};
+}
+// Battery telemetry with the charge limit: its setting, why it is unavailable, and the EC hold as it is now.
+Json Controller::battery_status() {
+    auto& ec = session_.transport();
+    Json j = battery_telemetry(ec);
+    int limit = store_.settings().charge_limit;
+    auto hold = read_hold(ec);
+    auto why = charge_unavailable();
+    bool held = why.empty() && hold.ours();
+    j["chargeLimit"] = {{"percent", limit},
+                        {"reason", why},
+                        {"report", why.starts_with("the EC")}, // Worth an issue: firmware, not a missing battery.
+                        {"resumePercent", limit - hold_band},
+                        {"blocked", held},
+                        {"minutesLeft", held ? hold.minutes : 0},
+                        {"checking", hold_ == Hold::probing}};
+    return j;
+}
+void Controller::charge_limit(ULONGLONG now) {
+    int limit = store_.settings().charge_limit;
+    if (limit >= 100 || hold_ == Hold::unsupported || !features_.battery() || now < charge_at_) return;
+    charge_at_ = now + (hold_ == Hold::probing ? 5000 : 30000);
+    auto note = [&](const std::string& text) { // A state is logged when it changes, not at every check.
+        if (text != charge_note_) diagnostic_("[Charge limit] " + (charge_note_ = text));
+    };
+    auto percent = [](int n) { return std::to_string(n) + "%"; };
+    try {
+        // Nothing below writes until this run has recognized the firmware, whatever the hold registers read.
+        if (hold_ == Hold::unknown)
+            if (auto why = charge_unavailable(); !why.empty()) return note("Unavailable: " + why);
+        auto& ec = session_.transport();
+        int charge = ec.read(0x4AB);
+        auto hold = read_hold(ec);
+        bool held = hold.ours();
+        // A hold exists only while the adapter is connected. One left armed on battery would keep a machine
+        // that is plugged in again while asleep from charging, with the app frozen and unable to end it.
+        bool adapter = ec.read(0x490) & 1;
+        if (!adapter || (charge < limit && !(held && charge > limit - hold_band))) {
+            if (held) {
+                batch(charge_hold_writes(0));
+                note(adapter ? "Battery at " + percent(charge) + ": charging to " + percent(limit)
+                             : "On battery: charging is not blocked");
+            }
+            if (hold_ == Hold::probing) hold_ = Hold::unknown;
+            return;
+        }
+        std::string blocked = "Battery at " + percent(charge) + ", limit " + percent(limit) + ": charging blocked";
+        // A hold longer than the check's was extended by an earlier run, which saw it count.
+        if (hold_ == Hold::unknown && held && hold.minutes > probe_minutes) hold_ = Hold::confirmed;
+        switch (hold_) {
+        case Hold::unknown:
+            probe_restore_ = hold.target;
+            probe_checks_ = 0;
+            hold_ = Hold::probing;
+            charge_at_ = now + 5000;
+            batch(charge_hold_writes(probe_minutes));
+            note(blocked + "; checking that the EC counts the hold down");
+            break;
+        case Hold::probing:
+            if (hold.minutes == probe_minutes - 1) {
+                hold_ = Hold::confirmed;
+                batch(charge_hold_writes(hold_minutes));
+                note("EC charge hold confirmed; charging resumes at " + percent(limit - hold_band));
+            } else if (!hold.minutes)
+                hold_ = Hold::unknown; // It ran out unseen, as across a sleep. The next check starts over.
+            else if (hold.minutes != probe_minutes || hold.target != 100 || ++probe_checks_ >= 18) {
+                hold_ = Hold::unsupported;
+                charge_reason_ = "the EC did not count the charge hold down";
+                auto restore = charge_hold_writes(0);
+                restore.push_back({charge_hold::target, probe_restore_});
+                batch(restore);
+                note("Unavailable: " + charge_reason_ + "; its registers are restored");
+            }
+            break;
+        case Hold::confirmed:
+            if (hold.minutes >= hold_minutes - 60 && held) break;
+            batch(charge_hold_writes(hold_minutes));
+            if (!held) note(blocked + " until it falls to " + percent(limit - hold_band));
+            break;
+        case Hold::unsupported: break;
+        }
+    } catch (const std::exception& ex) {
+        note(std::string("Check failed: ") + ex.what());
+    }
 }
 void Controller::speed(bool enabled_value, int ms) {
     if (!features_.fan_control()) throw std::runtime_error("Fan control unavailable");
@@ -989,7 +1128,7 @@ void Controller::poll_battery(ULONGLONG now) {
     if (!visible_ || !battery_page_ || !features_.battery() || now < battery_at_) return;
     battery_at_ = now + 2000;
     try {
-        battery_sample_ = battery_telemetry(session_.transport());
+        battery_sample_ = battery_status();
     } catch (const std::exception&) {
         // Source telemetry is best effort.
     }
@@ -1052,6 +1191,7 @@ std::optional<Sensors> Controller::tick(ULONGLONG now) {
         thermal_->enforce(true);
     }
     poll_battery(now);
+    charge_limit(now);
     if (linked_) {
         shared.cpu_temp = temperature("cpuTemp").value_or(0);
         try {
@@ -1153,7 +1293,7 @@ ControlResult Controller::run(const UiRead& c) {
     Json data = Json::object();
     if (c.page == 4) data = *execute(PeripheralRead{}).peripherals;
     if (c.page == 3 && features_.battery()) try {
-            data["battery"] = battery_telemetry(session_.transport());
+            data["battery"] = battery_status();
         } catch (const std::exception& e) {
             data["batteryError"] = e.what();
         }
@@ -1169,6 +1309,8 @@ ControlResult Controller::run(const UiRead& c) {
 }
 ControlResult Controller::run(const AcEvent& c) {
     if (!c.on_ac) clear_bypass("AC power lost");
+    charge_at_ = 0;                               // The charge hold follows the adapter.
+    if (!c.on_ac) charge_limit(GetTickCount64()); // Now: on battery Windows may freeze the app in standby.
     if (on_ac_ != c.on_ac) {
         on_ac_ = c.on_ac;
         gpu_check_at_ = GetTickCount64() + 5000;
@@ -1315,6 +1457,19 @@ ControlResult Controller::run(const BatteryApply& c) {
     battery(c.mode);
     return {.applied = true};
 }
+ControlResult Controller::run(const ChargeLimitApply& c) {
+    if (c.percent < 100)
+        if (auto why = charge_unavailable(); !why.empty()) throw std::runtime_error("Charge limit unavailable: " + why);
+    store_.set_charge_limit(c.percent);
+    charge_at_ = 0; // The next tick acts on it.
+    if (c.percent < 100)
+        return {.text = "Charge limit " + std::to_string(c.percent) + "%: charging stops there and resumes at " +
+                        std::to_string(c.percent - hold_band) + "%",
+                .applied = true};
+    if (charge_unavailable().empty() && read_hold(session_.transport()).ours()) batch(charge_hold_writes(0));
+    if (!charge_note_.empty()) diagnostic_("[Charge limit] " + (charge_note_ = "Off"));
+    return {.text = "Charge limit off", .applied = true};
+}
 ControlResult Controller::run(const SwitchApply& c) {
     speed(c.enabled, c.milliseconds);
     return {.applied = true};
@@ -1359,7 +1514,7 @@ ControlResult Controller::run(const PeripheralRead& c) {
         }
     if (cooler_) j["cooler"] = cooler_->snapshot();
     if (c.battery && features_.battery()) try {
-            j["battery"] = battery_telemetry(session_.transport());
+            j["battery"] = battery_status();
         } catch (const std::exception& e) {
             j["batteryError"] = e.what();
         }

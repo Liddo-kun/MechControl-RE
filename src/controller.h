@@ -47,6 +47,10 @@ struct FanRead {};
 struct BatteryApply {
     int mode;
 };
+// Percent at which charging stops; 100 is no limit. Kept with the application settings, not in a slot.
+struct ChargeLimitApply {
+    int percent;
+};
 struct LightingApply {
     int zone;
     config::Zone settings;
@@ -133,7 +137,7 @@ using ControlCommand =
                  SlotRename, SlotClear, DefaultsApply, ThermalReset, ThermalTest, Visibility, Resume, AcEvent,
                  GpuUnlock, DlppcApply, CliCommand, LightingApply, LightingIdle, DimmingApply, PeripheralRead,
                  CoolerRequest, BatteryPage, UiRead, UiPage, UiPreflight, FanMaster, FanEdit, FanRead, PowerTransition,
-                 EcBypassApply, CoolerFlag>;
+                 EcBypassApply, CoolerFlag, ChargeLimitApply>;
 // How the worker treats each command. Every command needs an entry: command_traits() fails to compile without one.
 struct CommandTraits {
     bool notification = false; // Lifecycle event, run even during the wait for a blocking device operation.
@@ -163,6 +167,7 @@ inline CommandTraits traits(const FanEdit&) { return {.posts = false}; }
 inline CommandTraits traits(const FanRead&) { return {.fresh = tab::fans}; }
 inline CommandTraits traits(const ProtectionApply&) { return {.stale = tab::failsafe}; }
 inline CommandTraits traits(const BatteryApply&) { return {.stale = tab::battery}; }
+inline CommandTraits traits(const ChargeLimitApply&) { return {.stale = tab::battery}; }
 inline CommandTraits traits(const LightingApply&) { return {.stale = tab::lighting}; }
 inline CommandTraits traits(const LightingIdle&) { return {.stale = tab::lighting}; }
 inline CommandTraits traits(const DimmingApply&) { return {.stale = tab::lighting}; }
@@ -265,6 +270,9 @@ private:
     void link(std::optional<int>, std::optional<int>);
     void boost(bool);
     void battery(int);
+    void charge_limit(ULONGLONG now);
+    std::string charge_unavailable();
+    config::Json battery_status();
     void speed(bool, int);
     // One handler per command; execute() adds the shared bookkeeping.
     ControlResult run(const CpuApply&), run(const GpuApply&), run(const FanApply&), run(const FanBoost&),
@@ -275,7 +283,7 @@ private:
         run(const LightingApply&), run(const LightingIdle&), run(const DimmingApply&), run(const PeripheralRead&),
         run(const CoolerRequest&), run(const BatteryPage&), run(const UiRead&), run(const UiPage&),
         run(const UiPreflight&), run(const FanMaster&), run(const FanEdit&), run(const FanRead&),
-        run(const PowerTransition&), run(const EcBypassApply&), run(const CoolerFlag&);
+        run(const PowerTransition&), run(const EcBypassApply&), run(const CoolerFlag&), run(const ChargeLimitApply&);
     cli::Reply cli(const std::vector<std::string>&);
     config::Json status();
     config::Json cpu_status(), gpu_status(bool presentation = false), fans_status(), gpu_telemetry(), gpu_budget();
@@ -328,6 +336,12 @@ private:
     std::unique_ptr<Cooler> cooler_;
     std::function<void(config::Json)> cooler_delivery_;
     Lighting::Send lighting_send_;
+    // See Controller::charge_limit. Unsupported lasts until the app restarts.
+    enum class Hold { unknown, probing, confirmed, unsupported } hold_ = Hold::unknown;
+    ULONGLONG charge_at_ = 0;
+    int probe_checks_ = 0;
+    uint8_t probe_restore_ = 0;
+    std::string charge_reason_, charge_note_, power_off_;
     bool battery_page_ = false;
     ULONGLONG battery_at_ = 0, budget_at_ = 0;
     std::optional<config::Json> battery_sample_;
