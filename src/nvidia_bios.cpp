@@ -123,14 +123,18 @@ Bios Bios::parse(Bytes bytes) {
     auto bios = entries.at('B').offset, power = entries.at('P').offset;
     result.version_bytes = {b[bios + 3], b[bios + 2], b[bios + 1], b[bios], b[bios + 4]};
     size_t table = map(u(power + 0x2c), 4);
-    // RTX 50 uses 40 38 66 14. RTX 40 uses 30 32 53 14 (layout from mVolt 0.50.8/0.50.9, checked on 4060/4070 ROMs).
-    result.ada = b[table] == 0x30 && b[table + 1] == 0x32 && b[table + 2] == 0x53 && b[table + 3] == 20;
-    if (!result.ada && !(b[table] == 0x40 && b[table + 1] == 0x38 && b[table + 2] == 0x66 && b[table + 3] == 20)) {
+    // RTX 50 uses 40 38 66 14. RTX 40 uses 30 32 53 14, or 30 34 5B 14 in later BIOS branches: the same entry
+    // fields behind a longer header and stride (layout from mVolt 0.50.8/0.50.9, checked on 4060-4090 Laptop ROMs).
+    auto layout = [&](uint8_t version, uint8_t header, uint8_t entry) {
+        return b[table] == version && b[table + 1] == header && b[table + 2] == entry && b[table + 3] == 20;
+    };
+    result.ada = layout(0x30, 0x32, 0x53) || layout(0x30, 0x34, 0x5b);
+    if (!result.ada && !layout(0x40, 0x38, 0x66)) {
         char header[16];
         sprintf_s(header, "%02X %02X %02X %02X", b[table], b[table + 1], b[table + 2], b[table + 3]);
         throw std::runtime_error(std::string("Unsupported NVIDIA BIOS: power policy layout ") + header);
     }
-    size_t size = result.ada ? 0x32 : 56, stride = result.ada ? 0x53 : 102;
+    size_t size = b[table + 1], stride = b[table + 2];
     span(table, size + 20 * stride);
     auto entry = [&](int i) { return table + size + i * stride; };
     auto limits = [&](size_t p) {

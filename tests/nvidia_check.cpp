@@ -115,11 +115,12 @@ struct Fixture {
     }
     // RTX 40 table with the 4060/4070 Laptop ROM values. Entry 7 is populated
     // and 14 looks like an RTX 50 MSVDD record; both must be ignored.
-    void ada() {
+    // wide is the 30 34 5B 14 variant of later BIOS branches.
+    void ada(bool wide = false) {
         std::fill_n(b.begin() + table, 56 + 20 * 102, uint8_t(0));
         b[table] = 0x30;
-        b[table + 1] = 0x32;
-        b[table + 2] = 0x53;
+        b[table + 1] = wide ? 0x34 : 0x32;
+        b[table + 2] = wide ? 0x5b : 0x53;
         b[table + 3] = 20;
         old(2, 0x21, 4, 5000, 115000, 140000);
         old(7, 1, 6, 5000, 90000, 90000);
@@ -129,7 +130,7 @@ struct Fixture {
         put(b, a(13) + 0xe, 0xd00);
         old(14, 7, 20, 1, 60000, 60000);
     }
-    int a(int i) const { return table + 0x32 + i * 0x53; }
+    int a(int i) const { return table + b[table + 1] + i * b[table + 2]; }
     void old(int i, uint8_t id, uint8_t channel, uint32_t lo, uint32_t def, uint32_t hi) {
         auto p = a(i);
         b[p] = id;
@@ -476,12 +477,13 @@ void bios_and_recovery(const std::filesystem::path& root) {
     check(p.settings.nvvdd_ma == 130000 && !p.settings.board_input_ma && !p.restart,
           "automatic active ceilings clamp currents and skip only unsupported board input");
 }
-void rtx40() {
+void rtx40_bios(bool wide) {
     Fixture f;
-    f.ada();
+    f.ada(wide);
     auto b = Bios::parse(f.b);
     check(b.ada && b.power.min == 5000 && b.power.def == 115000 && b.power.max == 140000 && b.nv.min == 1 &&
-              b.nv.def == 135000 && b.nv.max == 135000 && !b.ms && b.input && b.input->def == 12434,
+              b.nv.def == 135000 && b.nv.max == 135000 && !b.ms && b.input && b.input->def == 12434 &&
+              b.power.offset == f.a(2) + 2 && b.nv.offset == f.a(13) + 2 && b.input->offset == f.a(9) + 2,
           "RTX 40 table maps power, NVVDD and board input; index 14 is never MSVDD");
     auto patches = b.build({215000, RailOverride{150000, 189000}, {}, RailOverride{13000, 19148}});
     check(patches.size() == 4 &&
@@ -497,12 +499,12 @@ void rtx40() {
           "patched RTX 40 BIOS reparses with exact fields");
     refuses([&] { b.build({{}, {}, RailOverride{60000, 70000}, {}}); }, "RTX 40 refuses MSVDD overrides");
     Fixture none;
-    none.ada();
+    none.ada(wide);
     none.b[none.a(9)] = 0;
     check(!Bios::parse(none.b).input, "RTX 40 board input is optional");
     for (int mutation = 0; mutation < 6; ++mutation) {
         Fixture m;
-        m.ada();
+        m.ada(wide);
         switch (mutation) {
         case 0: m.b[m.a(2)] = 2; break;
         case 1: put(m.b, m.a(13) + 0xe, 0xd01); break;
@@ -513,18 +515,21 @@ void rtx40() {
         }
         refuses([&] { Bios::parse(m.b); }, "RTX 40 identity, channel or range mismatch refuses");
     }
+}
+void rtx40() {
+    rtx40_bios(false);
+    rtx40_bios(true);
     Fixture variant;
     variant.ada();
     variant.b[variant.table + 1] = 0x34;
-    variant.b[variant.table + 2] = 0x5b;
     std::string error;
     try {
         Bios::parse(variant.b);
     } catch (const std::exception& ex) {
         error = ex.what();
     }
-    check(error.find("power policy layout 30 34 5B 14") != std::string::npos,
-          "untested table variant refuses and the error names its header bytes");
+    check(error.find("power policy layout 30 34 53 14") != std::string::npos,
+          "unknown header and stride pair refuses and the error names its header bytes");
     Driver d;
     d.ada();
     Api api([&](auto id, auto& b) { d.call(id, b); });
