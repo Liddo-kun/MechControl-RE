@@ -390,16 +390,61 @@ void ensure_uefi_flags(const std::function<void(const std::string&)>& log) {
 Json battery_telemetry(EcTransport& ec) {
     auto word = [&](int a) { return ec.read(a) | (ec.read(a + 1) << 8); };
     int design = word(0x402), full = word(0x404);
-    return {{"onAC", (ec.read(0x490) & 1) != 0},
-            {"chargePercent", ec.read(0x4AB)},
-            {"temperatureCelsius", word(0x4A2) / 10.0 - 273.15},
-            {"cycleCount", word(0x4A6)},
-            {"designCapacityMah", design},
-            {"fullChargeCapacityMah", full},
-            {"remainingCapacityMah", word(0x436)},
-            {"designVoltageMv", word(0x408)},
-            {"presentVoltageMv", word(0x438)},
-            {"chargeRateMa", word(0x434)},
-            {"healthPercent", design > 0 ? rounded(100.0 * full / design) : 0}};
+    Json j = {{"onAC", (ec.read(0x490) & 1) != 0},
+              {"chargePercent", ec.read(0x4AB)},
+              {"temperatureCelsius", word(0x4A2) / 10.0 - 273.15},
+              {"cycleCount", word(0x4A6)},
+              {"designCapacityMah", design},
+              {"fullChargeCapacityMah", full},
+              {"remainingCapacityMah", word(0x436)},
+              {"designVoltageMv", word(0x408)},
+              {"presentVoltageMv", word(0x438)},
+              {"chargeRateMa", word(0x434)},
+              {"healthPercent", design > 0 ? rounded(100.0 * full / design) : 0}};
+    // The routine's own variables sit in firmware memory, not in the ACPI battery block, so they are shown only
+    // where its arithmetic identifies it.
+    if (auto v = charge_voltage(ec); v.recognized()) {
+        // The routine takes off the largest of what the mode (0x7A6 bits 5:4), the pack's age, its cycle count and
+        // an unreadable count of hours near full call for. agedMv is what the last three are known to come to: the
+        // age and cycle rows, or the whole cut where it exceeds the mode's.
+        auto rows = [](int n, std::array<int, 5> from) {
+            return 50 * static_cast<int>(std::ranges::count_if(from, [&](int at) { return n >= at; }));
+        };
+        int age = ec.read(0x39D), mode = ec.read(0x7A6) >> 4 & 3, cut = (v.request_mv - v.target_mv) / v.cells;
+        int aged = std::max({rows(age, {7, 10, 13, 19, 25}), rows(word(0x4A6), {150, 250, 350, 450, 550}),
+                             cut > (mode == 1   ? 100
+                                    : mode == 2 ? 200
+                                                : 0)
+                                 ? cut
+                                 : 0});
+        j["chargeVoltage"] = {
+            {"requestMv", v.request_mv}, {"targetMv", v.target_mv}, {"cells", v.cells}, {"agedMv", aged}};
+        // The age the EC derates by, and the pack's manufacture date (Smart Battery format) it counts from.
+        j["ageMonths"] = age;
+        int date = ec.read(0x314) << 8 | ec.read(0x315), month = date >> 5 & 15, day = date & 31;
+        if (month >= 1 && month <= 12 && day >= 1) {
+            char text[16];
+            snprintf(text, sizeof text, "%04d-%02d-%02d", 1980 + (date >> 9), month, day);
+            j["manufactured"] = text;
+        }
+    }
+    return j;
+}
+ChargeVoltage charge_voltage(EcTransport& ec) {
+    int code = ec.read(0x491) >> 6, cells = code == 3 ? 4 : code == 2 ? 3 : 2;
+    return {ec.read(0x30E) << 8 | ec.read(0x30F), ec.read(0x522) | ec.read(0x523) << 8, cells};
+}
+std::string power_off_cause(EcTransport& ec) {
+    int cause = ec.read(0x47E), reason = ec.read(0x47F);
+    switch (cause) {
+    case 0xCC: return "normal shutdown";
+    case 0xCD: return "power button held";
+    case 0xEC: return "not recorded: the EC has restarted since";
+    case 0xFC:
+        return "forced by the EC, " + (reason == 0x81   ? std::string("boot watchdog")
+                                       : reason == 0x99 ? std::string("powered on with the lid closed")
+                                                        : "reason " + hex_text(reason));
+    }
+    return {};
 }
 }

@@ -56,6 +56,7 @@ Json Controller::presentation(bool read, bool gpu_live, int page) {
                 j["modes"].push_back(key);
             }
         j["identity"] = {{"baseboard", session_.identity.baseboard}, {"cpu", session_.identity.cpu_name}};
+        j["powerOff"] = power_off_;
     }
     // Owned state goes out whole every time: the worker's mailbox keeps only the newest presentation.
     j["fan"] = fan_intent_;

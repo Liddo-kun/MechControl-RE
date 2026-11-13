@@ -96,6 +96,9 @@ enum Id {
     batteryApplyId,
     batteryTextId,
     batterySupportId,
+    chargeLimitId,
+    chargeApplyId,
+    chargeSupportId,
     logoSupportId,
     zoneBaseId = 600,
     idleId = 660,
@@ -171,6 +174,8 @@ void openUnelevated(const std::wstring& address) {
         throw std::runtime_error("Could not open the browser. Report at github.com/Liddo-kun/MechControl-RE/issues");
     }
 }
+// The charge limits offered, in the order of their list. 100 is no limit.
+constexpr int chargeLimits[]{100, 90, 85, 80, 75, 70, 65, 60, 55, 50, 45, 40};
 constexpr COLORREF okColor = RGB(46, 125, 50), warnColor = RGB(230, 124, 0), errorColor = RGB(198, 40, 40),
                    frameColor = RGB(180, 180, 180);
 // Green up to normal, amber midway, red from limiting; unknown keeps the normal text color.
@@ -718,6 +723,13 @@ private:
         combo(3, batteryModeId, {L"High Capacity (Performance)", L"Balanced", L"Stationary (Health)"});
         button(3, batteryApplyId, L"Apply");
         support(3, batterySupportId, L"Battery charge mode");
+        combo(3, chargeLimitId, {L"Off (charge to 100%)"});
+        for (int limit : chargeLimits)
+            if (limit < 100)
+                SendMessageW(get(chargeLimitId), CB_ADDSTRING, 0,
+                             reinterpret_cast<LPARAM>((std::to_wstring(limit) + L"%").c_str()));
+        button(3, chargeApplyId, L"Apply");
+        support(3, chargeSupportId, L"Battery charge limit");
         row(3, batteryTextId, L"Battery telemetry is read every two seconds only while this page is visible.", L"EDIT",
             ES_MULTILINE | ES_READONLY);
         support(4, logoSupportId, L"Logo LED control");
@@ -1215,26 +1227,50 @@ private:
         s.close();
         if (s.apply) thermalLive_ = live;
     }
-    // Battery Charging Mode, which fits its contents, and Battery Telemetry, as in the reference BatteryTab. The
-    // support note takes the telemetry's place.
+    // Battery Charging Mode, which fits its contents, and Battery Telemetry, as in the reference BatteryTab, with
+    // Charge Limit between them. The support note takes the telemetry's place.
     void layoutBattery(Sections& s) {
         RECT r{};
         GetWindowRect(get(batteryModeId), &r);
         auto title = L"Battery Charging Mode";
         int combo = s.extent(font_, L"High Capacity (Performance)") + ref(50);
-        s.open(title, s.x, s.fit(title, s.x, s.left + combo + ref(15)));
+        // With the note on what the modes do, the section spans the page.
+        if (modeNote_.empty())
+            s.open(title, s.x, s.fit(title, s.x, s.left + combo + ref(15)));
+        else
+            s.open(title);
         s.y += ref(4);
         s.put(get(batteryModeId), s.left, s.y, combo, ref(300));
         s.y += r.bottom - r.top + ref(10);
         s.put(get(batteryApplyId), s.left, s.y, ref(110), s.button);
         s.y += s.button;
+        if (!modeNote_.empty())
+            s.y =
+                s.paragraph(modeNote_, s.left + s.pad, s.y + ref(8), s.end - s.pad, GetSysColor(COLOR_GRAYTEXT), font_);
+        s.close();
+        s.open(L"Charge Limit");
+        s.y += ref(4);
+        int limit = s.extent(font_, L"Off (charge to 100%)") + ref(50);
+        int list = r.bottom - r.top, row = std::max(list, s.button);
+        s.put(get(chargeLimitId), s.left, s.y + (row - list) / 2, limit, ref(300));
+        s.put(get(chargeApplyId), s.left + limit + ref(12), s.y + (row - s.button) / 2, ref(110), s.button);
+        s.y += row + ref(8);
+        s.y = s.paragraph(
+            L"On the adapter, charging stops at this level and resumes five points below it. The EC keeps charging blocked for up to a week while MechControl is not running. This is a setting of the machine, not of a profile.",
+            s.left + s.pad, s.y, s.end - s.pad, GetSysColor(COLOR_GRAYTEXT), font_);
+        // The caveat shows while a limit is selected, applied or not, in the normal text colour so that it is read.
+        if (SendMessageW(get(chargeLimitId), CB_GETCURSEL, 0, 0) > 0)
+            s.y = s.paragraph(
+                L"This is a software-controlled charge limit. In rare cases the battery will not charge while the app is not running, such as when the laptop is put into deep sleep while plugged in, then unplugged, allowed to drain, and plugged in again without being woken.",
+                s.left + s.pad, s.y + ref(4), s.end - s.pad, GetSysColor(COLOR_BTNTEXT), font_);
+        s.supportNote(chargeSupportId, true, errorColor, s.left + s.pad, ref(3), s.end - s.left - 2 * s.pad);
         s.close();
         s.open(L"Battery Telemetry");
         bool telemetry = support_.at(batterySupportId).reason.empty();
-        // Ten lines of readings; the edit control insets its text by a few pixels.
-        s.put(get(batteryTextId), s.left + ref(3), s.y + ref(3), s.end - s.left - ref(3), 10 * s.line + ref(4),
-              telemetry);
-        if (telemetry) s.y += 10 * s.line + ref(7);
+        // The edit control insets its text by a few pixels.
+        s.put(get(batteryTextId), s.left + ref(3), s.y + ref(3), s.end - s.left - ref(3),
+              batteryLines_ * s.line + ref(4), telemetry);
+        if (telemetry) s.y += batteryLines_ * s.line + ref(7);
         s.supportNote(batterySupportId, true, errorColor, s.left + s.pad, ref(3), s.end - s.left - 2 * s.pad);
         s.close();
     }
@@ -1419,6 +1455,13 @@ private:
             power.insert(power.end(), {{-1, L"NVIDIA Driver"}, {6, L"GPU Budget F7:"}, {7, L"CPU+GPU Budget TPP:"}});
         }
         table(L"Power Delivery", power);
+        if (auto cause = w(state_.value("powerOff", std::string{})); !cause.empty()) {
+            open(L"Last Power-Off (from the EC)");
+            cause[0] = towupper(cause[0]);
+            right = s.say(cause, left, s.y, black, font_);
+            s.y += s.line;
+            close();
+        }
         if (s.apply) infoCells_ = cells;
     }
     void paintPage(int index, HDC target, const RECT& area) {
@@ -2281,6 +2324,19 @@ private:
             edited_.erase(batteryModeId);
             request(BatteryApply{int(SendMessageW(get(batteryModeId), CB_GETCURSEL, 0, 0))});
             break;
+        case chargeApplyId: {
+            auto index = SendMessageW(get(chargeLimitId), CB_GETCURSEL, 0, 0);
+            if (index < 0 || index >= LRESULT(std::size(chargeLimits))) break;
+            edited_.erase(chargeLimitId);
+            request(ChargeLimitApply{chargeLimits[index]});
+            break;
+        }
+        case chargeLimitId:
+            if (code == CBN_SELCHANGE) {
+                edited_.insert(id);
+                layoutPage(pages_[3]); // Its caveat shows only with a limit selected.
+            }
+            break;
         case lightingReadId:
             eraseEdits(zoneBaseId, dimmingId);
             request(UiRead{4});
@@ -2573,6 +2629,10 @@ private:
         if (page == 3) {
             bool battery = features.contains("battery");
             for (int id : {batteryModeId, batteryApplyId}) enable(id, battery);
+            if (!battery) {
+                for (int id : {chargeLimitId, chargeApplyId}) enable(id, false);
+                explain(chargeSupportId, L"");
+            }
             auto reason = battery ? std::wstring() : disabledReason(L"Battery charge mode and telemetry", "battery");
             if (reason != support_.at(batterySupportId).reason) {
                 explain(batterySupportId, reason);
@@ -2748,6 +2808,56 @@ private:
                 bindPeripherals(page);
         }
     }
+    // The Battery page's lines on the charge limit and on what the EC's charge-voltage routine keeps. The second
+    // and third exist only where the EC has that routine.
+    std::wstring chargeText(const Json& b) const {
+        std::wstring text;
+        if (b.contains("chargeLimit")) {
+            const auto& limit = b["chargeLimit"];
+            int percent = limit.value("percent", 100), minutes = limit.value("minutesLeft", 0);
+            text += L"\r\nCharge limit: ";
+            if (!limit.value("reason", std::string{}).empty())
+                text += L"unavailable";
+            else if (percent >= 100)
+                text += L"off";
+            else if (!limit.value("blocked", false))
+                text += std::to_wstring(percent) + L"%, charging up to it";
+            else if (limit.value("checking", false))
+                text += std::to_wstring(percent) + L"%, charging blocked; checking that the EC keeps the hold";
+            else
+                text += std::to_wstring(percent) + L"%, charging blocked until " +
+                        std::to_wstring(limit.value("resumePercent", 0)) + L"% (EC hold: " +
+                        (minutes >= 2880 ? std::to_wstring(minutes / 1440) + L" days"
+                                         : std::to_wstring(std::max(1, minutes / 60)) + L" h") +
+                        L" left)";
+        }
+        if (b.contains("chargeVoltage")) {
+            const auto& v = b["chargeVoltage"];
+            int request = v.value("requestMv", 0), target = v.value("targetMv", 0), cells = v.value("cells", 1);
+            text += L"\r\nCharge voltage: " + std::to_wstring(target) + L" mV (" + decimal(target / 1000.0 / cells, 2) +
+                    L" V per cell); the pack asks for " + std::to_wstring(request) + L" mV, the EC takes off " +
+                    std::to_wstring((request - target) / cells) + L" mV per cell";
+        }
+        if (int age = b.value("ageMonths", 0); age > 0) {
+            auto made = w(b.value("manufactured", std::string{}));
+            text += L"\r\nBattery age: " + std::to_wstring(age) + L" months" +
+                    (made.empty() ? std::wstring() : L" (made " + made + L")");
+        }
+        return text;
+    }
+    // What the three battery modes do, where the EC has the charge-voltage routine that implements them.
+    std::wstring modeText(const Json& b) const {
+        if (!b.contains("chargeVoltage")) return {};
+        const auto& v = b["chargeVoltage"];
+        int aged = v.value("agedMv", 0);
+        std::wstring text = L"The modes lower the charge voltage, not the charge level: Balanced by 100 mV per cell, "
+                            L"Stationary by 200 mV. ";
+        if (aged < 100) return text + L"The EC lowers it further as the pack ages.";
+        text += L"This pack's age and use already lower it by " + std::to_wstring(aged) + L" mV, so ";
+        if (aged < 200) return text + L"High Capacity and Balanced charge it the same.";
+        return text + L"all three modes charge it the same, to " +
+               decimal(v.value("targetMv", 0) / 1000.0 / v.value("cells", 1), 2) + L" V per cell.";
+    }
     void bindPeripherals(int page) {
         const auto& j = peripheralState_;
         updating_ = true;
@@ -2768,7 +2878,37 @@ private:
                     std::to_wstring(b.value("presentVoltageMv", 0)) + L" mV (design " +
                     std::to_wstring(b.value("designVoltageMv", 0)) + L" mV)\r\nCharge rate: " +
                     std::to_wstring(b.value("chargeRateMa", 0)) + L" mA\r\nHealth: " +
-                    std::to_wstring(b.value("healthPercent", 0)) + L"%");
+                    std::to_wstring(b.value("healthPercent", 0)) + L"%" + chargeText(b));
+            int lines = 10 + int(b.contains("chargeLimit")) + int(b.contains("chargeVoltage")) +
+                        int(b.value("ageMonths", 0) > 0);
+            bool relayout = lines != batteryLines_;
+            if (auto note = modeText(b); note != modeNote_) {
+                modeNote_ = note;
+                relayout = true;
+            }
+            if (b.contains("chargeLimit")) {
+                const auto& limit = b["chargeLimit"];
+                auto reason = w(limit.value("reason", std::string{}));
+                if (!reason.empty()) reason = L"Charge limit is unavailable: " + reason + L".";
+                for (int id : {chargeLimitId, chargeApplyId}) enable(id, reason.empty());
+                if (!edited_.contains(chargeLimitId)) {
+                    // A limit set outside the list selects the nearest one in it.
+                    int percent = limit.value("percent", 100), index = 0;
+                    for (int i = 1; i < int(std::size(chargeLimits)); ++i)
+                        if (std::abs(chargeLimits[i] - percent) < std::abs(chargeLimits[index] - percent)) index = i;
+                    // The caveat under the list comes and goes with a limit.
+                    if ((SendMessageW(get(chargeLimitId), CB_GETCURSEL, 0, 0) > 0) != (index > 0)) relayout = true;
+                    SendMessageW(get(chargeLimitId), CB_SETCURSEL, index, 0);
+                }
+                if (reason != support_.at(chargeSupportId).reason) {
+                    explain(chargeSupportId, reason, limit.value("report", true));
+                    relayout = true;
+                }
+            }
+            if (relayout) {
+                batteryLines_ = lines;
+                layoutPage(pages_[3]);
+            }
         }
         if (page == 3 && j.contains("batteryError"))
             set(batteryTextId,
@@ -3340,6 +3480,8 @@ private:
     std::wstring coolerStatus_ = L"Disconnected", coolerFirmware_;
     std::array<RECT, 8> infoCells_{};
     std::array<std::wstring, 8> infoText_;
+    int batteryLines_ = 10; // Lines of battery telemetry.
+    std::wstring modeNote_; // What the battery modes do on this firmware; empty where that is not known.
     std::map<int, int> detectedMa_;
     std::wstring cpuNote_, cpuPreset_, powerHint_, liveReason_, powerKey_, dlppcTip_, bypassText_;
     COLORREF bypassColor_ = 0;

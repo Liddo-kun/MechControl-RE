@@ -1167,6 +1167,105 @@ struct Bench {
 };
 // EC power-limit bypass (0x780) and the liquid cooler connection flag (0x7C7 bit 1). The fixture reports the
 // verified Intel EC version so IDY_7Y offers the bypass; existing fixtures omit 0x454 and keep it unavailable.
+void charge_limit(const std::filesystem::path& root) {
+    // The battery readings of the firmware that has the charge hold: four cells asking for 17.8 V, given 16.8 V.
+    auto battery = [](State& s) {
+        s.bytes[0x490] = 7;
+        s.bytes[0x4AB] = 90;
+    };
+    auto firmware = [&](State& s) {
+        battery(s);
+        for (auto [a, v] : std::initializer_list<std::pair<int, int>>{
+                 {0x491, 0xC0}, {0x30E, 0x45}, {0x30F, 0x88}, {0x522, 0xA0}, {0x523, 0x41}})
+            s.bytes[a] = static_cast<uint8_t>(v);
+    };
+    auto hold = [](State& s) { return std::pair(int(s.bytes[0x7F6]), s.bytes[0x7F4] << 8 | s.bytes[0x7F5]); };
+    auto hold_writes = [](State& s) {
+        return std::ranges::count_if(s.writes, [](const auto& w) { return w.first >= 0x7F4 && w.first <= 0x7F6; });
+    };
+    const int week = 7 * 24 * 60;
+    auto path = root / "charge-limit";
+    Rig r(path, true, {}, {}, {}, firmware);
+    auto& c = *r.controller;
+    auto& s = *r.state;
+    auto now = GetTickCount64() + 100000;
+    check(c.execute(ChargeLimitApply{80}).code == 0 && read_json(path / "settings.json")["chargeLimit"] == 80 &&
+              !hold_writes(s),
+          "charge limit is saved with the application settings and writes nothing by itself");
+    c.tick(now);
+    check(hold(s) == std::pair(100, 2), "a battery above the limit starts a two-minute hold with target 100");
+    c.tick(now += 5000);
+    check(hold(s) == std::pair(100, 2) && hold_writes(s) == 3, "a hold being checked is not rewritten");
+    s.bytes[0x7F5] = 1; // The EC counts a minute.
+    c.tick(now += 5000);
+    check(hold(s) == std::pair(100, week), "a hold the EC counted down is extended to a week");
+    s.writes.clear();
+    s.bytes[0x4AB] = 76;
+    c.tick(now += 30000);
+    check(!hold_writes(s), "a held battery inside the band stays held without writes");
+    s.bytes[0x4AB] = 75;
+    c.tick(now += 30000);
+    check(hold(s) == std::pair(100, 0), "five points below the limit the hold ends");
+    s.bytes[0x4AB] = 80;
+    c.tick(now += 30000);
+    check(hold(s) == std::pair(100, week), "back at the limit a confirmed hold is armed at full length");
+    s.bytes[0x490] = 6; // The adapter goes.
+    c.execute(AcEvent{false});
+    check(hold(s) == std::pair(100, 0), "losing the adapter ends the hold at once, without waiting for a tick");
+    s.writes.clear();
+    c.tick(now += 30000);
+    check(!hold_writes(s), "no hold is armed on battery, even at the limit");
+    s.bytes[0x490] = 7;
+    c.execute(AcEvent{true});
+    c.tick(now += 1000);
+    check(hold(s) == std::pair(100, week), "the adapter's return arms the hold again at the next tick");
+    auto read = *c.execute(PeripheralRead{true}).peripherals;
+    check(read["battery"]["chargeVoltage"]["targetMv"] == 16800 && read["battery"]["chargeVoltage"]["agedMv"] == 250 &&
+              read["battery"]["chargeLimit"]["blocked"] == true &&
+              read["battery"]["chargeLimit"]["minutesLeft"] == week,
+          "battery telemetry carries the charge voltage and the hold");
+    check(c.execute(ChargeLimitApply{100}).code == 0 && hold(s) == std::pair(100, 0),
+          "turning the limit off ends the hold at once");
+
+    std::filesystem::create_directories(root / "charge-limit-restarted");
+    write_json(root / "charge-limit-restarted/settings.json", Json{{"chargeLimit", 80}}, false);
+    Rig restarted(root / "charge-limit-restarted", true, {}, {}, {}, [&](State& state) {
+        firmware(state);
+        state.bytes[0x7F6] = 100;
+        state.bytes[0x7F5] = 200;
+    });
+    restarted.controller->tick(now);
+    check(hold(*restarted.state) == std::pair(100, week),
+          "a hold left by an earlier run is renewed without being checked again");
+
+    Rig other(root / "charge-limit-other", true, {}, {}, {}, battery);
+    check(other.controller->execute(ChargeLimitApply{80}).code == 1 && other.state->writes.empty() &&
+              !std::filesystem::exists(root / "charge-limit-other/settings.json"),
+          "firmware without the charge-voltage readings is refused before any write or save");
+    // Values that read like a hold of ours do not stand in for recognizing the firmware.
+    for (int limit : {80, 100}) {
+        auto dir = root / ("charge-limit-lookalike-" + std::to_string(limit));
+        std::filesystem::create_directories(dir);
+        write_json(dir / "settings.json", Json{{"chargeLimit", limit}}, false);
+        Rig lookalike(dir, true, {}, {}, {}, [&](State& state) {
+            battery(state);
+            state.bytes[0x7F6] = 100;
+            state.bytes[0x7F5] = 200;
+        });
+        lookalike.controller->tick(now);
+        auto shown = *lookalike.controller->execute(PeripheralRead{true}).peripherals;
+        check(lookalike.controller->execute(ChargeLimitApply{100}).code == 0 && !hold_writes(*lookalike.state) &&
+                  shown["battery"]["chargeLimit"]["blocked"] == false,
+              limit < 100 ? "unrecognized firmware whose registers read like a hold is not written with a limit set"
+                          : "unrecognized firmware whose registers read like a hold is not written with the limit off");
+    }
+
+    Rig stuck(root / "charge-limit-stuck", true, {}, {}, {}, firmware);
+    check(stuck.controller->execute(ChargeLimitApply{80}).code == 0, "recognized firmware accepts a limit");
+    for (int i = 0; i < 20; ++i) stuck.controller->tick(now += 5000);
+    check(hold(*stuck.state) == std::pair(0, 0) && stuck.controller->execute(ChargeLimitApply{70}).code == 1,
+          "an EC that does not count the hold down gets its registers back and no further holds");
+}
 void ec_bypass(const std::filesystem::path& root) {
     std::vector<std::string> logs;
     auto fresh = [](const std::function<void(State&)>& extra) {
@@ -2000,6 +2099,7 @@ int main(int argc, char** argv) {
         logo_validation(root);
         peripheral_regressions(root);
         ec_bypass(root);
+        charge_limit(root);
         monitor(root);
         x6fr(root);
         waits(root);

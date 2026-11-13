@@ -155,6 +155,12 @@ Registers: `0x7A6` (mode), `0x4AB` (SOC), `0x7B9`/`0x7D0` (charge limits). See 1
 
 **Write:** `WriteBitfield(0x7A6, 0x38, mode_value)`
 
+The modes set a charge voltage, not a percentage, and an old pack gets the lowest voltage in
+every mode (11.6.1).
+
+**Charge limit:** `0x7F6` = 100, then minutes into `0x7F4` (high) and `0x7F5` (low), blocks
+charging while the minutes last; minutes 0 ends it. Never write another target (11.6.1).
+
 ---
 
 ## 6. Logo LED (EC + HID -- both required)
@@ -363,7 +369,7 @@ Sent before keyboard OFF (other zones don't use this).
 
 ## 8. WriteGuard Rules
 
-### Allowlist (IDY_7Y -- 115 addresses)
+### Allowlist
 
 | Category | Addresses |
 |----------|-----------|
@@ -373,6 +379,7 @@ Sent before keyboard OFF (other zones don't use this).
 | Fan table CPU | `0xF00`-`0xF2F` (48) |
 | Fan table GPU | `0xF30`-`0xF5F` (48) |
 | Battery | `0x7A6` |
+| Charge hold | `0x7F4`, `0x7F5` (minutes), `0x7F6` (only ever 100) |
 | Logo/Lighting | `0x767`, `0x769`, `0x76A`, `0x76B`, `0x7AB`, `0x78C` |
 | Service init | `0x741` (activation), `0x7C6` (fan curve mode flag) |
 
@@ -665,8 +672,34 @@ Battery mode, charge limits, battery saver PL defaults.
 | `0x7A8` | R | ADDR_BATTERYSAVER_PL2_DEFAULT_VALUE | Battery saver mode PL2 default (watts) |
 | `0x7A9` | R | ADDR_BATTERYSAVER_PL4_DEFAULT_VALUE | Battery saver mode PL4 default (byte x2 = watts) |
 | `0x7AA` | R | ADDR_BATTERYSAVER_D_DEFAULT_VALUE | Battery saver mode "D" default value |
-| `0x7B9` | RW | ADDR_BATTERY_CHARGE_LIMIT_UP | Battery charge upper limit (reads 0 on IDY_7Y -- OEM app feature broken) |
-| `0x7D0` | RW | ADDR_BATTERY_CHARGE_LIMIT_DOWN | Battery charge lower limit (reads 0 on IDY_7Y -- OEM app feature broken) |
+| `0x7B9` | RW | ADDR_BATTERY_CHARGE_LIMIT_UP | `CGLM`. Bits 0-6 = limit, bit 7 = reached (EC-set, stops charging). Enforced only where `0x7C3` or `0x770` is 4; elsewhere the EC clears bit 7 every second, so a written limit does nothing (IDY_7Y). |
+| `0x7D0` | RW | ADDR_BATTERY_CHARGE_LIMIT_DOWN | Named a lower charge limit by the OEM app. The Intel EC 77.0 image never reads it as one. |
+| `0x7F4`-`0x7F5` | RW | (none) | Charge hold: minutes left, high byte first. The EC counts them down. See 11.6.1. |
+| `0x7F6` | RW | (none) | Charge hold target percent. MechControl writes only 100. See 11.6.1. |
+
+### 11.6.1 Charge voltage and charge hold
+
+Evidence, code addresses and hardware tests:
+[`notes/battery_charge_limiting_investigation.md`](notes/battery_charge_limiting_investigation.md).
+Found in the Intel X6AR (EC 77.0) and AMD X6FR images.
+
+- **Charge voltage:** the pack requests `0x30E:30F` mV (big-endian); the EC gives the charger
+  `0x522` (low), `0x523` (high), lower by 0-250 mV per cell in 50 mV steps. Cells: `0x491`
+  bits 7:6 (3 = four, 2 = three, else two). The step is the largest of the battery mode's
+  (Balanced 100, Stationary 200) and what age (`0x39D` months), cycle count and an internal
+  hours-near-full counter call for; any of those alone reaches 250.
+- **Age inputs:** manufacture date `0x314:315` (Smart Battery format) and the host date
+  `0x72D` year / `0x72E` month (BCD). `0x726` bits 0-2 are age-derating commands, one more
+  reason to write `0x726` masked.
+- **Charge hold:** while `0x7F4:7F5` minutes are left, a battery at or below the `0x7F6`
+  target is not charged, and a battery above it makes the EC report the adapter absent and
+  run the machine from the battery down to the target. With target 100 only the first can
+  happen. Tested on IDY_7Y: charging stops within 1 s and resumes within 2 s of minutes = 0.
+- **Recognizing the firmware:** MechControl uses the hold on any model whose charge-voltage
+  readings follow the arithmetic above, and only after the EC has counted a two-minute hold
+  down.
+- **Never write:** `0x727` bit 0 (forced run from the battery), `0x73F` bit 7 (repeating
+  discharge and recharge), a `0x7F6` target other than 100.
 
 ---
 
