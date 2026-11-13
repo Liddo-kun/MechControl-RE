@@ -87,6 +87,16 @@ the delayed GPU check reapplies currents a driver reload reset. Overrides staged
 by older releases (maximum only) are replaced for the next GPU start. NVML is opened
 and closed around each reading, because its handles crash when used after a GPU reset
 (a driver reset on waking from Modern Standby, a GPU restart or a driver install).
+`gpu_keepawake.*` is the opt-in GPU keep-awake (`gpuKeepAwake` in `settings.json`; the controller
+only stores it). It runs on the UI thread from the window's display, suspend, display-change and
+timer messages, because it must not share the worker's waits. While the screen is off, the PC is
+awake and the NVIDIA adapter drives the active internal panel (Windows display configuration, so
+not in hybrid mode), it does a 1x1 Direct3D clear and read-back every 3 s so that Windows does not
+power the GPU down. Before each tick it reads the GPU's power state from the PnP record and stops
+for the rest of that screen-off period if the GPU is not in D0 or the app was frozen; it also stops
+on Kernel-Power event 566 (going to sleep), since Modern Standby sends no suspend broadcast. The
+fault is waking a GPU that has just powered down, so it uses Direct3D only, the path reported safe,
+and the NVIDIA reads elsewhere skip a GPU outside D0. Direct3D and the event log API are delay-loaded.
 `peripherals.*`, `cooler.*` and `ble.*` own HID lighting and BLE operations. Queue
 acceptance is not completed cooler Apply or saved state. Unlocked GPU power writes
 qualify and maintain the live F7 laptop budget, which can fall below the VBIOS

@@ -42,11 +42,14 @@ add_library(foundation STATIC src/log.cpp src/worker.cpp src/counters.cpp
   "${CMAKE_CURRENT_BINARY_DIR}/mechcontrol_counters.h")
 target_include_directories(foundation PUBLIC src PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 target_link_libraries(foundation PUBLIC advapi32 windowsapp ec)
-add_executable(MechControl WIN32 src/ui.cpp src/fan_chart.cpp resources/app.rc
+add_executable(MechControl WIN32 src/ui.cpp src/fan_chart.cpp src/gpu_keepawake.cpp resources/app.rc
   "${CMAKE_CURRENT_BINARY_DIR}/counters.rc")
-# GDI+ draws the fan curves. Delay-loading keeps it out of the hidden tray app until a curve is shown.
-target_link_libraries(MechControl PRIVATE foundation comctl32 shell32 gdi32 comdlg32 gdiplus delayimp)
-target_link_options(MechControl PRIVATE /DELAYLOAD:gdiplus.dll /MANIFEST:EMBED
+# GDI+ draws the fan curves and Direct3D runs the GPU keep-awake. Delay-loading keeps them out of the hidden tray
+# app until a curve is shown or the keep-awake first runs.
+target_link_libraries(MechControl PRIVATE foundation comctl32 shell32 gdi32 comdlg32 gdiplus d3d11 dxgi wevtapi
+  cfgmgr32 delayimp)
+target_link_options(MechControl PRIVATE /DELAYLOAD:gdiplus.dll /DELAYLOAD:d3d11.dll /DELAYLOAD:dxgi.dll
+  /DELAYLOAD:wevtapi.dll /MANIFEST:EMBED
   "/MANIFESTUAC:level='requireAdministrator' uiAccess='false'"
   /MANIFESTINPUT:${CMAKE_CURRENT_SOURCE_DIR}/resources/app.manifest)
 add_custom_command(TARGET MechControl POST_BUILD
@@ -74,10 +77,10 @@ if(BUILD_TESTING)
   target_link_libraries(ec-check PRIVATE foundation)
   add_dependencies(ec-check MechControl)
   add_test(NAME ec COMMAND ec-check)
-  add_executable(ui-pages-check WIN32 src/ui.cpp src/fan_chart.cpp resources/app.rc "${CMAKE_CURRENT_BINARY_DIR}/counters.rc")
+  add_executable(ui-pages-check WIN32 src/ui.cpp src/fan_chart.cpp src/gpu_keepawake.cpp resources/app.rc "${CMAKE_CURRENT_BINARY_DIR}/counters.rc")
   target_compile_definitions(ui-pages-check PRIVATE MECHCONTROL_PAGE_CHECK)
-  target_link_libraries(ui-pages-check PRIVATE foundation comctl32 shell32 gdi32 comdlg32 gdiplus delayimp dwmapi)
-  target_link_options(ui-pages-check PRIVATE /DELAYLOAD:gdiplus.dll /MANIFEST:EMBED "/MANIFESTUAC:level='requireAdministrator' uiAccess='false'" /MANIFESTINPUT:${CMAKE_CURRENT_SOURCE_DIR}/resources/app.manifest)
+  target_link_libraries(ui-pages-check PRIVATE foundation comctl32 shell32 gdi32 comdlg32 gdiplus d3d11 dxgi wevtapi cfgmgr32 delayimp dwmapi)
+  target_link_options(ui-pages-check PRIVATE /DELAYLOAD:gdiplus.dll /DELAYLOAD:d3d11.dll /DELAYLOAD:dxgi.dll /DELAYLOAD:wevtapi.dll /MANIFEST:EMBED "/MANIFESTUAC:level='requireAdministrator' uiAccess='false'" /MANIFESTINPUT:${CMAKE_CURRENT_SOURCE_DIR}/resources/app.manifest)
   add_dependencies(ui-pages-check MechControl)
   add_executable(configuration-check tests/configuration_check.cpp)
   target_link_libraries(configuration-check PRIVATE configuration)

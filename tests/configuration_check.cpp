@@ -290,6 +290,9 @@ int main(int argc, char** argv) try {
     require(store.load(3)->name == slot.name, "Rename independent of slot contents");
     store.set_disable_dlppc(true);
     require(ProfileStore(persistence).settings().disable_dlppc, "Global DLPPC persistence");
+    require(!store.settings().gpu_keep_awake, "GPU keep-awake off by default");
+    store.set_gpu_keep_awake(true);
+    require(ProfileStore(persistence).settings().gpu_keep_awake, "GPU keep-awake persistence");
     store.rename(5, "Keep name");
     auto before = read_json(persistence / "settings.json");
     {

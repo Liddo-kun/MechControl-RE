@@ -233,6 +233,7 @@ void to_json(Json& j, const ThermalState& v) {
 void to_json(Json& j, const Settings& v) {
     j = {{"lastProfile", v.last_slot},
          {"disableDlppc", v.disable_dlppc},
+         {"gpuKeepAwake", v.gpu_keep_awake},
          {"chargeLimit", v.charge_limit},
          {"thermalProtection", v.thermal}};
     j["profileNames"] = Json::array();
@@ -337,6 +338,7 @@ void ProfileStore::load_settings() {
             }
             read_field(root, "profileNames", s.names);
             read_field(root, "disableDlppc", s.disable_dlppc);
+            read_field(root, "gpuKeepAwake", s.gpu_keep_awake);
             read_field(root, "chargeLimit", s.charge_limit);
             if (s.charge_limit < charge_limit_min || s.charge_limit > 100) {
                 s.charge_limit = 100;
@@ -410,6 +412,16 @@ void ProfileStore::set_disable_dlppc(bool value) {
         save_settings();
     } catch (...) {
         settings_.disable_dlppc = old;
+        throw;
+    }
+}
+void ProfileStore::set_gpu_keep_awake(bool value) {
+    bool old = settings_.gpu_keep_awake;
+    settings_.gpu_keep_awake = value;
+    try {
+        save_settings();
+    } catch (...) {
+        settings_.gpu_keep_awake = old;
         throw;
     }
 }

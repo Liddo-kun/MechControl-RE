@@ -137,6 +137,8 @@ public:
     static std::filesystem::path recovery_path();
     static bool saved();
     bool awake() const;
+    // The device's last power state as Windows recorded it: 0-3 for D0-D3, -1 when unknown. Does not touch the GPU.
+    static int power_state(const std::wstring& instance);
     Bios open(const Bytes&, bool& staged, bool& discarded);
     void stage(const Bios&, const std::vector<Record>&);
     bool matches(const std::vector<Record>&);

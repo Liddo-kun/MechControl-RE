@@ -1,6 +1,7 @@
 #include "worker.h"
 #include "fan_chart.h"
 #include "config_text.h"
+#include "gpu_keepawake.h"
 #ifdef MECHCONTROL_WITH_CLI
 #include "cli_server.h"
 #endif
@@ -68,6 +69,7 @@ enum Id {
     unlockSupportId,
     boardSupportId,
     bypassSupportId,
+    keepAwakeId,
     boostId = 300,
     switchId,
     switchMsId,
@@ -662,6 +664,7 @@ private:
         check(0, dlppcId, L"Disable DLPPC (AI-controlled GPU memory clock)");
         check(0, dbOnId, L"Enable Dynamic Boost");
         slider(0, dbId, L"Dynamic Boost Max", 0, 1, 0);
+        check(0, keepAwakeId, L"Display-off wake crash workaround (dGPU mode)");
         slider(0, nvId, L"NVVDD / Core current limit", 0, 1, 0);
         slider(0, msId, L"MSVDD / Fabric current limit", 0, 1, 0);
         slider(0, inputId, L"Board input current limit", 0, 1, 0);
@@ -686,6 +689,16 @@ private:
             L"Turns off on sleep, display off, AC loss, a failsafe trip and exit. Not saved.", TTF_IDISHWND);
         tip(reinterpret_cast<UINT_PTR>(get(coolerFlagId)),
             L"The flag the OEM app sets when its cooler connects. Saved with the profile. Does not connect the cooler.",
+            TTF_IDISHWND);
+        tip(reinterpret_cast<UINT_PTR>(get(keepAwakeId)),
+            L"Works around an NVIDIA driver fault: if the GPU wakes just after Windows powered it down with the screen "
+            L"off, the display may not come back (driver reset, black screen, sometimes a bluescreen).\n\n"
+            L"While the screen is off and the PC is awake, MechControl gives the GPU a tiny piece of Direct3D work "
+            L"every 3 seconds, so Windows never powers it down. It acts only while the NVIDIA GPU drives the laptop "
+            L"screen directly (hybrid mode off), never wakes a GPU that is already powered down, and stops when the "
+            L"PC goes to sleep, so the GPU still powers down in sleep.\n\n"
+            L"Cost: the GPU's idle power (about 7 W on an RTX 5090 Laptop) while the screen is off and the PC is "
+            L"awake. Saved as an application setting, not in a profile.",
             TTF_IDISHWND);
         for (int id : {nvId, msId, inputId})
             tip(reinterpret_cast<UINT_PTR>(get(id)),
@@ -770,6 +783,9 @@ private:
         updating_ = false;
         delivery_->attach(window_);
         busy(true);
+        // Never with the fake hardware of the UI checks. The saved setting arrives with the first presentation.
+        if (workerOptions_.nvidia_hardware)
+            keepAwake_.emplace(window_, [this](const std::string& text) { log_.write(text); });
         worker_ = std::make_unique<ControlWorker>(delivery_, log_, std::move(workerOptions_));
 #ifdef MECHCONTROL_WITH_CLI
         cli_ = std::make_unique<CliServer>(*worker_, log_);
@@ -1020,6 +1036,7 @@ private:
         s.slide(dbId, c, gpu);
         support(gpuSupportId, true, errorColor, 0);
         if (gpu) note(powerHint_, muted, 0);
+        s.check(keepAwakeId, true, font_);
         s.close();
         s.y += ref(6);
         s.put(get(powerApplyId), s.x, s.y, ref(110), s.button);
@@ -2252,13 +2269,16 @@ private:
         }
         case dlppcId: request(DlppcApply{checked(id)}); break;
         case bypassId:
-        case coolerFlagId: {
+        case coolerFlagId:
+        case keepAwakeId: {
             bool on = checked(id);
             updating_ = true;
             SendMessageW(get(id), BM_SETCHECK, on ? BST_UNCHECKED : BST_CHECKED, 0);
             updating_ = false; // The result rebinds it.
             if (id == coolerFlagId)
                 request(CoolerFlag{on});
+            else if (id == keepAwakeId)
+                request(GpuKeepAwakeApply{on});
             else if (
                 !on ||
                 confirm(
@@ -2660,6 +2680,10 @@ private:
         if (readPage == 1) state_.erase("fanError");
         if (readPage == 3) state_.erase("batteryError");
         for (auto i = j.begin(); i != j.end(); ++i) state_[i.key()] = i.value();
+        if (j.contains("gpuKeepAwake")) {
+            checked(keepAwakeId, j["gpuKeepAwake"].get<bool>());
+            if (keepAwake_) keepAwake_->enable(j["gpuKeepAwake"].get<bool>());
+        }
         if (initial && !ready_) {
             ready_ = true;
             busy(false);
@@ -3302,6 +3326,7 @@ private:
         delivery_->close();
         for (auto notify : powerNotifications_)
             if (notify) UnregisterPowerSettingNotification(notify);
+        keepAwake_.reset();
 #ifdef MECHCONTROL_WITH_CLI
         cli_.reset();
 #endif
@@ -3330,7 +3355,14 @@ private:
                 } else
                     tray();
             }
+            if (keepAwake_) keepAwake_->timer(wp);
             return 0;
+        case GpuKeepAwake::sleepMessage:
+            if (keepAwake_) keepAwake_->goingToSleep();
+            return 0;
+        case WM_DISPLAYCHANGE:
+            if (keepAwake_) keepAwake_->topology();
+            break;
         case WM_SHOWWINDOW:
             if (worker_) worker_->request(Visibility{wp != 0});
             if (wp && ready_) bindPage(TabCtrl_GetCurSel(tabs_));
@@ -3436,6 +3468,13 @@ private:
                 show();
             return 0;
         case WM_POWERBROADCAST:
+            if (keepAwake_ && wp == PBT_POWERSETTINGCHANGE) {
+                auto s = reinterpret_cast<const POWERBROADCAST_SETTING*>(lp);
+                if (s->PowerSetting == displayState && s->DataLength >= sizeof(DWORD))
+                    keepAwake_->display(*reinterpret_cast<const DWORD*>(s->Data));
+            }
+            if (keepAwake_ && (wp == PBT_APMSUSPEND || wp == PBT_APMRESUMEAUTOMATIC || wp == PBT_APMRESUMESUSPEND))
+                keepAwake_->suspend(wp == PBT_APMSUSPEND);
             if (worker_ && wp == PBT_APMPOWERSTATUSCHANGE) {
                 SYSTEM_POWER_STATUS s{};
                 if (GetSystemPowerStatus(&s) && s.ACLineStatus != 255) worker_->request(AcEvent{s.ACLineStatus == 1});
@@ -3513,6 +3552,7 @@ private:
     std::shared_ptr<Delivery> delivery_;
     WorkerOptions workerOptions_;
     std::unique_ptr<ControlWorker> worker_;
+    std::optional<GpuKeepAwake> keepAwake_;
 #ifdef MECHCONTROL_WITH_CLI
     std::unique_ptr<CliServer> cli_;
 #endif

@@ -51,6 +51,10 @@ struct BatteryApply {
 struct ChargeLimitApply {
     int percent;
 };
+// Application setting; the UI owns the keep-awake itself (GpuKeepAwake).
+struct GpuKeepAwakeApply {
+    bool enabled;
+};
 struct LightingApply {
     int zone;
     config::Zone settings;
@@ -137,7 +141,7 @@ using ControlCommand =
                  SlotRename, SlotClear, DefaultsApply, ThermalReset, ThermalTest, Visibility, Resume, AcEvent,
                  GpuUnlock, DlppcApply, CliCommand, LightingApply, LightingIdle, DimmingApply, PeripheralRead,
                  CoolerRequest, BatteryPage, UiRead, UiPage, UiPreflight, FanMaster, FanEdit, FanRead, PowerTransition,
-                 EcBypassApply, CoolerFlag, ChargeLimitApply>;
+                 EcBypassApply, CoolerFlag, ChargeLimitApply, GpuKeepAwakeApply>;
 // How the worker treats each command. Every command needs an entry: command_traits() fails to compile without one.
 struct CommandTraits {
     bool notification = false; // Lifecycle event, run even during the wait for a blocking device operation.
@@ -168,6 +172,7 @@ inline CommandTraits traits(const FanRead&) { return {.fresh = tab::fans}; }
 inline CommandTraits traits(const ProtectionApply&) { return {.stale = tab::failsafe}; }
 inline CommandTraits traits(const BatteryApply&) { return {.stale = tab::battery}; }
 inline CommandTraits traits(const ChargeLimitApply&) { return {.stale = tab::battery}; }
+inline CommandTraits traits(const GpuKeepAwakeApply&) { return {.present = true}; }
 inline CommandTraits traits(const LightingApply&) { return {.stale = tab::lighting}; }
 inline CommandTraits traits(const LightingIdle&) { return {.stale = tab::lighting}; }
 inline CommandTraits traits(const DimmingApply&) { return {.stale = tab::lighting}; }
@@ -283,7 +288,8 @@ private:
         run(const LightingApply&), run(const LightingIdle&), run(const DimmingApply&), run(const PeripheralRead&),
         run(const CoolerRequest&), run(const BatteryPage&), run(const UiRead&), run(const UiPage&),
         run(const UiPreflight&), run(const FanMaster&), run(const FanEdit&), run(const FanRead&),
-        run(const PowerTransition&), run(const EcBypassApply&), run(const CoolerFlag&), run(const ChargeLimitApply&);
+        run(const PowerTransition&), run(const EcBypassApply&), run(const CoolerFlag&), run(const ChargeLimitApply&),
+        run(const GpuKeepAwakeApply&);
     cli::Reply cli(const std::vector<std::string>&);
     config::Json status();
     config::Json cpu_status(), gpu_status(bool presentation = false), fans_status(), gpu_telemetry(), gpu_budget();
