@@ -52,6 +52,16 @@ because nothing is running to stop it. One plugged in while asleep may do the sa
 **Off** before you remove MechControl; otherwise charging stays blocked until that week
 runs out.
 
+## Display-off wake crash workaround
+
+**Power > Display-off wake crash workaround (dGPU mode)** works around an NVIDIA driver fault
+where the display may not come back (driver reset, black screen, sometimes a bluescreen) if
+the GPU wakes just after Windows powered it down with the screen off. While the screen is
+off and the PC is awake, MechControl gives the GPU a tiny piece of Direct3D work every 3
+seconds. It acts only while the NVIDIA GPU drives the laptop screen directly (hybrid mode
+off) and stops when the PC sleeps. It costs the GPU's idle power while the screen is off.
+It is off by default.
+
 ## Command line
 
 The `-cli` archive includes `mcctl.exe`. From an elevated shell it reads and changes

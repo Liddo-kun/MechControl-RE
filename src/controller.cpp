@@ -1470,6 +1470,10 @@ ControlResult Controller::run(const ChargeLimitApply& c) {
     if (!charge_note_.empty()) diagnostic_("[Charge limit] " + (charge_note_ = "Off"));
     return {.text = "Charge limit off", .applied = true};
 }
+ControlResult Controller::run(const GpuKeepAwakeApply& c) {
+    store_.set_gpu_keep_awake(c.enabled); // The UI runs it; see GpuKeepAwake.
+    return {.text = c.enabled ? "GPU keep-awake on" : "GPU keep-awake off", .applied = true};
+}
 ControlResult Controller::run(const SwitchApply& c) {
     speed(c.enabled, c.milliseconds);
     return {.applied = true};

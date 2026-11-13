@@ -102,15 +102,20 @@ std::filesystem::path Store::recovery_path() {
     return path / L"MechControl/NvidiaOverrides/originals.txt";
 }
 bool Store::saved() { return std::filesystem::exists(recovery_path()); }
-bool Store::awake() const {
+bool Store::awake() const { return power_state(instance) == 0; }
+int Store::power_state(const std::wstring& instance) {
     DEVINST node = 0;
     if (instance.empty() || CM_Locate_DevNodeW(&node, const_cast<wchar_t*>(instance.c_str()), 0) != CR_SUCCESS)
-        return false;
+        return -1;
     std::array<uint8_t, 64> data{};
     ULONG size = static_cast<ULONG>(data.size());
     DEVPROPTYPE type = 0;
-    return CM_Get_DevNode_PropertyW(node, &DEVPKEY_Device_PowerData, &type, data.data(), &size, 0) == CR_SUCCESS &&
-           size >= 8 && u32(data, 4) == 1;
+    // CM_POWER_DATA.PD_MostRecentPowerState: PowerDeviceD0 = 1.
+    if (CM_Get_DevNode_PropertyW(node, &DEVPKEY_Device_PowerData, &type, data.data(), &size, 0) != CR_SUCCESS ||
+        size < 8)
+        return -1;
+    auto state = u32(data, 4);
+    return state >= 1 && state <= 4 ? int(state) - 1 : -1;
 }
 std::map<std::string, Bytes> Store::records() {
     std::map<std::string, Bytes> result;
