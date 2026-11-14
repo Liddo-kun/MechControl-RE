@@ -1260,6 +1260,19 @@ void charge_limit(const std::filesystem::path& root) {
                           : "unrecognized firmware whose registers read like a hold is not written with the limit off");
     }
 
+    // GM5TG0O (EC 79.0): the same charge-voltage variables, a GPU without a module ID and no charge hold.
+    Rig older(root / "charge-limit-older", true, {}, {}, {}, [&](State& state) {
+        firmware(state);
+        state.bytes[0x7D2] = 0;
+        state.bytes[0x456] = 0xC8;
+    });
+    auto unoffered = *older.controller->execute(PeripheralRead{true}).peripherals;
+    check(older.controller->execute(ChargeLimitApply{80}).code == 1 && older.state->writes.empty() &&
+              !unoffered["battery"].contains("chargeLimit") && unoffered["battery"].contains("chargeVoltage") &&
+              older.controller->presentation(true, false, -2)["chargeLimitOffered"] == false &&
+              c.presentation(true, false, -2)["chargeLimitOffered"] == true,
+          "firmware older than the GPU module ID gets no charge limit, whatever its charge-voltage readings");
+
     Rig stuck(root / "charge-limit-stuck", true, {}, {}, {}, firmware);
     check(stuck.controller->execute(ChargeLimitApply{80}).code == 0, "recognized firmware accepts a limit");
     for (int i = 0; i < 20; ++i) stuck.controller->tick(now += 5000);

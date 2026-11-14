@@ -120,12 +120,14 @@ struct Hardware {
         return (*v & 0x80) != 0;
     }
     bool liquid_cooling() const { return (at(0x7A4).value_or(0) & 0x80) != 0; }
-    // Whether a discrete GPU is fitted; empty when the EC does not say. The GPU module ID (0x7D2) is nonzero
-    // with one. Firmware older than that register leaves it 0 and reports the GPU in system ID (0x456) bit 7.
+    // Firmware older than the GPU module ID (0x7D2): it leaves that 0 and reports a GPU in system ID (0x456)
+    // bit 7. The one such image read (GMxTG0x, EC 79.0) also has no charge hold.
+    bool before_gpu_module() const { return at(0x7D2) == 0 && (at(0x456).value_or(0) & 0x80) != 0; }
+    // Whether a discrete GPU is fitted; empty when the EC does not say.
     std::optional<bool> gpu() const {
         auto module = at(0x7D2);
         if (!module || *module == 255) return {};
-        return *module != 0 || (at(0x456).value_or(0) & 0x80) != 0;
+        return *module != 0 || before_gpu_module();
     }
     std::map<std::string, Limit> extract_limits() const;
     std::optional<std::map<std::string, Mode>> extract_modes(bool absolute) const;

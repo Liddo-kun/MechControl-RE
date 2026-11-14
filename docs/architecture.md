@@ -75,7 +75,10 @@ week-long hold once the charge reaches the limit on the adapter, and ends it fiv
 below. Losing the adapter ends it at once, so no hold is left armed on battery. The hold
 stays in the EC while the app is not running. No profile enables this. Reads of the EC's
 charge-voltage variables recognize the firmware family, and each run's first hold is a
-two-minute one that the EC must count down before it is trusted. Where those variables are recognized, the Battery page
+two-minute one that the EC must count down before it is trusted. Firmware that predates the GPU
+module ID (`0x7D2` = 0 with a GPU in `0x456` bit 7) is known to lack the hold: it is refused before
+those checks and the Battery page has no Charge Limit section. Elsewhere an unavailable limit
+is greyed with its reason. Where those variables are recognized, the Battery page
 shows them and says what the battery modes do to the charge voltage. System Info shows the
 EC's record of the last power-off.
 

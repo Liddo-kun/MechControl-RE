@@ -1265,23 +1265,30 @@ private:
             s.y =
                 s.paragraph(modeNote_, s.left + s.pad, s.y + ref(8), s.end - s.pad, GetSysColor(COLOR_GRAYTEXT), font_);
         s.close();
-        s.open(L"Charge Limit");
-        s.y += ref(4);
-        int limit = s.extent(font_, L"Off (charge to 100%)") + ref(50);
-        int list = r.bottom - r.top, row = std::max(list, s.button);
-        s.put(get(chargeLimitId), s.left, s.y + (row - list) / 2, limit, ref(300));
-        s.put(get(chargeApplyId), s.left + limit + ref(12), s.y + (row - s.button) / 2, ref(110), s.button);
-        s.y += row + ref(8);
-        s.y = s.paragraph(
-            L"On the adapter, charging stops at this level and resumes five points below it. The EC keeps charging blocked for up to a week while MechControl is not running. This is a setting of the machine, not of a profile.",
-            s.left + s.pad, s.y, s.end - s.pad, GetSysColor(COLOR_GRAYTEXT), font_);
-        // The caveat shows while a limit is selected, applied or not, in the normal text colour so that it is read.
-        if (SendMessageW(get(chargeLimitId), CB_GETCURSEL, 0, 0) > 0)
+        // Firmware known to have no charge hold gets no section.
+        if (chargeOffered_) {
+            s.open(L"Charge Limit");
+            s.y += ref(4);
+            int limit = s.extent(font_, L"Off (charge to 100%)") + ref(50);
+            int list = r.bottom - r.top, row = std::max(list, s.button);
+            s.put(get(chargeLimitId), s.left, s.y + (row - list) / 2, limit, ref(300));
+            s.put(get(chargeApplyId), s.left + limit + ref(12), s.y + (row - s.button) / 2, ref(110), s.button);
+            s.y += row + ref(8);
             s.y = s.paragraph(
-                L"This is a software-controlled charge limit. In rare cases the battery will not charge while the app is not running, such as when the laptop is put into deep sleep while plugged in, then unplugged, allowed to drain, and plugged in again without being woken.",
-                s.left + s.pad, s.y + ref(4), s.end - s.pad, GetSysColor(COLOR_BTNTEXT), font_);
-        s.supportNote(chargeSupportId, true, errorColor, s.left + s.pad, ref(3), s.end - s.left - 2 * s.pad);
-        s.close();
+                L"On the adapter, charging stops at this level and resumes five points below it. The EC keeps charging blocked for up to a week while MechControl is not running. This is a setting of the machine, not of a profile.",
+                s.left + s.pad, s.y, s.end - s.pad, GetSysColor(COLOR_GRAYTEXT), font_);
+            // The caveat shows while a limit is selected, applied or not, in the normal text colour so that it is
+            // read.
+            if (SendMessageW(get(chargeLimitId), CB_GETCURSEL, 0, 0) > 0)
+                s.y = s.paragraph(
+                    L"This is a software-controlled charge limit. In rare cases the battery will not charge while the app is not running, such as when the laptop is put into deep sleep while plugged in, then unplugged, allowed to drain, and plugged in again without being woken.",
+                    s.left + s.pad, s.y + ref(4), s.end - s.pad, GetSysColor(COLOR_BTNTEXT), font_);
+            s.supportNote(chargeSupportId, true, errorColor, s.left + s.pad, ref(3), s.end - s.left - 2 * s.pad);
+            s.close();
+        } else {
+            for (int id : {chargeLimitId, chargeApplyId}) s.put(get(id), 0, 0, 0, 0, false);
+            s.supportNote(chargeSupportId, false, errorColor, 0, 0, 0);
+        }
         s.open(L"Battery Telemetry");
         bool telemetry = support_.at(batterySupportId).reason.empty();
         // The edit control insets its text by a few pixels.
@@ -2654,8 +2661,10 @@ private:
                 explain(chargeSupportId, L"");
             }
             auto reason = battery ? std::wstring() : disabledReason(L"Battery charge mode and telemetry", "battery");
-            if (reason != support_.at(batterySupportId).reason) {
+            bool offered = state_.value("chargeLimitOffered", true);
+            if (reason != support_.at(batterySupportId).reason || offered != chargeOffered_) {
                 explain(batterySupportId, reason);
+                chargeOffered_ = offered;
                 layoutPage(pages_[3]);
             }
             if (state_.contains("batteryMode") && !edited_.contains(batteryModeId))
@@ -3519,8 +3528,9 @@ private:
     std::wstring coolerStatus_ = L"Disconnected", coolerFirmware_;
     std::array<RECT, 8> infoCells_{};
     std::array<std::wstring, 8> infoText_;
-    int batteryLines_ = 10; // Lines of battery telemetry.
-    std::wstring modeNote_; // What the battery modes do on this firmware; empty where that is not known.
+    int batteryLines_ = 10;     // Lines of battery telemetry.
+    bool chargeOffered_ = true; // The Battery page has its Charge Limit section.
+    std::wstring modeNote_;     // What the battery modes do on this firmware; empty where that is not known.
     std::map<int, int> detectedMa_;
     std::wstring cpuNote_, cpuPreset_, powerHint_, liveReason_, powerKey_, dlppcTip_, bypassText_;
     COLORREF bypassColor_ = 0;

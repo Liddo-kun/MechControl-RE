@@ -235,7 +235,8 @@ int main(int argc, char** argv) try {
     require(validate_startup(p, read, true, {}, "intel").cpu_power(), "Matching vendor enabled");
     require(!validate_startup(p, read, false, {}, "intel").gpu_power(), "Absent GPU gated");
     Hardware module;
-    module.bytes = {{0x7D2, 0}, {0x456, 0x48}};
+    module.bytes[0x7D2] = 0;
+    module.bytes[0x456] = 0x48;
     require(module.gpu() == false, "No GPU module ID and no system ID flag is no GPU");
     module.bytes[0x456] = 0xC8; // GM5TG0O, EC 79.0: the firmware has no module ID register.
     require(module.gpu() == true && validate_startup(p, read, module.gpu(), {}, "intel").gpu_power(),

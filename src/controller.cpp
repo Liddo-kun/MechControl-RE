@@ -717,6 +717,9 @@ void Controller::battery(int mode) {
 // Why no hold can be armed, from reads alone. Empty when one can.
 std::string Controller::charge_unavailable() {
     if (!features_.battery()) return "battery control is disabled";
+    // Its charge-voltage readings are those of the firmware that has the hold, with the cell count kept
+    // elsewhere, so they could pass the check below. 0x7F6 is an unrelated countdown there.
+    if (session_.hardware.before_gpu_module()) return "this EC firmware has no charge hold";
     if (hold_ == Hold::unsupported) return charge_reason_;
     if (hold_ != Hold::unknown) return {};
     auto& ec = session_.transport();
@@ -733,6 +736,7 @@ std::string Controller::charge_unavailable() {
 Json Controller::battery_status() {
     auto& ec = session_.transport();
     Json j = battery_telemetry(ec);
+    if (session_.hardware.before_gpu_module()) return j; // The page has no Charge Limit section to fill.
     int limit = store_.settings().charge_limit;
     auto hold = read_hold(ec);
     auto why = charge_unavailable();

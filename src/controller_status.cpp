@@ -48,6 +48,8 @@ Json Controller::presentation(bool read, bool gpu_live, int page) {
         j["dutyBaseCpu"] = hex(p.fan_table.cpu_duty);
         j["dutyBaseGpu"] = hex(p.fan_table.gpu_duty);
         if (features_.battery()) j["batteryRegister"] = p.reg("batteryMode");
+        // Firmware known to have no charge hold gets no Charge Limit section, not a greyed one.
+        j["chargeLimitOffered"] = !session_.hardware.before_gpu_module();
         for (std::string key : {"cpuTemp", "gpuTemp"})
             if (p.registers.contains(key)) j[key + "Register"] = p.reg(key);
         j["modes"] = Json::array();
