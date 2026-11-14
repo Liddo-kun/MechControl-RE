@@ -84,8 +84,6 @@ WriteGuard::WriteGuard(EcTransport& ec, const config::MachineProfile& profile, b
     : ec_(ec), read_only_(read_only), allow_(writable(profile)), redirects_(profile.expanded_redirects()),
       wait_(std::move(wait)) {
     if (!wait_) wait_ = [](unsigned ms) { std::this_thread::sleep_for(std::chrono::milliseconds(ms)); };
-    if (auto i = profile.bitfields.find("whisperModeApply"); i != profile.bitfields.end())
-        requests_[config::hex(i->second.reg)] = i->second.get_mask();
 }
 void WriteGuard::admit(int32_t address) const {
     if (read_only_) throw std::runtime_error("EC diagnostic session is read-only");
@@ -102,8 +100,8 @@ void WriteGuard::write_verify(int32_t address, uint8_t value) {
             if ((ec_.read(config::hex(i->second.read_addr)) & mask) == (value & mask)) return;
         }
     } else {
-        auto request = requests_.find(address);
-        uint8_t kept = request == requests_.end() ? 255 : static_cast<uint8_t>(~request->second);
+        // 0x7C5 bit 6 is a request that some firmware clears once it has acted, so a readback cannot confirm it.
+        uint8_t kept = address == 0x7C5 ? 0xBF : 0xFF;
         if (((ec_.read(address) ^ value) & kept) == 0) return;
         ec_.write(address, value);
         if (((ec_.read(address) ^ value) & kept) == 0) return;

@@ -323,7 +323,7 @@ void Lighting::zone(int z, const Zone& value, bool flash, bool color_only) {
         auto& p = session_.profile;
         std::vector<EcWrite> writes;
         if (v.enabled && b) {
-            if (!color_only) writes = {{p.reg("logoTrigger"), 0}, {p.reg("fanCurveEnable"), 0x20, 0x20}};
+            if (!color_only) writes = {{p.reg("logoTrigger"), 0}};
             for (auto [name, c] : {std::pair{"logoR", v.r}, {"logoG", v.g}, {"logoB", v.b}})
                 writes.push_back({p.reg(name), static_cast<uint8_t>(rounded(c * 60.0 / 255))});
             constexpr uint8_t levels[]{1, 0x21, 0x41, 0x61, 0x81};

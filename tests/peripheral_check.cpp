@@ -72,8 +72,8 @@ void lighting(const std::filesystem::path& root) {
     owner.change(3, Zone{true, 255, 128, 0, 75});
     check(state->writes ==
               std::vector<std::pair<int, int>>{
-                  {0x767, 0}, {0x7C5, 0xE5}, {0x769, 60}, {0x76A, 30}, {0x76B, 0}, {0x7AB, 0x61}, {0x78C, 0x10}},
-          "logo ordered guarded writes preserve shared fan-enable bits and scale RGB");
+                  {0x767, 0}, {0x769, 60}, {0x76A, 30}, {0x76B, 0}, {0x7AB, 0x61}, {0x78C, 0x10}},
+          "logo ordered guarded writes scale RGB and leave the Whisper Mode switch in 0x7C5 alone");
     auto logo = owner.logo();
     check(logo.enabled && logo.brightness == 75 && logo.r == 255 && logo.g == 128,
           "logo source-compatible EC readback");

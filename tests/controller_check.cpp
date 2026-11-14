@@ -362,8 +362,8 @@ void startup_degradation(const std::filesystem::path& root) {
               errors[1].find("not acknowledged") != std::string::npos,
           "unacknowledged activation is a startup warning, not a controller failure");
 }
-// A GM7ZG as its owner's reports show it (baseboard GMxZGxx, EC 96.0): the EC keeps 0x741 bit 2 for itself, and
-// bits 6:5 of 0x7C5 switch NVIDIA Whisper Mode, bit 6 being a request the EC clears.
+// A GM7ZG as its owner's reports show it (baseboard GMxZGxx, EC 96.0): the EC keeps 0x741 bit 2 for itself, clears
+// the Whisper Mode request (0x7C5 bit 6) once it has told the driver, and holds a whisper level in 0x7C6.
 void whisper_firmware(const std::filesystem::path& root) {
     auto path = root / "whisper-firmware";
     std::filesystem::create_directories(path);

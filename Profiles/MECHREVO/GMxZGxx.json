@@ -30,9 +30,7 @@
   },
   "limits": {},
   "bitfields": {
-    "fanCurveLatch": { "register": "0x7C6", "mask": "0x04" },
-    "whisperMode": { "register": "0x7C5", "bit": 5 },
-    "whisperModeApply": { "register": "0x7C5", "bit": 6 }
+    "fanCurveLatch": { "register": "0x7C6", "mask": "0x04" }
   },
   "batteryModes": [],
   "verifyRedirect": {}

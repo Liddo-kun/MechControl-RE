@@ -388,22 +388,17 @@ bool Controller::initialize(std::vector<std::string>& errors) {
     const auto& p = session_.profile;
     // On firmware that reports acceptance, the EC clears bit 2 of the 5 written. Elsewhere bit 2 is the EC's own.
     bool ack = p.activation_ack;
-    // Bits 6:5 of 0x7C5 as the reference writes them. Where the profile names them as the NVIDIA Whisper Mode
-    // switch and its "tell the driver" request, that sets Whisper Mode's frame-rate cap; it is turned off as the
-    // OEM service does outside its quiet mode, with the level the driver reported (re/register_reference.md 11.8).
-    std::vector<EcWrite> mode{{0x7C5, 96, 96}};
-    auto whisper = p.bitfields.find("whisperMode"), request = p.bitfields.find("whisperModeApply");
-    if (whisper != p.bitfields.end() && request != p.bitfields.end()) {
-        uint8_t apply = request->second.get_mask();
-        mode = {{hex(whisper->second.reg), apply, static_cast<uint8_t>(apply | whisper->second.get_mask())},
-                {0x7C6, 0, 3}};
-    }
+    // Bits 6:5 of 0x7C5 are the NVIDIA Whisper Mode switch and the request that makes the EC pass it to the driver.
+    // The reference set both, which keeps the frame-rate cap of the OEM app's quiet mode in force. This is the OEM
+    // service's "off", which also clears a whisper level the driver left (re/register_reference.md section 10).
+    std::vector<EcWrite> whisper{{0x7C5, 0x40, 0x60}};
+    if (session_.transport().read(0x7C6) & 3) whisper.push_back({0x7C6, 0, 3});
     // Each reference init step runs even after an independent step fails.
     const std::vector<std::vector<EcWrite>> steps = {{{0x709, 5}, {0x708, 1}},
                                                      {ack ? EcWrite{0x741, 5} : EcWrite{0x741, 1, 5}},
                                                      {{0x748, 129}},
                                                      {{0x726, 128, 128}, {0x727, 64, 64}},
-                                                     mode,
+                                                     whisper,
                                                      {{0x7C7, uint8_t(cooler_flag_ ? 0x0E : 0x0C)}},
                                                      {{0x706, 65}}};
     std::string log = "--- EC Initialization ---";
