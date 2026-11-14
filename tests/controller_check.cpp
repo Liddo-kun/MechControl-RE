@@ -372,14 +372,16 @@ void startup_degradation(const std::filesystem::path& root) {
           "unacknowledged activation is a startup warning, not a controller failure");
 }
 // A GM7ZG as its owner's reports show it (baseboard GMxZGxx, EC 96.0): the EC keeps 0x741 bit 2 for itself, clears
-// the Whisper Mode request (0x7C5 bit 6) once it has told the driver, and holds a whisper level in 0x7C6.
-void whisper_firmware(const std::filesystem::path& root) {
-    auto path = root / "whisper-firmware";
+// the Whisper Mode request (0x7C5 bit 6) once it has told the driver, holds a whisper level in 0x7C6 and is in
+// Office mode (0x751), with or without a Turbo mode (0x49F bit 1).
+void gmxzgxx_firmware(const std::filesystem::path& root, bool turbo) {
+    auto path = root / (turbo ? "gmxzgxx-turbo" : "gmxzgxx");
     std::filesystem::create_directories(path);
     auto s = std::make_shared<State>();
     s->amd = true;
     s->consumed = EcWrite{0x7C5, 0, 0x40};
-    for (auto [a, v] : {std::pair{0x740, 16}, {0x741, 0x24}, {0x7D2, 0}, {0x456, 0x80}, {0x7C5, 0xA0}, {0x7C6, 0x1B}})
+    for (auto [a, v] : {std::pair{0x740, 16}, {0x741, 0x24}, {0x7D2, 0}, {0x456, 0x80}, {0x7C5, 0xA0}, {0x7C6, 0x1B},
+                        {0x751, 0xA0}, {0x49F, turbo ? 0x0A : 0x08}})
         s->bytes[a] = static_cast<uint8_t>(v);
     EcSession session([&](const std::wstring&) { return std::make_unique<Fake>(s); }, [](const std::string&) {}, false,
                       [](unsigned) {}, profiles_directory(), Identity{"GMxZGxx", "fixture", "amd", uint8_t{16}});
@@ -397,6 +399,8 @@ void whisper_firmware(const std::filesystem::path& root) {
           "activation sets bit 0 alone where the EC does not acknowledge with bit 2, and is not a warning");
     check(written(0x7C5).front() == 0xC0 && s->bytes[0x7C5] == 0x80 && written(0x7C6).front() == 0x18,
           "Whisper Mode is switched off and the driver told, the fan-curve bit kept and the request not rewritten");
+    check(written(0x751).front() == (turbo ? 0x10 : 0x00),
+          "init selects the highest operating mode: Turbo where the EC reports it, otherwise Gaming");
 }
 void gpu_integration(const std::filesystem::path& root) {
     auto backend = std::make_unique<GpuFixture>();
@@ -2186,7 +2190,8 @@ int main(int argc, char** argv) {
             root = base / (stem + "-" + std::to_string(suffix));
         integration(root);
         startup_degradation(root);
-        whisper_firmware(root);
+        gmxzgxx_firmware(root, true);
+        gmxzgxx_firmware(root, false);
         gpu_integration(root);
         gpu_temp_target(root);
         thermal(root);

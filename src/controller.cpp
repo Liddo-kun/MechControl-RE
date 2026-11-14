@@ -395,13 +395,18 @@ bool Controller::initialize(std::vector<std::string>& errors) {
     std::vector<EcWrite> whisper{{0x7C5, 0x40, 0x60}};
     if (session_.transport().read(0x7C6) & 3) whisper.push_back({0x7C6, 0, 3});
     // Each reference init step runs even after an independent step fails.
-    const std::vector<std::vector<EcWrite>> steps = {{{0x709, 5}, {0x708, 1}},
-                                                     {ack ? EcWrite{0x741, 5} : EcWrite{0x741, 1, 5}},
-                                                     {{0x748, 129}},
-                                                     {{0x726, 128, 128}, {0x727, 64, 64}},
-                                                     whisper,
-                                                     {{0x7C7, uint8_t(cooler_flag_ ? 0x0E : 0x0C)}},
-                                                     {{0x706, 65}}};
+    std::vector<std::vector<EcWrite>> steps = {{{0x709, 5}, {0x708, 1}},
+                                               {ack ? EcWrite{0x741, 5} : EcWrite{0x741, 1, 5}},
+                                               {{0x748, 129}},
+                                               {{0x726, 128, 128}, {0x727, 64, 64}},
+                                               whisper,
+                                               {{0x7C7, uint8_t(cooler_flag_ ? 0x0E : 0x0C)}},
+                                               {{0x706, 65}}};
+    // Firmware with operating modes starts in Office, whose stock fan table stops at half speed and whose CPU
+    // limits are the lowest. Select the highest mode, Turbo where 0x49F bit 1 reports it and Gaming elsewhere;
+    // power limits and fan curves are then the user's (re/register_reference.md, 0x751).
+    if (p.operating_mode)
+        steps.push_back({{0x751, uint8_t(session_.transport().read(0x49F) & 2 ? 0x10 : 0), 0xB0}});
     std::string log = "--- EC Initialization ---";
     for (const auto& step : steps) {
         std::string label, detail;

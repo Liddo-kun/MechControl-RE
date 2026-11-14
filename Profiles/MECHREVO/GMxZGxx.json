@@ -4,6 +4,7 @@
   "baseboardPatterns": ["GMxZGxx"],
   "cpuVendor": "amd",
   "activationAck": false,
+  "operatingMode": true,
   "driver": { "devicePath": "\\\\.\\ACPIDriver" },
   "registers": {
     "PL1": "0x783", "PL2": "0x784", "PL4": "0x785",

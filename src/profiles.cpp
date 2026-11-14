@@ -113,6 +113,7 @@ void from_json(const Json& j, MachineProfile& v) {
     F("modePresets", mode_presets);
     F("ecBypass", ec_bypass);
     F("activationAck", activation_ack);
+    F("operatingMode", operating_mode);
 }
 #undef F
 int hex(const std::string& text) {

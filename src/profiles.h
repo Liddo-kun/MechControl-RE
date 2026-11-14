@@ -64,6 +64,8 @@ struct MachineProfile {
     // The EC clears 0x741 bit 2 once it has accepted activation. Firmware that gives the bit another use is told
     // to activate with bit 0 alone.
     bool activation_ack = true;
+    // Bits 7 and 4 of 0x751 are the EC's operating mode (Office, Gaming, Turbo), which EC init then selects.
+    bool operating_mode = false;
     int reg(const std::string& name) const;
     int tj_max() const;
     int tgp_offset() const;
