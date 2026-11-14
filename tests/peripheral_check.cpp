@@ -125,6 +125,67 @@ void lighting(const std::filesystem::path& root) {
               battery["healthPercent"] == 90 && std::abs(battery["temperatureCelsius"].get<double>() - 24.95) < 0.001,
           "battery LE mAh and tenth-Kelvin decoding");
 }
+// A GM5TG0O as its owner's log shows it: detected as GK7NXXR, a single-zone RGB keyboard on the EC, no HID
+// lighting controller and firmware without the GPU module ID.
+void ec_keyboard(const std::filesystem::path& root) {
+    auto state = std::make_shared<FakeState>();
+    for (auto [a, v] : {std::pair{0x740, 16},
+                        {0x7D2, 0},
+                        {0x456, 0xC8},
+                        {0x766, 0xF7},
+                        {0x767, 0x01},
+                        {0x769, 40},
+                        {0x76A, 10},
+                        {0x78C, 0x4B},
+                        {0x7AB, 0}})
+        state->bytes[a] = static_cast<uint8_t>(v);
+    auto log = [](const std::string& s) { std::cout << s << '\n'; };
+    EcSession session([&](const std::wstring&) { return std::make_unique<Channel>(state); }, log, false,
+                      [](unsigned) {}, profiles_directory(),
+                      Identity{"Avell A70 MOB", "fixture", "intel", uint8_t(16)});
+    check(session.profile.project_id == "GK7NXXR" && session.validation.gpu_power(),
+          "system ID bit 7 enables GPU power where the EC has no GPU module ID");
+    auto path = root / "ec-keyboard";
+    std::filesystem::create_directories(path);
+    ProfileStore store(path, false, log);
+    Lighting owner(session, store, log, false);
+    check(owner.available(0) && !owner.available(2) && !owner.available(3),
+          "support byte 2 bits 2 and 5 offer the keyboard without a HID controller, and nothing else");
+    {
+        auto unset = std::make_shared<FakeState>(*state);
+        unset->bytes[0x766] = 0xD7;
+        EcSession other([&](const std::wstring&) { return std::make_unique<Channel>(unset); }, log, false,
+                        [](unsigned) {}, profiles_directory(),
+                        Identity{"Avell A70 MOB", "fixture", "intel", uint8_t(16)});
+        check(!Lighting(other, store, log, false).available(0),
+              "no EC keyboard while the EC does not let the host set its color");
+    }
+    Zone orange{true, 255, 128, 0, 75};
+    owner.change(0, orange);
+    check(state->writes ==
+              std::vector<std::pair<int, int>>{{0x769, 50}, {0x76A, 25}, {0x76B, 0}, {0x767, 0x21}, {0x78C, 0x79}},
+          "EC keyboard: color 0-50, apply bit set beside the other triggers, level 3 with the low bits kept");
+    state->writes.clear();
+    owner.zone(0, Zone{true, 255, 255, 255, 100});
+    owner.zone(0, Zone{true, 255, 255, 255, 1});
+    check(state->writes.size() == 10 && state->writes[4] == std::pair{0x78C, 0x99} &&
+              state->writes[9] == std::pair{0x78C, 0x39},
+          "EC keyboard brightness 100 % and 1 % are levels 4 and 1");
+    state->writes.clear();
+    owner.zone(0, Zone{true, 2, 2, 2, 100});
+    owner.zone(0, Zone{false, 255, 0, 0, 100});
+    check(state->writes == std::vector<std::pair<int, int>>{{0x78C, 0x19}, {0x78C, 0x19}},
+          "EC keyboard off and black write level 0 and never an all-zero color");
+    state->writes.clear();
+    owner.idle(10);
+    owner.tick(100, 10000);
+    owner.tick(101, 1000);
+    check(state->writes.size() == 6 && state->writes.front() == std::pair{0x78C, 0x19} &&
+              state->writes.back() == std::pair{0x78C, 0x79},
+          "idle timer turns the EC keyboard off and input restores its intent");
+    check(read_json(path / "lighting_state.json").get<LightingState>().keyboard->brightness == 75,
+          "EC keyboard intent is saved like a HID zone's");
+}
 struct Pending {
     Handle entered{CreateEventW(nullptr, TRUE, FALSE, nullptr)}, release{CreateEventW(nullptr, TRUE, FALSE, nullptr)},
         returned{CreateEventW(nullptr, TRUE, FALSE, nullptr)};
@@ -480,6 +541,7 @@ int wmain(int argc, wchar_t** argv) {
             radio_check(root);
         } else {
             lighting(root);
+            ec_keyboard(root);
             pending(root);
         }
         uninit_apartment();

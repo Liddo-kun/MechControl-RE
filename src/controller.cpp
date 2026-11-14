@@ -91,7 +91,7 @@ Controller::Controller(EcSession& session, std::filesystem::path directory,
                        std::unique_ptr<nv::Power> driver, bool peripheral_hardware,
                        std::function<void(Json)> cooler_delivery, Lighting::Send lighting_send)
     : session_(session), features_(session.validation), limits_(control_limits(session.profile)),
-      store_(std::move(directory), gpu_recovery_unavailable(session.profile, session.hardware.gpu_module()).empty(),
+      store_(std::move(directory), gpu_recovery_unavailable(session.profile, session.hardware.gpu()).empty(),
              diagnostic),
       diagnostic_(std::move(diagnostic)), wait_(std::move(wait)), run_blocking_(std::move(run_blocking)),
       cooler_delivery_(std::move(cooler_delivery)), lighting_send_(std::move(lighting_send)),
@@ -127,7 +127,7 @@ Controller::Controller(EcSession& session, std::filesystem::path directory,
     }
     // The Thermal Failsafe tab shows why the GPU cannot be protected.
     try {
-        gpu_unprotected_ = features_.gpu_power() ? gpu_recovery_unavailable(p, session.hardware.gpu_module())
+        gpu_unprotected_ = features_.gpu_power() ? gpu_recovery_unavailable(p, session.hardware.gpu())
                                                  : "GPU power control is disabled";
         if (gpu_unprotected_.empty() && !(p.limits.contains("TGP") && p.limits.at("TGP").offset))
             gpu_unprotected_ = "this model's GPU power register format is unsupported";

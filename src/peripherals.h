@@ -25,6 +25,7 @@ public:
 
 private:
     bool open_device();
+    bool ec_keyboard() const; // A single-zone RGB keyboard, which the EC drives and no HID controller does.
     void io(const std::function<void()>&);
     void send(int, const HidReport&);
     void restore(bool reopen);

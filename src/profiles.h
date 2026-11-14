@@ -120,7 +120,13 @@ struct Hardware {
         return (*v & 0x80) != 0;
     }
     bool liquid_cooling() const { return (at(0x7A4).value_or(0) & 0x80) != 0; }
-    uint8_t gpu_module() const { return at(0x7D2).value_or(255); } // 255: not reported
+    // Whether a discrete GPU is fitted; empty when the EC does not say. The GPU module ID (0x7D2) is nonzero
+    // with one. Firmware older than that register leaves it 0 and reports the GPU in system ID (0x456) bit 7.
+    std::optional<bool> gpu() const {
+        auto module = at(0x7D2);
+        if (!module || *module == 255) return {};
+        return *module != 0 || (at(0x456).value_or(0) & 0x80) != 0;
+    }
     std::map<std::string, Limit> extract_limits() const;
     std::optional<std::map<std::string, Mode>> extract_modes(bool absolute) const;
 };
@@ -140,10 +146,11 @@ struct Validation {
     bool lighting() const { return !disabled.contains("lighting"); }
     std::set<std::string> enabled() const;
 };
-Validation validate_startup(const MachineProfile&, const ReadByte&, uint8_t gpu_module = 255,
+// gpu is Hardware::gpu().
+Validation validate_startup(const MachineProfile&, const ReadByte&, std::optional<bool> gpu = {},
                             const Enrichment& enrichment = {}, const std::optional<std::string>& vendor = {});
 std::string gpu_recovery_unavailable(const MachineProfile&,
-                                     uint8_t gpu_module); // Empty when a thermal trip can lower GPU power.
+                                     std::optional<bool> gpu); // Empty when a thermal trip can lower GPU power.
 
 // Register encodings from re/register_reference.md. The first five refuse a value outside the register's known range.
 namespace encoding {

@@ -376,14 +376,14 @@ Enrichment enrich(MachineProfile& p, const Hardware& h) {
     }
     return e;
 }
-std::string gpu_recovery_unavailable(const MachineProfile& p, uint8_t module) {
-    if (module == 0 || module == 255) return "the EC reports no GPU module";
+std::string gpu_recovery_unavailable(const MachineProfile& p, std::optional<bool> gpu) {
+    if (!gpu.value_or(false)) return "the EC reports no GPU module";
     if (p.tgp_fallback) return "this model's GPU power range is unknown";
     return p.registers.contains("gpuTemp") && p.registers.contains("tgp")
                ? ""
                : "the profile lacks a GPU temperature or power register";
 }
-Validation validate_startup(const MachineProfile& p, const ReadByte& read, uint8_t gpu_module, const Enrichment& e,
+Validation validate_startup(const MachineProfile& p, const ReadByte& read, std::optional<bool> gpu, const Enrichment& e,
                             const std::optional<std::string>& vendor) {
     Validation r;
     auto enriched = [&](std::string_view f) {
@@ -429,7 +429,7 @@ Validation validate_startup(const MachineProfile& p, const ReadByte& read, uint8
           [&](uint8_t v) { return encoding::decode_cpu_temperature(v, p.cpu_direct(), p.tj_max()); });
     check("tgp", "gpuPower", 50, 250, [&](uint8_t v) { return v + p.tgp_offset(); });
     check("dbMaxTgp", "gpuPower", 0, 50, [](uint8_t v) { return v; });
-    if (gpu_module == 0) disable("gpuPower", "GPU module not detected");
+    if (gpu == false) disable("gpuPower", "GPU module not detected");
     for (const auto* reg : {"logoR", "logoG", "logoB"}) check(reg, "lighting", 0, 60, [](uint8_t v) { return v; });
     if (!e.cpu_encoding_confirmed && vendor && p.cpu_encoding() != (*vendor == "amd" ? "direct" : "inverted_offset"))
         r.disabled["cpuPower"] = "CPU temperature encoding contradicts CPU vendor without ECSpec confirmation";

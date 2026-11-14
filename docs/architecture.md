@@ -99,7 +99,9 @@ for the rest of that screen-off period if the GPU is not in D0 or the app was fr
 on Kernel-Power event 566 (going to sleep), since Modern Standby sends no suspend broadcast. The
 fault is waking a GPU that has just powered down, so it uses Direct3D only, the path reported safe,
 and the NVIDIA reads elsewhere skip a GPU outside D0. Direct3D and the event log API are delay-loaded.
-`peripherals.*`, `cooler.*` and `ble.*` own HID lighting and BLE operations. Queue
+`peripherals.*`, `cooler.*` and `ble.*` own HID lighting and BLE operations. A single-zone RGB
+keyboard has no HID controller; where EC support byte 2 reports one, its zone is written through
+the EC instead. Queue
 acceptance is not completed cooler Apply or saved state. Unlocked GPU power writes
 qualify and maintain the live F7 laptop budget, which can fall below the VBIOS
 maximum when Dynamic Boost is off. Independent usable GPU features survive

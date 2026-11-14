@@ -231,14 +231,24 @@ int main(int argc, char** argv) try {
     };
     p = load_machine(profiles / "IDY_7Y.json");
     apply_universal_defaults(p);
-    require(!validate_startup(p, read, 1, {}, "amd").cpu_power(), "Vendor contradiction gated");
-    require(validate_startup(p, read, 1, {}, "intel").cpu_power(), "Matching vendor enabled");
-    require(!validate_startup(p, read, 0, {}, "intel").gpu_power(), "Absent GPU gated");
+    require(!validate_startup(p, read, true, {}, "amd").cpu_power(), "Vendor contradiction gated");
+    require(validate_startup(p, read, true, {}, "intel").cpu_power(), "Matching vendor enabled");
+    require(!validate_startup(p, read, false, {}, "intel").gpu_power(), "Absent GPU gated");
+    Hardware module;
+    module.bytes = {{0x7D2, 0}, {0x456, 0x48}};
+    require(module.gpu() == false, "No GPU module ID and no system ID flag is no GPU");
+    module.bytes[0x456] = 0xC8; // GM5TG0O, EC 79.0: the firmware has no module ID register.
+    require(module.gpu() == true && validate_startup(p, read, module.gpu(), {}, "intel").gpu_power(),
+            "System ID bit 7 reports the GPU on firmware without the module ID");
+    module.bytes.erase(0x7D2);
+    require(!module.gpu() && validate_startup(p, read, module.gpu(), {}, "intel").gpu_power() &&
+                !gpu_recovery_unavailable(p, module.gpu()).empty(),
+            "An unread module ID neither disables GPU power nor allows GPU recovery");
     auto sentinel = [](int) -> uint8_t { return 0; };
-    require(!validate_startup(p, sentinel, 1, {}, "intel").cpu_power(), "Register sanity gate");
+    require(!validate_startup(p, sentinel, true, {}, "intel").cpu_power(), "Register sanity gate");
     Enrichment ec;
     ec.limits = {"PL1"};
-    require(validate_startup(p, sentinel, 1, ec, "intel").cpu_power(), "ECSpec stronger than sentinel");
+    require(validate_startup(p, sentinel, true, ec, "intel").cpu_power(), "ECSpec stronger than sentinel");
     require(encoding::cpu_temperature(95, false) == 0x8A && encoding::cpu_temperature(95, true) == 0xDF, "CPU encode");
     require(encoding::decode_cpu_temperature(0x8A, false) == 95 && encoding::decode_cpu_temperature(0xDF, true) == 95,
             "CPU read high bit mask");

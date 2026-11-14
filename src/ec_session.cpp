@@ -133,7 +133,7 @@ EcSession::EcSession(
     hardware = config::collect_hardware(read, [&](int index) { return ec_->spec(index); });
     bool profile_modes = profile.modes.has_value();
     auto enrichment = config::enrich(profile, hardware);
-    validation = config::validate_startup(profile, read, hardware.gpu_module(), enrichment, identity.cpu_vendor);
+    validation = config::validate_startup(profile, read, hardware.gpu(), enrichment, identity.cpu_vendor);
     try {
         battery_bit3 = uint8_t(read(profile.reg("batteryMode")) & 8);
     } catch (const std::exception& ex) {
