@@ -146,6 +146,7 @@ Writes to `mechcontrol.log` next to the exe. One section per session. Contains e
 - **ECSpec config**: all 12 entries (0x00-0x0B), raw hex + decoded limits
 - **Feature registers**: raw + decoded for all ~17 registers
 - **Fan table dump**: 96 bytes (0xF00-0xF5F) + RamFan2 probe (0xF60-0xF6F)
+- **EC RAM**: 0x300-0xFFF as hex rows, in a log's first session and in every `--diagnose` run and report (`ecRam`)
 - **HID devices**: zone availability (keyboard, light bar, logo)
 - **Bitfield validation**: pass/fail per bitfield with raw/masked values
 - **Feature validation**: pass/fail per register with decoded values

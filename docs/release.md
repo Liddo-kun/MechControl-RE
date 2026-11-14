@@ -72,8 +72,9 @@ are not saved.
 ## Diagnostic report
 
 `MechControl.exe --diagnose report.json` writes a read-only report of the model, EC
-power limits, fan tables and sensors, then exits. It can run while MechControl is
-running. Attach it, or `mechcontrol.log`, when reporting a problem with your model.
+power limits, fan tables, sensors and the EC's memory, then exits. It can run while
+MechControl is running. Attach it, or `mechcontrol.log`, when reporting a problem with
+your model. The first session in the log records the EC's memory too.
 
 ## Fan speed performance counters (optional)
 

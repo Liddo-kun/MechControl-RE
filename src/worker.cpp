@@ -178,7 +178,19 @@ void ControlWorker::run(std::stop_token stop) {
                     throw std::runtime_error("Model selection canceled during shutdown");
                 return selection->chosen;
             });
-        if (!options_.report.empty()) config::write_json(options_.report, session->diagnostic_report(), false);
+        // Before anything is written: a diagnostic report carries the EC's RAM, and so does a log's first session,
+        // since the log is what a user is most likely to send.
+        if (!options_.report.empty() || log_.first()) {
+            auto ram = session->ram_dump();
+            std::string text = "--- EC RAM 0x300-0xFFF (* repeats the row above) ---";
+            for (const auto& row : ram) text += "\n  " + row;
+            log_.write(text);
+            if (!options_.report.empty()) {
+                auto report = session->diagnostic_report();
+                report["ecRam"] = ram;
+                config::write_json(options_.report, report, false);
+            }
+        }
         delivery_->post(
             {ResultKind::command, 0,
              (options_.once || options_.read_only ? L"Read-only EC session: " : L"Preparing core controller: ") +

@@ -52,6 +52,7 @@ Log::Log(const std::filesystem::path& path) {
         }
         for (size_t i = 0; i + 1 < lines.size(); ++i)
             if (lines[i] == separator && lines[i + 1].starts_with("Session started:")) starts.push_back(i);
+        first_ = starts.empty();
         if (starts.size() > 6) {
             auto temporary = path;
             temporary += L".retention";

@@ -46,6 +46,10 @@ public:
     EcTransport& transport() { return *ec_; }
     void snapshot_fans(); // Control startup calls this after activation; diagnostics never activate.
     config::Json diagnostic_report();
+    // The EC's RAM from 0x300 up as rows of hex, read only; "*" stands for rows equal to the one before. A report
+    // from an untested model otherwise lacks whichever byte its question turns on. Nothing the app or the notes
+    // use is below 0x300, and the GMxTG0x firmware's keyboard code keeps working bytes there.
+    std::vector<std::string> ram_dump();
     config::Identity identity;
     config::Selection selection;
     config::MachineProfile profile;
