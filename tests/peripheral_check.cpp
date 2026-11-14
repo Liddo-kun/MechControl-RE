@@ -127,7 +127,7 @@ void lighting(const std::filesystem::path& root) {
 }
 // A GM5TG0O as its owner's log shows it: detected as GK7NXXR, a single-zone RGB keyboard on the EC, no HID
 // lighting controller and firmware without the GPU module ID.
-void ec_keyboard(const std::filesystem::path& root) {
+void keyboard_on_ec(const std::filesystem::path& root) {
     auto state = std::make_shared<FakeState>();
     for (auto [a, v] : {std::pair{0x740, 16},
                         {0x7D2, 0},
@@ -176,6 +176,7 @@ void ec_keyboard(const std::filesystem::path& root) {
     owner.zone(0, Zone{false, 255, 0, 0, 100});
     check(state->writes == std::vector<std::pair<int, int>>{{0x78C, 0x19}, {0x78C, 0x19}},
           "EC keyboard off and black write level 0 and never an all-zero color");
+    owner.change(0, orange);
     state->writes.clear();
     owner.idle(10);
     owner.tick(100, 10000);
@@ -185,6 +186,28 @@ void ec_keyboard(const std::filesystem::path& root) {
           "idle timer turns the EC keyboard off and input restores its intent");
     check(read_json(path / "lighting_state.json").get<LightingState>().keyboard->brightness == 75,
           "EC keyboard intent is saved like a HID zone's");
+    Zone grey{true, 100, 100, 100, 60};
+    owner.change(0, grey);
+    owner.sync();
+    check(owner.intent().keyboard == grey, "an EC that holds what was applied does not round the intent to its steps");
+    // The Fn keys: the EC rewrites the level, or sets the off bit.
+    state->bytes[0x78C] = 0x29;
+    owner.sync();
+    check(owner.intent().keyboard == Zone{true, 100, 100, 100, 25}, "a level the EC changed replaces the brightness");
+    state->bytes[0x78C] = 0x2B;
+    state->bytes[0x76B] = 10;
+    owner.sync();
+    check(owner.intent().keyboard == Zone{false, 102, 102, 51, 25} &&
+              read_json(path / "lighting_state.json").get<LightingState>().keyboard == owner.intent().keyboard,
+          "EC off keeps the brightness to return to, a changed color is read back, and both are saved");
+    state->bytes[0x78C] = 0x49;
+    state->writes.clear();
+    owner.tick(200, 10000);
+    owner.sync();
+    owner.tick(201, 1000);
+    check(state->writes.front() == std::pair{0x78C, 0x19} && state->writes.back() == std::pair{0x78C, 0x59} &&
+              owner.intent().keyboard == Zone{true, 102, 102, 51, 50},
+          "the idle timer returns the EC keyboard to what it showed, not to an older intent");
 }
 struct Pending {
     Handle entered{CreateEventW(nullptr, TRUE, FALSE, nullptr)}, release{CreateEventW(nullptr, TRUE, FALSE, nullptr)},
@@ -541,7 +564,7 @@ int wmain(int argc, wchar_t** argv) {
             radio_check(root);
         } else {
             lighting(root);
-            ec_keyboard(root);
+            keyboard_on_ec(root);
             pending(root);
         }
         uninit_apartment();

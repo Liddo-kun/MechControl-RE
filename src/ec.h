@@ -81,6 +81,14 @@ namespace charge_hold {
 inline constexpr int timer = 0x7F4, target = 0x7F6; // Minutes left: high byte, then low. The EC counts them down.
 }
 std::vector<EcWrite> charge_hold_writes(int minutes); // 0 ends the hold.
+// The single-zone RGB keyboard the EC drives (re/register_reference.md 6.1). Where there is a logo instead, these
+// same addresses are the profile's logo registers.
+namespace ec_keyboard {
+inline constexpr int support = 0x766, // Bit 2: the keyboard is there. Bit 5: the host may set its color.
+    apply = 0x767,                    // Bit 5 applies the color; the EC clears it.
+    color = 0x769,                    // Red, green and blue, 0-50 each.
+    status = 0x78C;                   // Bits 7:5 level 0-4, bit 4 applies it, bit 1 backlight off.
+}
 // Curves contain active entries only, with raw 0..200 duty as in saved profiles.
 // The caller qualifies latch_mask: 0x04 for shared-bit firmware, 0xFF for the
 // reference whole-byte latch. There is deliberately no universal default.

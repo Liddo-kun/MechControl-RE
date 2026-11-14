@@ -1322,6 +1322,7 @@ ControlResult Controller::run(const AcEvent& c) {
     return {};
 }
 ControlResult Controller::run(const PowerTransition& c) {
+    if (c.kind == PowerTransition::suspend && lighting_) lighting_->sync(); // Resume restores the saved intent.
     if (clear_bypass(c.kind == PowerTransition::display_off ? "display off"
                      : c.kind == PowerTransition::suspend   ? "sleep"
                                                             : "exit or Windows shutdown"))
@@ -1504,6 +1505,7 @@ ControlResult Controller::run(const DimmingApply& c) {
 ControlResult Controller::run(const PeripheralRead& c) {
     Json j = {{"dimmingAvailable", dimming_available_}, {"coolerAvailable", bool(cooler_)}};
     if (lighting_) {
+        lighting_->sync();
         j["lightingIntent"] = lighting_->intent();
         j["zones"] = {lighting_->available(0), lighting_->available(2), lighting_->available(3)};
         if (features_.lighting()) try {

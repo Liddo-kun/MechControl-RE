@@ -30,6 +30,7 @@ struct Zone {
     bool enabled = false;
     uint8_t r = 0, g = 0, b = 0;
     int brightness = 0;
+    bool operator==(const Zone&) const = default;
 };
 struct LightingSettings {
     Zone logo, keyboard, light_bar;

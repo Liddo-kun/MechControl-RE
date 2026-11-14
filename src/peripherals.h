@@ -18,6 +18,9 @@ public:
     config::Zone logo();
     void apply(const config::LightingSettings&);
     void capture(config::LightingSettings&);
+    // The EC keeps its single-zone keyboard's state and the Fn keys change it, so what the EC holds replaces the
+    // intent before the intent is shown, saved or restored. Not while the idle timer has the backlight off.
+    void sync();
     void idle(int);
     void resume(ULONGLONG now);
     void tick(ULONGLONG now, std::optional<DWORD> idle_ms = {});
@@ -25,7 +28,8 @@ public:
 
 private:
     bool open_device();
-    bool ec_keyboard() const; // A single-zone RGB keyboard, which the EC drives and no HID controller does.
+    bool keyboard_on_ec() const; // A single-zone RGB keyboard, which the EC drives and no HID controller does.
+    void write_ec_keyboard(const config::Zone&);
     void io(const std::function<void()>&);
     void send(int, const HidReport&);
     void restore(bool reopen);

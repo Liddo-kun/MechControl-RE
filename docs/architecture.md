@@ -104,7 +104,8 @@ fault is waking a GPU that has just powered down, so it uses Direct3D only, the 
 and the NVIDIA reads elsewhere skip a GPU outside D0. Direct3D and the event log API are delay-loaded.
 `peripherals.*`, `cooler.*` and `ble.*` own HID lighting and BLE operations. A single-zone RGB
 keyboard has no HID controller; where EC support byte 2 reports one, its zone is written through
-the EC instead. Queue
+the EC instead, and what the EC holds replaces the saved intent before that is shown, captured
+into a slot, or restored after the idle timer or sleep. Queue
 acceptance is not completed cooler Apply or saved state. Unlocked GPU power writes
 qualify and maintain the live F7 laptop budget, which can fall below the VBIOS
 maximum when Dynamic Boost is off. Independent usable GPU features survive

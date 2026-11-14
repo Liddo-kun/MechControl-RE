@@ -61,6 +61,19 @@ uint8_t dimming_call(IWbemServices* service, uint64_t data) {
     VariantClear(&n);
     return result;
 }
+// What the EC holds for its single-zone keyboard: a color of 0-50 a channel and a brightness level of 0-4, which
+// it multiplies without a range check. It takes an all-zero color as a request for its default one, so black is
+// off.
+struct EcKeyboard {
+    std::array<uint8_t, 3> color{};
+    int level = 0;
+};
+EcKeyboard ec_keyboard_state(const Zone& v) {
+    auto scale = [](uint8_t c) { return static_cast<uint8_t>(rounded(c * 50.0 / 255)); };
+    EcKeyboard k{{scale(v.r), scale(v.g), scale(v.b)}};
+    if (v.enabled && k.color != std::array<uint8_t, 3>{}) k.level = (std::clamp(v.brightness, 0, 100) + 24) / 25;
+    return k;
+}
 }
 Lighting::Lighting(EcSession& s, ProfileStore& store, std::function<void(const std::string&)> log, bool hardware,
                    Send send, std::function<void(std::function<void()>)> run_io,
@@ -70,7 +83,7 @@ Lighting::Lighting(EcSession& s, ProfileStore& store, std::function<void(const s
     // Standalone packet fixture/live probe only.
     if (!batch_) batch_ = [this](const auto& writes) { session_.guard->apply(writes); };
     if (hardware_) open();
-    if (ec_keyboard()) log_("Keyboard backlight: single-zone RGB driven by the EC");
+    if (keyboard_on_ec()) log_("Keyboard backlight: single-zone RGB driven by the EC");
     for (auto* zone : {&state_.logo, &state_.keyboard, &state_.light_bar})
         if (!*zone) log_("Lighting intent contains an explicit-null zone; it is unavailable, not an all-off default");
 }
@@ -163,13 +176,56 @@ bool Lighting::open_device() {
     return std::any_of(handles_.begin(), handles_.end(), [](auto& h) { return bool(h); });
 }
 // Support byte 2 reports the keyboard in bit 2 and lets the host set its color with bit 5; without that the EC
-// turns the backlight off again (re/register_reference.md 6.1). The color registers are the logo's, which
-// startup validation has checked.
-bool Lighting::ec_keyboard() const {
-    return (session_.hardware.at(0x766).value_or(0) & 0x24) == 0x24 && session_.validation.lighting() && !handles_[0];
+// turns the backlight off again (re/register_reference.md 6.1). Startup validation has checked the color
+// registers' range.
+bool Lighting::keyboard_on_ec() const {
+    return (session_.hardware.at(ec_keyboard::support).value_or(0) & 0x24) == 0x24 && session_.validation.lighting() &&
+           !handles_[0];
+}
+// The EC keeps what it is given, so there is nothing separate to flash.
+void Lighting::write_ec_keyboard(const Zone& v) {
+    auto k = ec_keyboard_state(v);
+    std::vector<EcWrite> writes;
+    if (k.level) {
+        for (int i = 0; i < 3; ++i) writes.push_back({ec_keyboard::color + i, k.color[i]});
+        // Bit 5 alone: the register's other bits are one-shot requests for other things.
+        writes.push_back({ec_keyboard::apply, 0x20, 0x20});
+    }
+    // The level with its apply bit, and bit 1 cleared. The bits the EC sets for itself are kept.
+    writes.push_back({ec_keyboard::status, static_cast<uint8_t>(k.level << 5 | 0x10), 0xF2});
+    batch_(writes);
+}
+void Lighting::sync() {
+    if (!keyboard_on_ec() || sleeping_ || !state_.keyboard) return;
+    try {
+        auto& ec = session_.transport();
+        auto status = ec.read(ec_keyboard::status);
+        EcKeyboard held{{}, status & 2 ? 0 : std::min(status >> 5, 4)};
+        for (int i = 0; i < 3; ++i) held.color[i] = ec.read(ec_keyboard::color + i);
+        // Only what the EC disagrees with is replaced: its coarser steps would otherwise round the intent.
+        auto z = *state_.keyboard;
+        if (held.color != std::array<uint8_t, 3>{} && held.color != ec_keyboard_state(z).color) {
+            auto wide = [](uint8_t c) { return static_cast<uint8_t>(std::min(rounded(c * 255.0 / 50), 255)); };
+            z.r = wide(held.color[0]);
+            z.g = wide(held.color[1]);
+            z.b = wide(held.color[2]);
+        }
+        if (held.level != ec_keyboard_state(z).level) {
+            z.enabled = held.level > 0;
+            if (held.level) z.brightness = held.level * 25; // Off keeps the brightness to come back to.
+        }
+        if (z == *state_.keyboard) return;
+        state_.keyboard = z;
+        store_.save_lighting(state_);
+        log_("Keyboard backlight read from the EC: level " + std::to_string(held.level) + ", color " +
+             std::to_string(held.color[0]) + "/" + std::to_string(held.color[1]) + "/" +
+             std::to_string(held.color[2]));
+    } catch (const std::exception& e) {
+        log_(std::string("Keyboard readback failed; intent retained: ") + e.what());
+    }
 }
 bool Lighting::available(int z) const {
-    if (z == 0 && ec_keyboard()) return true;
+    if (z == 0 && keyboard_on_ec()) return true;
     // The logo is also written to EC registers, which startup validation may have rejected.
     if (z == 3 && !session_.validation.lighting()) return false;
     return z >= 0 && z < 4 && (output_ || bool(handles_[z]));
@@ -198,25 +254,7 @@ void Lighting::zone(int z, const Zone& value, bool flash, bool color_only) {
                    : z == 2 ? 0x22
                             : 0x23,
             speed = z == 0 ? 8 : 1, b = static_cast<uint8_t>(v.brightness);
-    if (z == 0 && ec_keyboard()) {
-        // Colors are 0-50 and the brightness has four levels; the EC multiplies the two without a range check.
-        // It keeps what it is given, so there is nothing separate to flash. It takes an all-zero color as a
-        // request for its default one, so black is off.
-        auto& p = session_.profile;
-        auto scale = [](uint8_t c) { return static_cast<uint8_t>(rounded(c * 50.0 / 255)); };
-        uint8_t red = scale(v.r), green = scale(v.g), blue = scale(v.b);
-        int level = v.enabled && (red || green || blue) ? (b + 24) / 25 : 0;
-        std::vector<EcWrite> writes;
-        if (level)
-            writes = {{p.reg("logoR"), red},
-                      {p.reg("logoG"), green},
-                      {p.reg("logoB"), blue},
-                      {p.reg("logoTrigger"), 0x20, 0x20}}; // Bit 5 applies the color.
-        // Bits 7:5 are the level and bit 4 applies it. Bit 1, which turns the backlight off, is cleared.
-        writes.push_back({p.reg("logoCommit"), static_cast<uint8_t>(level << 5 | 0x10), 0xF2});
-        batch_(writes);
-        return;
-    }
+    if (z == 0 && keyboard_on_ec()) return write_ec_keyboard(v);
     io([&] {
         if (flash) {
             if (z == 3) throw std::invalid_argument("Logo persists through EC, not HID flash");
@@ -294,6 +332,7 @@ void Lighting::capture(LightingSettings& s) {
         } catch (const std::exception& e) {
             log_(std::string("Logo capture failed; target intent retained: ") + e.what());
         }
+    sync();
     // Null intent is invalid, not an implicit off zone. Refuse capture rather than erase it.
     if (available(0)) {
         if (!state_.keyboard) throw std::runtime_error("Cannot capture explicit-null keyboard intent");
@@ -335,6 +374,7 @@ void Lighting::tick(ULONGLONG now, std::optional<DWORD> idle_ms) {
         idle_ms = GetLastInputInfo(&input) ? GetTickCount() - input.dwTime : 0;
     }
     if (!sleeping_ && *idle_ms >= static_cast<uint32_t>(state_.idle_seconds) * 1000u) {
+        sync(); // What the keyboard returns to is what it shows now.
         sleeping_ = true;
         for (auto [z, v] : {std::pair{0, state_.keyboard}, {2, state_.light_bar}})
             if (v && v->enabled && available(z)) try {
