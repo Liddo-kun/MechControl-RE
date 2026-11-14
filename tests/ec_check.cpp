@@ -1,6 +1,7 @@
 #include "ec_session.h"
 #include "worker.h"
 #include <iostream>
+#include <algorithm>
 #include <atomic>
 #include <system_error>
 
@@ -309,8 +310,14 @@ void worker_owner(const std::filesystem::path& scratch) {
     ControlWorker worker(delivery, log, std::move(options));
     require(worker.wait() == 0 && owner != std::this_thread::get_id() && s->live == 0,
             "worker owns startup, EC I/O, delivery and destruction without a window");
-    require(config::read_json(scratch / L"diagnostic.json")["model"] == "IDY_7Y" && writes(*s).empty(),
-            "worker diagnostic writes report, never hardware");
+    auto report = config::read_json(scratch / L"diagnostic.json");
+    require(report["model"] == "IDY_7Y" && writes(*s).empty(), "worker diagnostic writes report, never hardware");
+    auto ram = report["ecRam"].get<std::vector<std::string>>();
+    require(ram.front().starts_with("300:") && std::ranges::count(ram, "*") > 0 &&
+                std::ranges::count_if(ram, [](const auto& row) { return row.starts_with("740: 1A "); }) == 1,
+            "the report carries the EC's RAM from 0x300 with repeated rows folded");
+    require(log.first() && !Log(scratch / L"worker.log").first(),
+            "only a log's first session is the one that records the EC's RAM unasked");
 }
 void ended_worker(const std::filesystem::path& scratch) {
     Log log(scratch / L"ended.log");
@@ -468,7 +475,8 @@ void recurring_worker(const std::filesystem::path& scratch) {
                                : "recurring worker publishes typed profile-decoded RPM via owned mailbox");
         require(s->live == 0 && writes(*s).empty(),
                 "recurring read-only worker releases transport without hardware writes");
-        if (fail) require(s->reopens == 5, "each failed sample has only one reconnect and polling stops");
+        // One more is the first session's RAM dump, which stops at its first failed read.
+        if (fail) require(s->reopens == 6, "each failed sample has only one reconnect and polling stops");
     }
 }
 }

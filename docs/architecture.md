@@ -20,7 +20,9 @@ commands stay queued.
 Controlling startup acquires `Global\MechControl` before log or hardware access.
 The optional named-pipe server submits to the same worker. It is compiled out by
 default. `--diagnose <file>` is a separate write-free, mutex-exempt EC path, not
-a controller.
+a controller. Its report and log session carry the EC's RAM from `0x300` up. So does
+the first session of a log, read before the first write, because retention keeps that
+session and the log is what users send.
 
 `configuration` contains the pinned JSON parser, profile detection and stores.
 Detection preserves baseboard-pattern precedence, CPU-vendor filtering, direct

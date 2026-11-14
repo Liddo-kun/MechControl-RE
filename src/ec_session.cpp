@@ -332,6 +332,30 @@ void EcSession::snapshot_fans() {
         if (auto present = fans.gpu_present()) profile.fan_table.has_gpu = *present;
     }
 }
+std::vector<std::string> EcSession::ram_dump() {
+    std::vector<std::string> rows;
+    std::string previous;
+    char text[8];
+    for (int base = 0x300; base < 0x1000; base += 16) {
+        std::string row;
+        try {
+            for (int i = 0; i < 16; ++i) {
+                snprintf(text, sizeof text, " %02X", ec_->read(base + i));
+                row += text;
+            }
+        } catch (const std::exception& ex) {
+            rows.push_back(config::hex_text(base, 3) + " row unread; dump stopped: " + ex.what());
+            break;
+        }
+        if (row != previous) {
+            snprintf(text, sizeof text, "%03X:", base);
+            rows.push_back(text + row);
+        } else if (rows.back() != "*")
+            rows.push_back("*");
+        previous = row;
+    }
+    return rows;
+}
 config::Json EcSession::diagnostic_report() {
     using config::Json;
     auto s = sample(Detail::full);

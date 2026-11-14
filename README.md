@@ -74,7 +74,7 @@ Changes apply immediately but aren't saved. Values outside your model's ranges a
 
 ### Diagnostic report
 
-`MechControl.exe --diagnose report.json` writes a read-only report of the model, EC power limits, fan tables and sensors, then exits. It can run while MechControl is running.
+`MechControl.exe --diagnose report.json` writes a read-only report of the model, EC power limits, fan tables, sensors and the EC's memory, then exits. It can run while MechControl is running. The first session in `mechcontrol.log` records the EC's memory too.
 
 ## Supported models
 
