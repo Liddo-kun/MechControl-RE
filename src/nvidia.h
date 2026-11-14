@@ -94,6 +94,9 @@ public:
     void set_budget(Budget);
     std::optional<Dlppc> dlppc();
     void set_dlppc(bool);
+    // What a diagnostic report records: every reading above, each on its own, plus the driver's policy tables as it
+    // returns them. Reads only. A reading the driver or this code refuses becomes {"error": text}.
+    config::Json diagnostic();
 
 private:
     struct Native;
@@ -201,6 +204,9 @@ private:
     std::optional<bool> budget_boost_;
     std::function<void(const std::string&)> log_;
 };
+// The report's NVIDIA section: null without an NVIDIA adapter, otherwise its device ID and Api::diagnostic().
+// Connects to the driver, which wakes a sleeping GPU.
+config::Json diagnostic();
 // Value-only profile planning: never opens NVIDIA for automatic or stock-current loads.
 struct ProfilePlan {
     config::GpuSettings settings;

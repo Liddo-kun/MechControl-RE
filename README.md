@@ -10,7 +10,7 @@ MechControl is a native C++ Windows app. It needs no .NET runtime and keeps its 
 ## Features
 
 - **CPU power:** PL1, PL2, PL4 and the CPU temperature limit
-- **GPU power:** TGP and Dynamic Boost. An optional NVIDIA unlock raises the power ceiling and lets you change the GPU current limits.
+- **GPU power:** TGP and Dynamic Boost. With an RTX 40 or newer GPU, an optional NVIDIA unlock raises the power ceiling and lets you change the GPU current limits.
 - **Fans:** boost, custom fan curves, linked CPU/GPU fans, fan ramp speed
 - **Thermal failsafe:** holds the GPU at minimum power if it stays too hot
 - **Battery:** charge modes and battery info
@@ -74,7 +74,7 @@ Changes apply immediately but aren't saved. Values outside your model's ranges a
 
 ### Diagnostic report
 
-`MechControl.exe --diagnose report.json` writes a read-only report of the model, EC power limits, fan tables, sensors and the EC's memory, then exits. It can run while MechControl is running. The first session in `mechcontrol.log` records the EC's memory too.
+`MechControl.exe --diagnose report.json` writes a read-only report of the model, EC power limits, fan tables, sensors and the EC's memory, then exits. With an NVIDIA GPU it adds the driver's power and current limits and live readings, which wakes the GPU if it is asleep. It can run while MechControl is running. The first session in `mechcontrol.log` records the EC's memory too.
 
 ## Supported models
 

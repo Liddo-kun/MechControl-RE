@@ -5,6 +5,20 @@
 
 namespace mech::nv {
 static std::string amps(uint32_t milliamps) { return config::decimal_text(milliamps / 1000.0, 3, true) + " A"; }
+config::Json diagnostic() {
+    auto device = Store::device();
+    if (!device) return nullptr;
+    char id[8];
+    sprintf_s(id, "%04X", *device);
+    config::Json j = {{"device", id}};
+    try {
+        Api api;
+        j.update(api.diagnostic());
+    } catch (const std::exception& e) {
+        j["error"] = e.what();
+    }
+    return j;
+}
 Power::Power(int minimum, std::function<void(const std::string&)> log) : log_(std::move(log)) {
     api_ = std::make_unique<Api>();
     auto& id = api_->identity;

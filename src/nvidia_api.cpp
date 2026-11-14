@@ -621,4 +621,127 @@ Telemetry Api::telemetry() {
     t.ipc = inline_activity();
     return t;
 }
+config::Json Api::diagnostic() {
+    using config::Json;
+    auto section = [](const auto& read) -> Json {
+        try {
+            return read();
+        } catch (const std::exception& e) {
+            return Json{{"error", e.what()}};
+        }
+    };
+    auto range = [](uint32_t min, uint32_t def, uint32_t max) {
+        return Json{{"min", min}, {"default", def}, {"max", max}};
+    };
+    auto optional = [](const std::optional<uint32_t>& v) { return v ? Json(*v) : Json(nullptr); };
+    // An entry as the driver returned it, for a layout this code does not know yet.
+    auto raw = [](const Bytes& b, size_t p, size_t n) {
+        std::string text;
+        char byte[4];
+        for (size_t i = p; i < p + n; ++i) {
+            sprintf_s(byte, "%02x", b[i]);
+            text += byte;
+        }
+        return text;
+    };
+    // Each table lists its entries that the mask selects and that fit the packet. Powers are mW, currents mA.
+    auto table = [&](const Bytes& b, uint32_t mask, size_t first, size_t stride, const auto& describe) {
+        Json list = Json::array();
+        for (int i = 0; i < 32; ++i) {
+            size_t p = first + i * stride;
+            if (!(mask & (1u << i)) || p + stride > b.size()) continue;
+            Json entry = describe(p);
+            entry["index"] = i;
+            entry["raw"] = raw(b, p, stride);
+            list.push_back(std::move(entry));
+        }
+        return list;
+    };
+    char subsystem[16];
+    sprintf_s(subsystem, "%08X", identity.subsystem);
+    Json j = {
+        {"name", identity.name}, {"subsystem", subsystem}, {"driver", identity.driver}, {"biosVersion", identity.bios}};
+    j["bios"] = section([&] {
+        auto image = bios();
+        Json b = {{"size", image.size()}};
+        try {
+            auto parsed = Bios::parse(std::move(image));
+            auto field = [&](const Field& f) { return range(f.min, f.def, f.max); };
+            b["table"] = parsed.ada ? "RTX 40" : "RTX 50";
+            b["power"] = field(parsed.power);
+            b["nvvdd"] = field(parsed.nv);
+            b["msvdd"] = parsed.ms ? field(*parsed.ms) : Json(nullptr);
+            b["boardInput"] = parsed.input ? field(*parsed.input) : Json(nullptr);
+        } catch (const std::exception& e) {
+            b["error"] = e.what();
+        }
+        return b;
+    });
+    j["powerPolicies"] = section([&] {
+        auto b = packet(0x728, 0x10728);
+        call_(0x54924bf5, b);
+        return table(b, u32(b, 4), 0x28, 0x38, [&](size_t p) {
+            Json entry = range(u32(b, p + 8), u32(b, p + 12), u32(b, p + 16));
+            entry["type"] = u32(b, p);
+            entry["unit"] = u32(b, p + 4);
+            return entry;
+        });
+    });
+    j["power"] = section([&] {
+        auto p = power();
+        Json limits = range(p.min, p.def, p.max);
+        limits["requested"] = optional(p.requested);
+        limits["enforced"] = p.enforced;
+        return limits;
+    });
+    j["policies"] = section([&] {
+        auto b = packet(0xa70, 0x40a70);
+        call_(0x67f31384, b);
+        return table(b, u32(b, 4), 0x3c, 0x58, [&](size_t p) {
+            Json entry = range(u32(b, p + 12), u32(b, p + 16), u32(b, p + 20));
+            entry["type"] = u32(b, p);
+            entry["channel"] = u32(b, p + 4);
+            entry["unit"] = u32(b, p + 8);
+            return entry;
+        });
+    });
+    j["channels"] = section([&] {
+        auto b = packet(0xca8, 0x30ca8);
+        call_(0xc12eb19e, b);
+        return table(b, u32(b, 16), 0x28, 0x3c,
+                     [&](size_t p) { return Json{{"kind", u32(b, p + 12)}, {"id", u32(b, p + 16)}}; });
+    });
+    j["currents"] = section([&] {
+        auto c = currents();
+        auto rail = [&](const Rail& r) {
+            Json limits = range(r.min, r.def, r.max);
+            limits["current"] = r.current;
+            return limits;
+        };
+        return Json{{"nvvdd", rail(c.nv)},
+                    {"msvdd", c.ms ? rail(*c.ms) : Json(nullptr)},
+                    {"boardInput", c.input ? rail(*c.input) : Json(nullptr)}};
+    });
+    j["telemetry"] = section([&] {
+        auto t = telemetry();
+        return Json{{"nvvdd", t.nv},
+                    {"msvdd", optional(t.ms)},
+                    {"boardInput", optional(t.input)},
+                    {"nvvddLimit", optional(t.nv_limit)},
+                    {"msvddLimit", optional(t.ms_limit)},
+                    {"boardInputLimit", optional(t.input_limit)},
+                    {"currentCapKhz", optional(t.current_khz)},
+                    {"powerCapKhz", optional(t.power_khz)},
+                    {"maxClockKhz", optional(t.ceiling_khz)},
+                    {"clockMhz", optional(t.clock_mhz)},
+                    {"gpuPower", optional(t.gpu_mw)},
+                    {"corePower", optional(t.core_mw)},
+                    {"enforcedPower", optional(t.enforced_mw)}};
+    });
+    j["dlppc"] = section([&] {
+        auto d = dlppc();
+        return d ? Json{{"active", d->active}, {"policy", d->policy}, {"controllers", d->controllers}} : Json(nullptr);
+    });
+    return j;
+}
 }

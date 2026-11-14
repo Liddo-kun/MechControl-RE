@@ -322,6 +322,17 @@ void packets() {
         refuses([&] { a.set_currents({}, {}, 12000); },
                 "missing selected readback or changed unselected rail is a failure");
     }
+    // The fixture driver has no board-power or BIOS call, like a driver that refuses them.
+    Driver probed;
+    Api probe([&](auto id, auto& b) { probed.call(id, b); });
+    auto report = probe.diagnostic();
+    check(report["currents"]["nvvdd"]["current"] == 125000 && report["telemetry"]["nvvdd"] == 126883 &&
+              report["dlppc"]["active"] == true && report["policies"].size() == 6 &&
+              report["policies"][1]["type"] == 0 && report["policies"][1]["max"] == 250000 &&
+              report["policies"][1]["raw"].get<std::string>().size() == 2 * 0x58 && report["channels"].size() == 3 &&
+              report["power"].contains("error") && report["powerPolicies"].contains("error") &&
+              report["bios"].contains("error"),
+          "a diagnostic report lists the driver's policy tables and keeps a refused reading from costing the others");
     Driver d;
     Api a([&](auto id, auto& b) { d.call(id, b); });
     check(!a.telemetry().ipc, "IPC first read is unavailable");

@@ -22,7 +22,12 @@ The optional named-pipe server submits to the same worker. It is compiled out by
 default. `--diagnose <file>` is a separate write-free, mutex-exempt EC path, not
 a controller. Its report and log session carry the EC's RAM from `0x300` up. So does
 the first session of a log, read before the first write, because retention keeps that
-session and the log is what users send.
+session and the log is what users send. With an NVIDIA adapter the report then gets an
+`nvidia` section (`nv::diagnostic`): the GPU BIOS limits where the parser knows the
+table, the driver's policy tables as returned, power and current limits, telemetry and
+DLPPC. Each reading stands alone, so a refused one is an error entry beside the others.
+The laptop power budget is left out, because that read calls driver internals found by
+signature. The report is written before these driver calls and again after them.
 
 `configuration` contains the pinned JSON parser, profile detection and stores.
 Detection preserves baseboard-pattern precedence, CPU-vendor filtering, direct
