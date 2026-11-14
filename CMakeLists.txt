@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(MechControl VERSION 2.3.0 LANGUAGES CXX RC)
+project(MechControl VERSION 2.3.1 LANGUAGES CXX RC)
 if(NOT MSVC OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
   message(FATAL_ERROR "Use the MSVC x64 toolchain.")
 endif()
