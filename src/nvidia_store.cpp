@@ -84,14 +84,22 @@ Store::Store(const Identity& id) : path_(recovery_path()) {
 Store::~Store() {
     if (key_) RegCloseKey(key_);
 }
-bool Store::present() {
+std::optional<uint16_t> Store::device() {
+    std::optional<uint16_t> id;
     try {
-        return adapters([](HDEVINFO, SP_DEVINFO_DATA, const std::wstring& hw) {
-            return hw.size() >= 13 && _wcsnicmp(hw.c_str(), L"PCI\\VEN_10DE&", 13) == 0;
+        adapters([&](HDEVINFO, SP_DEVINFO_DATA, const std::wstring& hw) {
+            constexpr std::wstring_view prefix = L"PCI\\VEN_10DE&DEV_";
+            if (hw.size() < prefix.size() + 4 || _wcsnicmp(hw.c_str(), prefix.data(), prefix.size()) != 0) return false;
+            wchar_t* end = nullptr;
+            auto digits = hw.substr(prefix.size(), 4);
+            auto value = wcstoul(digits.c_str(), &end, 16);
+            if (end != digits.c_str() + 4) return false;
+            id = static_cast<uint16_t>(value);
+            return true;
         });
     } catch (const std::system_error&) {
-        return false;
     }
+    return id;
 }
 std::filesystem::path Store::recovery_path() {
     PWSTR p = nullptr;

@@ -322,6 +322,7 @@ private:
         dlppc_api_; // DLPPC needs only NVAPI; used while nvidia_ is unavailable (unsupported BIOS limits).
     bool nvidia_available_ = false, nvidia_busy_ = false, dlppc_available_ = false, dlppc_disabled_ = false,
          on_ac_ = false;
+    bool nvidia_offered_ = false; // Fixed at startup; nvidia_available_ also goes false when the driver refuses.
     bool gpu_unlocked_ = false, gpu_driver_uncertain_ = false;
     int nvidia_min_watts_ = 1;
     std::string nvidia_error_, gpu_notice_;

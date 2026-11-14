@@ -50,6 +50,8 @@ Json Controller::presentation(bool read, bool gpu_live, int page) {
         if (features_.battery()) j["batteryRegister"] = p.reg("batteryMode");
         // Firmware known to have no charge hold gets no Charge Limit section, not a greyed one.
         j["chargeLimitOffered"] = !session_.hardware.before_gpu_module();
+        // The same for the NVIDIA unlock, DLPPC, current limits and driver readings on a GPU they cannot work on.
+        j["nvidiaOffered"] = nvidia_offered_;
         for (std::string key : {"cpuTemp", "gpuTemp"})
             if (p.registers.contains(key)) j[key + "Register"] = p.reg(key);
         j["modes"] = Json::array();

@@ -127,13 +127,17 @@ private:
     int64_t inline_time_ = 0;
     Bytes status_;
 };
+// Whether a GPU is of a generation these controls can work on: RTX 40 or later. RTX 30 BIOSes lack the tables
+// Bios::parse needs. In the PCI ID list RTX 30 ends at 0x25FB and RTX 40 starts at 0x2681.
+constexpr bool supported_generation(uint16_t device) { return device >= 0x2680; }
 // Exact PCI-bound registry/recovery owner. The alternate key/path are fixture-only.
 class Store {
 public:
     explicit Store(const Identity&);
     Store(HKEY key, std::filesystem::path recovery); // Takes ownership of the test key.
     ~Store();
-    static bool present();
+    // The NVIDIA display adapter's PCI device ID as Windows lists it. Does not touch the driver or the GPU.
+    static std::optional<uint16_t> device();
     static std::filesystem::path recovery_path();
     static bool saved();
     bool awake() const;

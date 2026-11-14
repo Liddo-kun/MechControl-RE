@@ -425,6 +425,12 @@ void gpu_integration(const std::filesystem::path& root) {
           "System Info reads driver budgets at most every five seconds");
     check(again.at("fan") == info.at("fan") && again.at("advanced") == info.at("advanced"),
           "a presentation the UI never received loses nothing: the next one carries the same owned state");
+    Rig driverless(root / "nvidia-unoffered");
+    check(c.presentation(true, false, -2)["nvidiaOffered"] == true &&
+              driverless.controller->presentation(true, false, -2)["nvidiaOffered"] == false &&
+              !nv::supported_generation(0x2520) && !nv::supported_generation(0x25FB) &&
+              nv::supported_generation(0x2684) && nv::supported_generation(0x28A0) && nv::supported_generation(0x2C18),
+          "NVIDIA controls are offered with a driver, and by device ID from RTX 40 on (not the RTX 3060 Laptop)");
     c.execute(UiPage{0});
     c.execute(Visibility{false});
     before = driver->sets;

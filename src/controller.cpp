@@ -98,13 +98,24 @@ Controller::Controller(EcSession& session, std::filesystem::path directory,
       peripheral_hardware_(peripheral_hardware) {
     if (!wait_) wait_ = [](unsigned ms) { std::this_thread::sleep_for(std::chrono::milliseconds(ms)); };
     if (!run_blocking_) run_blocking_ = [](std::function<void()> work) { work(); };
-    nvidia_available_ = dlppc_available_ = nvidia_hardware && features_.gpu_power() && nv::Store::present();
+    // The NVIDIA controls are offered only where they can work, which the adapter's PCI device ID shows without
+    // waking the driver. Elsewhere the UI hides them.
+    if (nvidia_hardware && features_.gpu_power()) {
+        auto device = nv::Store::device();
+        nvidia_available_ = dlppc_available_ = device && nv::supported_generation(*device);
+        char id[8]{};
+        if (device) sprintf_s(id, "%04X", *device);
+        if (!nvidia_available_)
+            diagnostic_(device ? std::string("NVIDIA controls not offered: GPU 10DE:") + id + " is older than RTX 40"
+                               : std::string("NVIDIA controls not offered: no NVIDIA GPU found"));
+    }
     nvidia_ = std::move(driver);
     if (nvidia_) {
         nvidia_available_ = dlppc_available_ = true;
         gpu_unlocked_ = nvidia_->enabled;
         nvidia_min_watts_ = nvidia_->minimum_watts();
     }
+    nvidia_offered_ = nvidia_available_;
     SYSTEM_POWER_STATUS power{};
     on_ac_ = GetSystemPowerStatus(&power) && power.ACLineStatus == 1;
     const auto& p = session_.profile;

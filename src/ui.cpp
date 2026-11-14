@@ -1049,14 +1049,16 @@ private:
         s.put(get(advancedId), s.x + ref(3), s.y, s.extent(font_, L"Hide advanced controls") + ref(8), s.line);
         s.y += s.line + ref(14);
         if (expanded) s.open(L"Advanced");
-        s.check(unlockId, expanded && gpu, font_);
-        support(unlockSupportId, expanded && gpu, muted, ref(2));
-        s.check(dlppcId, expanded && gpu, font_);
+        // A GPU the NVIDIA controls cannot work on gets none of them, not greyed ones.
+        bool nvidia = gpu && state_.value("nvidiaOffered", true);
+        s.check(unlockId, expanded && nvidia, font_);
+        support(unlockSupportId, expanded && nvidia, muted, ref(2));
+        s.check(dlppcId, expanded && nvidia, font_);
         // Current limits apply with the Apply button above, like the other GPU settings.
-        if (expanded && gpu) s.y += ref(6);
+        if (expanded && nvidia) s.y += ref(6);
         c = s.columns({nvId, msId, inputId}, L"000.000 A");
-        for (int id : {nvId, msId, inputId}) s.slide(id, c, expanded && gpu);
-        support(boardSupportId, expanded && gpu, muted, ref(2));
+        for (int id : {nvId, msId, inputId}) s.slide(id, c, expanded && nvidia);
+        support(boardSupportId, expanded && nvidia, muted, ref(2));
         s.check(bypassId, expanded, font_);
         if (expanded) {
             note(
@@ -1072,7 +1074,7 @@ private:
                 muted, ref(2));
         if (expanded) s.close();
         int liveTop = -1;
-        if (gpu) {
+        if (nvidia) {
             s.open(L"GPU Limits (live)");
             liveTop = s.y;
             s.y += 8 * (ref(6) + s.line);
@@ -1474,7 +1476,8 @@ private:
                                                         {4, L"TGP Live / NPCF ACBT [0x788]:"},
                                                         {5, L"DB Max Live / NPCF AMAT [0x7D5]:"}};
         // Source headings only when the NVIDIA driver is a second source.
-        if (state_.value("enabled", std::set<std::string>{}).contains("gpuPower")) {
+        if (state_.value("enabled", std::set<std::string>{}).contains("gpuPower") &&
+            state_.value("nvidiaOffered", true)) {
             power.emplace(power.begin(), -1, L"EC");
             power.insert(power.end(), {{-1, L"NVIDIA Driver"}, {6, L"GPU Budget F7:"}, {7, L"CPU+GPU Budget TPP:"}});
         }
@@ -1703,7 +1706,8 @@ private:
                                     ? L"Board input current limit unavailable: no driver limit matches the GPU BIOS."
                                     : L"");
         powerHint_ = gpuError_;
-        if (gpuError_.empty() && g.is_object()) {
+        bool offered = state_.value("nvidiaOffered", true);
+        if (gpuError_.empty() && g.is_object() && offered) {
             auto failed = g.value("powerError", std::string{});
             if (failed.empty()) failed = g.value("currentsError", std::string{});
             auto stock = [&](const char* key) { return compact(g[key]["stockMa"].get<int>() / 1000.0); };
@@ -1732,9 +1736,10 @@ private:
         // Text that changes the layout relays out the page; live readings only repaint the table.
         auto key = cpuNote_ + L'\n' + cpuPreset_ + L'\n' + powerHint_ + L'\n' + liveReason_ + L'\n' +
                    text(get(unlockId)) + L'\n' + bypassText_ +
-                   std::to_wstring(int(advanced_) + 2 * state_.value("advanced", Json::object())
-                                                            .value("coolerFlag", Json::object())
-                                                            .value("available", false));
+                   std::to_wstring(int(advanced_) + 4 * offered +
+                                   2 * state_.value("advanced", Json::object())
+                                           .value("coolerFlag", Json::object())
+                                           .value("available", false));
         for (int id : {cpuSupportId, gpuSupportId, unlockSupportId, boardSupportId, bypassSupportId})
             key += L'\n' + text(get(id));
         if (key != powerKey_) {

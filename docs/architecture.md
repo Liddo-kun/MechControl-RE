@@ -61,6 +61,9 @@ profile declares it and the live EC version is one the image was checked against
 Controls withheld because a model or its firmware is unverified (this bypass, the
 NVIDIA unlock, features disabled by startup validation) stay visible but greyed, with
 the reason and a link that opens a GitHub issue prefilled with it and the model.
+Controls that cannot work on the hardware are hidden instead. The NVIDIA unlock, DLPPC,
+current limits, live table and driver readings are shown only with an NVIDIA GPU from
+RTX 40 on, decided at startup from the adapter's PCI device ID without waking the driver.
 The bypass is never saved, and the controller clears it on turn-off, sleep, display off,
 AC loss, a thermal trip, EC reinitialization, exit and a leftover value at startup;
 while a clear is pending, other EC writes are refused. The liquid cooler connection
