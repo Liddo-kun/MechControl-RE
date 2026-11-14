@@ -5,6 +5,9 @@
 
 namespace mech {
 using HidReport = std::array<uint8_t, 9>;
+// What an ITE 8291 per-key keyboard is sent to show one color on every key, or to turn off: 9-byte feature reports,
+// and after each row announcement that row's colors as a 65-byte output report (re/register_reference.md 7.1).
+std::vector<std::vector<uint8_t>> per_key_reports(const config::Zone&, bool save);
 class Lighting {
 public:
     using Send = std::function<void(int, const HidReport&)>;
@@ -32,12 +35,14 @@ private:
     void write_ec_keyboard(const config::Zone&);
     void io(const std::function<void()>&);
     void send(int, const HidReport&);
+    void transmit(int, std::span<const uint8_t>);
     void restore(bool reopen);
     EcSession& session_;
     config::ProfileStore& store_;
     std::function<void(const std::string&)> log_;
     std::array<Handle, 4> handles_;
     bool hardware_, sleeping_ = false;
+    bool per_key_ = false; // The keyboard's controller is an ITE 8291 that takes a color for each key.
     ULONGLONG resume_at_ = 0;
     Send output_;
     std::function<void(std::function<void()>)> run_io_;

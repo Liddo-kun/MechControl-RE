@@ -75,6 +75,22 @@ EcKeyboard ec_keyboard_state(const Zone& v) {
     return k;
 }
 }
+// Brightness is 0-50. The row report is the report ID, a zero, then 21 blue, 21 green and 21 red values. The
+// keyboard keeps the rows across a restart only when the mode report asks it to save.
+std::vector<std::vector<uint8_t>> per_key_reports(const Zone& v, bool save) {
+    int level = v.enabled ? (std::clamp(v.brightness, 0, 100) + 1) / 2 : 0;
+    if (!level) return {{0, 8, 1, 0, 0, 0, 0, 0, 0}};
+    std::vector<std::vector<uint8_t>> reports{{0, 8, 2, 0x33, 0, static_cast<uint8_t>(level), 0, 0, save}};
+    std::vector<uint8_t> row(65);
+    std::fill_n(row.begin() + 2, 21, v.b);
+    std::fill_n(row.begin() + 23, 21, v.g);
+    std::fill_n(row.begin() + 44, 21, v.r);
+    for (uint8_t i = 0; i < 6; ++i) {
+        reports.push_back({0, 0x16, 0, i, 0, 0, 0, 0, 0});
+        reports.push_back(row);
+    }
+    return reports;
+}
 Lighting::Lighting(EcSession& s, ProfileStore& store, std::function<void(const std::string&)> log, bool hardware,
                    Send send, std::function<void(std::function<void()>)> run_io,
                    std::function<void(const std::vector<EcWrite>&)> batch)
@@ -109,7 +125,12 @@ bool Lighting::open_device() {
         HDEVINFO h;
         ~List() { SetupDiDestroyDeviceInfoList(h); }
     } cleanup{devices};
-    std::vector<std::pair<std::wstring, USHORT>> paths;
+    struct Controller {
+        std::wstring path;
+        USHORT usage;
+        bool per_key;
+    };
+    std::vector<Controller> paths;
     std::string probes;
     int found = 0;
     SP_DEVICE_INTERFACE_DATA iface{sizeof(iface)};
@@ -145,15 +166,20 @@ bool Lighting::open_device() {
                       " input=" + std::to_string(caps.InputReportByteLength) +
                       " output=" + std::to_string(caps.OutputReportByteLength) + " usage=" + hex_text(caps.Usage, 4) +
                       " usagePage=" + hex_text(caps.UsagePage, 4);
+            HIDD_ATTRIBUTES id{sizeof(id)};
+            if (HidD_GetAttributes(probe.get(), &id))
+                probes += " pid=" + hex_text(id.ProductID, 4) + " rev=" + hex_text(id.VersionNumber, 4);
             if (status == HIDP_STATUS_SUCCESS && caps.FeatureReportByteLength == 9) {
-                paths.emplace_back(path, caps.Usage);
-                probes += " -> lighting controller";
+                // The one ITE 8291 the Linux drivers agree takes a color for each key (re/register_reference.md 7.1).
+                bool per_key = id.ProductID == 0xCE00 && id.VersionNumber == 3 && caps.OutputReportByteLength == 65;
+                paths.push_back({path, caps.Usage, per_key});
+                probes += per_key ? " -> per-key lighting controller" : " -> lighting controller";
             }
         }
     }
     log_("[HID] Found " + std::to_string(found) + " ITE (VID 048D) HID device paths" + probes);
     std::sort(paths.begin(), paths.end(), [](const auto& a, const auto& b) {
-        return CompareStringOrdinal(a.first.c_str(), -1, b.first.c_str(), -1, TRUE) == CSTR_LESS_THAN;
+        return CompareStringOrdinal(a.path.c_str(), -1, b.path.c_str(), -1, TRUE) == CSTR_LESS_THAN;
     });
     auto write = [&](int z, const std::wstring& path) {
         handles_[z] = Handle(CreateFileW(path.c_str(), GENERIC_WRITE, 3, nullptr, OPEN_EXISTING, 0, nullptr));
@@ -161,18 +187,22 @@ bool Lighting::open_device() {
             handles_[z] =
                 Handle(CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE, 3, nullptr, OPEN_EXISTING, 0, nullptr));
     };
-    auto kb = std::find_if(paths.begin(), paths.end(), [](auto& p) { return p.second == 1; });
-    auto bar = std::find_if(paths.begin(), paths.end(), [](auto& p) { return p.second == 2; });
+    auto kb = std::find_if(paths.begin(), paths.end(), [](auto& p) { return p.usage == 1; });
+    auto bar = std::find_if(paths.begin(), paths.end(), [](auto& p) { return p.usage == 2; });
+    per_key_ = false;
     if (kb != paths.end() || bar != paths.end()) {
-        if (kb != paths.end()) write(0, kb->first);
+        if (kb != paths.end()) {
+            write(0, kb->path);
+            per_key_ = kb->per_key && handles_[0];
+        }
         if (bar != paths.end()) {
-            write(2, bar->first);
-            write(3, bar->first);
+            write(2, bar->path);
+            write(3, bar->path);
         }
     } else
-        for (size_t i = 0; i < std::min<size_t>(paths.size(), 4); ++i) write(static_cast<int>(i), paths[i].first);
-    log_("HID lighting zones: keyboard=" + std::to_string(bool(handles_[0])) + " bar=" + std::to_string(available(2)) +
-         " logo=" + std::to_string(available(3)));
+        for (size_t i = 0; i < std::min<size_t>(paths.size(), 4); ++i) write(static_cast<int>(i), paths[i].path);
+    log_("HID lighting zones: keyboard=" + std::to_string(bool(handles_[0])) + (per_key_ ? " (per-key)" : "") +
+         " bar=" + std::to_string(available(2)) + " logo=" + std::to_string(available(3)));
     return std::any_of(handles_.begin(), handles_.end(), [](auto& h) { return bool(h); });
 }
 // Support byte 2 reports the keyboard in bit 2 and lets the host set its color with bit 5; without that the EC
@@ -218,8 +248,7 @@ void Lighting::sync() {
         state_.keyboard = z;
         store_.save_lighting(state_);
         log_("Keyboard backlight read from the EC: level " + std::to_string(held.level) + ", color " +
-             std::to_string(held.color[0]) + "/" + std::to_string(held.color[1]) + "/" +
-             std::to_string(held.color[2]));
+             std::to_string(held.color[0]) + "/" + std::to_string(held.color[1]) + "/" + std::to_string(held.color[2]));
     } catch (const std::exception& e) {
         log_(std::string("Keyboard readback failed; intent retained: ") + e.what());
     }
@@ -235,15 +264,26 @@ void Lighting::send(int z, const HidReport& report) {
         output_(z, report);
         return;
     }
+    transmit(z, report);
+}
+// Nine bytes are a feature report; anything else is an output report.
+void Lighting::transmit(int z, std::span<const uint8_t> report) {
     if (!available(z)) throw std::runtime_error("HID lighting zone unavailable");
-    auto packet = report;
-    if (HidD_SetFeature(handles_[z].get(), packet.data(), 9)) return;
+    std::vector<uint8_t> packet(report.begin(), report.end());
+    auto write = [&] {
+        DWORD written = 0;
+        return packet.size() == 9 ? HidD_SetFeature(handles_[z].get(), packet.data(), 9) != 0
+                                  : WriteFile(handles_[z].get(), packet.data(), static_cast<DWORD>(packet.size()),
+                                              &written, nullptr) != 0;
+    };
+    if (write()) return;
     auto error = GetLastError();
     if (error == 6 || error == 31 || error == 55 || error == 433 || error == 1167 || error == 1617) {
         open_device();
-        if (available(z) && HidD_SetFeature(handles_[z].get(), packet.data(), 9)) return;
+        if (available(z) && write()) return;
     }
-    throw std::system_error(GetLastError(), std::system_category(), "HidD_SetFeature");
+    throw std::system_error(GetLastError(), std::system_category(),
+                            packet.size() == 9 ? "HidD_SetFeature" : "HID output report");
 }
 void Lighting::zone(int z, const Zone& value, bool flash, bool color_only) {
     if (z != 0 && z != 2 && z != 3) throw std::invalid_argument("Unknown lighting zone");
@@ -255,6 +295,10 @@ void Lighting::zone(int z, const Zone& value, bool flash, bool color_only) {
                             : 0x23,
             speed = z == 0 ? 8 : 1, b = static_cast<uint8_t>(v.brightness);
     if (z == 0 && keyboard_on_ec()) return write_ec_keyboard(v);
+    if (z == 0 && per_key_)
+        return io([&] {
+            for (const auto& report : per_key_reports(v, flash)) transmit(z, report);
+        });
     io([&] {
         if (flash) {
             if (z == 3) throw std::invalid_argument("Logo persists through EC, not HID flash");

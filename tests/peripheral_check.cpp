@@ -114,6 +114,21 @@ void lighting(const std::filesystem::path& root) {
         refused = true;
     }
     check(refused, "explicit-null HID intent is not captured as all-off");
+    auto per_key = per_key_reports(Zone{true, 255, 128, 1, 75}, false);
+    std::vector<uint8_t> row(65, 128);
+    row[0] = row[1] = 0;
+    std::fill_n(row.begin() + 2, 21, uint8_t(1));
+    std::fill_n(row.begin() + 44, 21, uint8_t(255));
+    check(per_key.size() == 13 && per_key[0] == std::vector<uint8_t>{0, 8, 2, 0x33, 0, 38, 0, 0, 0} &&
+              per_key[1] == std::vector<uint8_t>{0, 0x16, 0, 0, 0, 0, 0, 0, 0} && per_key[2] == row &&
+              per_key[11] == std::vector<uint8_t>{0, 0x16, 0, 5, 0, 0, 0, 0, 0} && per_key[12] == row,
+          "per-key keyboard: user mode at brightness 0-50, then six announced rows of blue, green, red");
+    check(per_key_reports(Zone{true, 255, 128, 1, 100}, true)[0] ==
+                  std::vector<uint8_t>{0, 8, 2, 0x33, 0, 50, 0, 0, 1} &&
+              per_key_reports(Zone{false, 255, 128, 1, 75}, false) ==
+                  std::vector<std::vector<uint8_t>>{{0, 8, 1, 0, 0, 0, 0, 0, 0}} &&
+              per_key_reports(Zone{true, 255, 128, 1, 0}, false).size() == 1,
+          "per-key keyboard: save flag, and off as one report");
     state->bytes[0x402] = 0x88;
     state->bytes[0x403] = 0x13;
     state->bytes[0x404] = 0x94;

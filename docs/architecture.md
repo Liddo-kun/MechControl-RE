@@ -114,7 +114,8 @@ and the NVIDIA reads elsewhere skip a GPU outside D0. Direct3D and the event log
 `peripherals.*`, `cooler.*` and `ble.*` own HID lighting and BLE operations. A single-zone RGB
 keyboard has no HID controller; where EC support byte 2 reports one, its zone is written through
 the EC instead, and what the EC holds replaces the saved intent before that is shown, captured
-into a slot, or restored after the idle timer or sleep. Queue
+into a slot, or restored after the idle timer or sleep. A per-key ITE 8291 keyboard
+(`048D:CE00` revision 0.03) is one zone too: every key gets the zone's color. Queue
 acceptance is not completed cooler Apply or saved state. Unlocked GPU power writes
 qualify and maintain the live F7 laptop budget, which can fall below the VBIOS
 maximum when Dynamic Boost is off. Independent usable GPU features survive
