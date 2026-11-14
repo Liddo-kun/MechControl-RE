@@ -1110,6 +1110,7 @@ UserProfile Controller::capture(int slot) {
 void Controller::recover_settings() {
     reapply_ = false;
     thermal_->enforce();
+    if (lighting_) lighting_->restore_ec_bar();
     int slot = active_slot_ ? active_slot_ : store_.settings().last_slot;
     if (slot) {
         diagnostic_("Re-applying slot " + std::to_string(slot) + " after EC re-activation");

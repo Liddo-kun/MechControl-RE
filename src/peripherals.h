@@ -24,6 +24,9 @@ public:
     // The EC keeps its single-zone keyboard's state and the Fn keys change it, so what the EC holds replaces the
     // intent before the intent is shown, saved or restored. Not while the idle timer has the backlight off.
     void sync();
+    // The EC forgets its light bar at shutdown and EC initialization leaves it on the rainbow animation, so the
+    // intent is written again after both, also when it is off.
+    void restore_ec_bar();
     void idle(int);
     void resume(ULONGLONG now);
     void tick(ULONGLONG now, std::optional<DWORD> idle_ms = {});
@@ -33,6 +36,8 @@ private:
     bool open_device();
     bool keyboard_on_ec() const; // A single-zone RGB keyboard, which the EC drives and no HID controller does.
     void write_ec_keyboard(const config::Zone&);
+    bool bar_on_ec() const; // A light bar that the EC drives and no HID controller does.
+    void write_ec_bar(const config::Zone&);
     void io(const std::function<void()>&);
     void send(int, const HidReport&);
     void transmit(int, std::span<const uint8_t>);

@@ -89,6 +89,12 @@ inline constexpr int support = 0x766, // Bit 2: the keyboard is there. Bit 5: th
     color = 0x769,                    // Red, green and blue, 0-50 each.
     status = 0x78C;                   // Bits 7:5 level 0-4, bit 4 applies it, bit 1 backlight off.
 }
+// The light bar the EC drives where no HID controller does (re/register_reference.md 6.2).
+namespace ec_light_bar {
+inline constexpr int support = 0x765, // Bit 6: the machine has a light bar.
+    control = 0x748,                  // Bit 2 off, bit 3 dark during sleep, bit 7 the EC's rainbow animation.
+    color = 0x749;                    // Red, green and blue as PWM duty, 0-200 each.
+}
 // Curves contain active entries only, with raw 0..200 duty as in saved profiles.
 // The caller qualifies latch_mask: 0x04 for shared-bit firmware, 0xFF for the
 // reference whole-byte latch. There is deliberately no universal default.

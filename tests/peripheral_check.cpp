@@ -224,6 +224,41 @@ void keyboard_on_ec(const std::filesystem::path& root) {
               owner.intent().keyboard == Zone{true, 102, 102, 51, 50},
           "the idle timer returns the EC keyboard to what it showed, not to an older intent");
 }
+// A GM7ZG as its owner's reports show it: support byte 1 reports a light bar, no HID controller has one, and EC
+// initialization has left the control byte on the rainbow animation.
+void light_bar_on_ec(const std::filesystem::path& root) {
+    auto state = std::make_shared<FakeState>();
+    for (auto [a, v] : {std::pair{0x740, 16}, {0x7D2, 0}, {0x456, 0x80}, {0x765, 0xE0}, {0x748, 0x81}, {0x749, 200}})
+        state->bytes[a] = static_cast<uint8_t>(v);
+    auto log = [](const std::string& s) { std::cout << s << '\n'; };
+    EcSession session([&](const std::wstring&) { return std::make_unique<Channel>(state); }, log, false,
+                      [](unsigned) {}, profiles_directory(), Identity{"GMxZGxx", "fixture", "amd", uint8_t(16)});
+    auto path = root / "ec-light-bar";
+    std::filesystem::create_directories(path);
+    ProfileStore store(path, false, log);
+    using Writes = std::vector<std::pair<int, int>>;
+    Lighting owner(session, store, log, false);
+    check(owner.available(2) && !owner.available(0) && state->writes == Writes{{0x748, 0x0D}},
+          "support byte 1 bit 6 offers the light bar without a HID controller, and an unset intent turns it off");
+    state->writes.clear();
+    Zone orange{true, 255, 128, 0, 100};
+    owner.change(2, orange);
+    check(state->writes == Writes{{0x749, 200}, {0x74A, 100}, {0x74B, 0}, {0x748, 0x09}},
+          "EC light bar: color as duty 0-200, then static color with the off and rainbow bits cleared");
+    state->writes.clear();
+    owner.zone(2, Zone{true, 255, 128, 0, 50});
+    owner.zone(2, Zone{false, 255, 128, 0, 100});
+    owner.zone(2, Zone{true, 0, 0, 0, 100});
+    check(state->writes ==
+              Writes{{0x749, 100}, {0x74A, 50}, {0x74B, 0}, {0x748, 0x09}, {0x748, 0x0D}, {0x748, 0x0D}},
+          "EC light bar brightness scales the duty, and off and black set the off bit without writing a color");
+    state->bytes[0x748] = 0x81;
+    state->writes.clear();
+    owner.restore_ec_bar();
+    check(state->writes == Writes{{0x749, 200}, {0x74A, 100}, {0x74B, 0}, {0x748, 0x09}} &&
+              read_json(path / "lighting_state.json").get<LightingState>().light_bar == orange,
+          "after EC initialization the saved light-bar intent replaces the rainbow animation");
+}
 struct Pending {
     Handle entered{CreateEventW(nullptr, TRUE, FALSE, nullptr)}, release{CreateEventW(nullptr, TRUE, FALSE, nullptr)},
         returned{CreateEventW(nullptr, TRUE, FALSE, nullptr)};
@@ -580,6 +615,7 @@ int wmain(int argc, wchar_t** argv) {
         } else {
             lighting(root);
             keyboard_on_ec(root);
+            light_bar_on_ec(root);
             pending(root);
         }
         uninit_apartment();

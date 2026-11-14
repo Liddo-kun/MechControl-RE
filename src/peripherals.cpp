@@ -100,6 +100,10 @@ Lighting::Lighting(EcSession& s, ProfileStore& store, std::function<void(const s
     if (!batch_) batch_ = [this](const auto& writes) { session_.guard->apply(writes); };
     if (hardware_) open();
     if (keyboard_on_ec()) log_("Keyboard backlight: single-zone RGB driven by the EC");
+    if (bar_on_ec()) {
+        log_("Light bar: RGB driven by the EC");
+        restore_ec_bar();
+    }
     for (auto* zone : {&state_.logo, &state_.keyboard, &state_.light_bar})
         if (!*zone) log_("Lighting intent contains an explicit-null zone; it is unavailable, not an all-off default");
 }
@@ -253,8 +257,34 @@ void Lighting::sync() {
         log_(std::string("Keyboard readback failed; intent retained: ") + e.what());
     }
 }
+// Support byte 1 reports a light bar in bit 6. Without a HID controller for it, the EC drives it
+// (re/register_reference.md 6.2).
+bool Lighting::bar_on_ec() const {
+    return (session_.hardware.at(ec_light_bar::support).value_or(0) & 0x40) && !output_ && !handles_[2];
+}
+// The color registers are the PWM duty of the three LED channels, so brightness scales the color. The control
+// byte selects that static color or off, never the rainbow animation, and keeps the bar dark during sleep.
+void Lighting::write_ec_bar(const Zone& v) {
+    auto duty = [&](uint8_t c) { return static_cast<uint8_t>(rounded(c * v.brightness / 100.0 * 200 / 255)); };
+    std::array<uint8_t, 3> color{duty(v.r), duty(v.g), duty(v.b)};
+    bool on = v.enabled && color != std::array<uint8_t, 3>{};
+    std::vector<EcWrite> writes;
+    if (on)
+        for (int i = 0; i < 3; ++i) writes.push_back({ec_light_bar::color + i, color[i]});
+    writes.push_back({ec_light_bar::control, static_cast<uint8_t>(on ? 0x08 : 0x0C), 0x8C});
+    batch_(writes);
+}
+void Lighting::restore_ec_bar() {
+    if (!bar_on_ec() || !state_.light_bar) return;
+    try {
+        zone(2, sleeping_ ? Zone{} : *state_.light_bar);
+    } catch (const std::exception& e) {
+        log_(std::string("Light bar restore failed: ") + e.what());
+    }
+}
 bool Lighting::available(int z) const {
     if (z == 0 && keyboard_on_ec()) return true;
+    if (z == 2 && bar_on_ec()) return true;
     // The logo is also written to EC registers, which startup validation may have rejected.
     if (z == 3 && !session_.validation.lighting()) return false;
     return z >= 0 && z < 4 && (output_ || bool(handles_[z]));
@@ -295,6 +325,7 @@ void Lighting::zone(int z, const Zone& value, bool flash, bool color_only) {
                             : 0x23,
             speed = z == 0 ? 8 : 1, b = static_cast<uint8_t>(v.brightness);
     if (z == 0 && keyboard_on_ec()) return write_ec_keyboard(v);
+    if (z == 2 && bar_on_ec()) return write_ec_bar(v);
     if (z == 0 && per_key_)
         return io([&] {
             for (const auto& report : per_key_reports(v, flash)) transmit(z, report);
