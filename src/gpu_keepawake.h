@@ -7,7 +7,7 @@
 #include <string>
 
 namespace mech {
-// Holds the NVIDIA GPU awake while the screen is off and the PC is awake; see gpu_keepawake.cpp. The UI thread
+// Holds the NVIDIA GPU awake for the first minute after the screen goes off; see gpu_keepawake.cpp. The UI thread
 // owns it: it forwards the window's power, display and timer messages.
 class GpuKeepAwake {
 public:
@@ -41,8 +41,9 @@ private:
     std::optional<Panel> panel_;
     void* subscription_ = nullptr; // EVT_HANDLE of the Kernel-Power sleep event.
     bool enabled_ = false, off_ = false, seenOn_ = false, asleep_ = false, active_ = false, failed_ = false;
-    ULONGLONG last_ = 0;
+    ULONGLONG start_ = 0, last_ = 0; // Screen-off and the latest tick.
     unsigned ticks_ = 0;
+    unsigned lastMs_ = 0, longestMs_ = 0; // How long the Direct3D work of a tick took.
     Microsoft::WRL::ComPtr<ID3D11Device> device_;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext> context_;
     Microsoft::WRL::ComPtr<ID3D11Texture2D> target_, staging_;

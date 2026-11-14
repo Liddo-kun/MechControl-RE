@@ -56,11 +56,12 @@ runs out.
 
 **Power > Display-off wake crash workaround (dGPU mode)** works around an NVIDIA driver fault
 where the display may not come back (driver reset, black screen, sometimes a bluescreen) if
-the GPU wakes just after Windows powered it down with the screen off. While the screen is
-off and the PC is awake, MechControl gives the GPU a tiny piece of Direct3D work every 3
-seconds. It acts only while the NVIDIA GPU drives the laptop screen directly (hybrid mode
-off) and stops when the PC sleeps. It costs the GPU's idle power while the screen is off.
-It is off by default.
+the GPU wakes just after Windows powered it down with the screen off. For the first minute
+after the screen goes off, MechControl gives the GPU a tiny piece of Direct3D work every 3
+seconds, so the GPU is still awake if you come straight back. Then it lets the GPU power
+down, because a GPU held awake for many minutes fails at the wake too. It acts only while
+the NVIDIA GPU drives the laptop screen directly (hybrid mode off) and stops when the PC
+sleeps. It is off by default.
 
 ## Command line
 

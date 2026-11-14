@@ -104,8 +104,9 @@ and closed around each reading, because its handles crash when used after a GPU 
 only stores it). It runs on the UI thread from the window's display, suspend, display-change and
 timer messages, because it must not share the worker's waits. While the screen is off, the PC is
 awake and the NVIDIA adapter drives the active internal panel (Windows display configuration, so
-not in hybrid mode), it does a 1x1 Direct3D clear and read-back every 3 s so that Windows does not
-power the GPU down. Before each tick it reads the GPU's power state from the PnP record and stops
+not in hybrid mode), it does a 1x1 Direct3D clear and read-back every 3 s for the first minute, so
+that Windows does not power the GPU down while a quick return is likely; held longer, the wake fails
+in another way. Before each tick it reads the GPU's power state from the PnP record and stops
 for the rest of that screen-off period if the GPU is not in D0 or the app was frozen; it also stops
 on Kernel-Power event 566 (going to sleep), since Modern Standby sends no suspend broadcast. The
 fault is waking a GPU that has just powered down, so it uses Direct3D only, the path reported safe,

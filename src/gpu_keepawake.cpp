@@ -11,13 +11,18 @@
 // Works around an NVIDIA driver fault (seen on 610.62 to 621.24 with the NVIDIA GPU driving the panel): when the GPU
 // is powered up shortly after Windows powered it down, the display may not come back (driver reset, black
 // wallpaper, sometimes bugcheck 0x116). With the screen off, Windows powers the GPU down about 10 s after its last
-// piece of work. This gives the GPU one trivial piece of Direct3D work every few seconds while the screen is off,
-// so that power-down never happens. Ported from the tested standalone GpuKeepAwake. Its rules:
+// piece of work. This gives the GPU one trivial piece of Direct3D work every few seconds for the first holdMs after
+// the screen goes off, so a wake soon after screen-off finds the GPU awake. Ported from the standalone
+// GpuKeepAwake, which held the GPU for the whole screen-off period. Its rules:
 //   - It runs only when turned on, the NVIDIA GPU drives the internal panel (not hybrid mode), the screen is off and
 //     the PC is awake. Otherwise it holds no Direct3D device and no timer.
 //   - Screen off: one 1x1-pixel clear and read-back every tickMs, the first one tickMs after the screen-off notice,
 //     never at once. After a sleep, the stale screen-off notice arrives at wake-up just before screen-on, and the
 //     GPU must be left alone then.
+//   - After holdMs it lets the GPU power down until the next screen-on. A GPU held awake through a long screen-off
+//     fails at the wake in its own way: on fresh boots, 6 of 6 wakes failed after 10 to 13 minutes held awake and
+//     0 of 5 with the GPU left to power down. The wake that can still hit the fault is one about 10 s after the
+//     hold ends.
 //   - Sleep: Windows freezes desktop programs in sleep and sends no suspend broadcast for Modern Standby. As a second
 //     safeguard it also stops on Kernel-Power event 566 with NextSessionType 2 ("going to sleep"; screen-off is
 //     type 1) and on a suspend broadcast.
@@ -30,6 +35,7 @@
 namespace mech {
 namespace {
 constexpr UINT tickMs = 3000;     // Windows' idle-to-power-down threshold is 10 s.
+constexpr UINT holdMs = 60000;    // The GPU is held awake this long after screen-off.
 constexpr UINT staleMs = 8000;    // A longer gap between ticks means the app was frozen: the GPU may be down.
 constexpr UINT releaseMs = 30000; // The device is dropped this long after the screen came back on.
 std::string hex(HRESULT hr) {
@@ -145,8 +151,8 @@ void GpuKeepAwake::update() {
     if (want && !active_) {
         active_ = true;
         failed_ = false;
-        ticks_ = 0;
-        last_ = GetTickCount64();
+        ticks_ = lastMs_ = longestMs_ = 0;
+        start_ = last_ = GetTickCount64();
         KillTimer(window_, releaseTimer);
         SetTimer(window_, tickTimer, tickMs, nullptr); // First tick in tickMs, not now.
         log_("GPU keep-awake: screen off, holding the GPU awake");
@@ -160,7 +166,15 @@ void GpuKeepAwake::stop(const std::string& why) {
     active_ = false;
     KillTimer(window_, tickTimer);
     SetTimer(window_, releaseTimer, releaseMs, nullptr); // Not now: leave the GPU alone while the screen comes back.
-    log_("GPU keep-awake: stopped (" + why + ") after " + std::to_string(ticks_) + " ticks");
+    // The timing and the power state (a read of Windows' device records) are there to diagnose a failed wake.
+    std::string detail;
+    if (ticks_) {
+        int state = panel_ ? nv::Store::power_state(panel_->instance) : -1;
+        detail = "; last tick " + std::to_string(GetTickCount64() - last_) + " ms ago took " + std::to_string(lastMs_) +
+                 " ms, longest " + std::to_string(longestMs_) + " ms; GPU " +
+                 (state < 0 ? std::string("power state unknown") : "in D" + std::to_string(state));
+    }
+    log_("GPU keep-awake: stopped (" + why + ") after " + std::to_string(ticks_) + " ticks" + detail);
 }
 void GpuKeepAwake::timer(UINT_PTR id) {
     if (id == tickTimer) tick();
@@ -177,13 +191,22 @@ void GpuKeepAwake::tick() {
         seenOn_ = false;
         return stop("paused " + std::to_string(gap) + " ms; waiting for the next screen-on");
     }
-    last_ = now;
     if (int state = nv::Store::power_state(panel_->instance); state != 0) {
         seenOn_ = false;
         return stop((state < 0 ? std::string("GPU power state unknown") : "GPU already in D" + std::to_string(state)) +
                     "; waiting for the next screen-on");
     }
+    if (now - start_ >= holdMs) {
+        seenOn_ = false;
+        stop("held " + std::to_string(holdMs / 1000) + " s; the GPU may power down until the next screen-on");
+        KillTimer(window_, releaseTimer);
+        release(); // Now, while the GPU is awake: 30 s later it would wake a GPU that has just powered down.
+        return;
+    }
+    last_ = now;
     if (!device_ && !create()) return;
+    LARGE_INTEGER begin;
+    QueryPerformanceCounter(&begin);
     float color[4]{float(ticks_ & 1), 0, 0, 1};
     context_->ClearRenderTargetView(view_.Get(), color);
     context_->CopyResource(staging_.Get(), target_.Get());
@@ -195,6 +218,11 @@ void GpuKeepAwake::tick() {
         log_("GPU keep-awake: read-back failed " + hex(hr) + "; the device is rebuilt on the next tick");
         release(); // For example, the device was lost in a driver reset.
     }
+    LARGE_INTEGER end, frequency;
+    QueryPerformanceCounter(&end);
+    QueryPerformanceFrequency(&frequency);
+    lastMs_ = static_cast<unsigned>((end.QuadPart - begin.QuadPart) * 1000 / frequency.QuadPart);
+    if (lastMs_ > longestMs_) longestMs_ = lastMs_;
     ++ticks_;
 }
 bool GpuKeepAwake::create() {

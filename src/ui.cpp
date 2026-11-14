@@ -693,12 +693,12 @@ private:
         tip(reinterpret_cast<UINT_PTR>(get(keepAwakeId)),
             L"Works around an NVIDIA driver fault: if the GPU wakes just after Windows powered it down with the screen "
             L"off, the display may not come back (driver reset, black screen, sometimes a bluescreen).\n\n"
-            L"While the screen is off and the PC is awake, MechControl gives the GPU a tiny piece of Direct3D work "
-            L"every 3 seconds, so Windows never powers it down. It acts only while the NVIDIA GPU drives the laptop "
-            L"screen directly (hybrid mode off), never wakes a GPU that is already powered down, and stops when the "
-            L"PC goes to sleep, so the GPU still powers down in sleep.\n\n"
-            L"Cost: the GPU's idle power (about 7 W on an RTX 5090 Laptop) while the screen is off and the PC is "
-            L"awake. Saved as an application setting, not in a profile.",
+            L"For the first minute after the screen goes off, MechControl gives the GPU a tiny piece of Direct3D work "
+            L"every 3 seconds, so the GPU is still awake if you come straight back. Then it lets the GPU power down, "
+            L"because a GPU held awake for many minutes fails at the wake too. It acts only while the NVIDIA GPU "
+            L"drives the laptop screen directly (hybrid mode off), never wakes a GPU that is already powered down, "
+            L"and stops when the PC goes to sleep.\n\n"
+            L"Saved as an application setting, not in a profile.",
             TTF_IDISHWND);
         for (int id : {nvId, msId, inputId})
             tip(reinterpret_cast<UINT_PTR>(get(id)),
