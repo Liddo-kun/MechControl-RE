@@ -385,12 +385,25 @@ bool Controller::matches(int action) {
     return true;
 }
 bool Controller::initialize(std::vector<std::string>& errors) {
+    const auto& p = session_.profile;
+    // On firmware that reports acceptance, the EC clears bit 2 of the 5 written. Elsewhere bit 2 is the EC's own.
+    bool ack = p.activation_ack;
+    // Bits 6:5 of 0x7C5 as the reference writes them. Where the profile names them as the NVIDIA Whisper Mode
+    // switch and its "tell the driver" request, that sets Whisper Mode's frame-rate cap; it is turned off as the
+    // OEM service does outside its quiet mode, with the level the driver reported (re/register_reference.md 11.8).
+    std::vector<EcWrite> mode{{0x7C5, 96, 96}};
+    auto whisper = p.bitfields.find("whisperMode"), request = p.bitfields.find("whisperModeApply");
+    if (whisper != p.bitfields.end() && request != p.bitfields.end()) {
+        uint8_t apply = request->second.get_mask();
+        mode = {{hex(whisper->second.reg), apply, static_cast<uint8_t>(apply | whisper->second.get_mask())},
+                {0x7C6, 0, 3}};
+    }
     // Each reference init step runs even after an independent step fails.
     const std::vector<std::vector<EcWrite>> steps = {{{0x709, 5}, {0x708, 1}},
-                                                     {{0x741, 5}},
+                                                     {ack ? EcWrite{0x741, 5} : EcWrite{0x741, 1, 5}},
                                                      {{0x748, 129}},
                                                      {{0x726, 128, 128}, {0x727, 64, 64}},
-                                                     {{0x7C5, 96, 96}},
+                                                     mode,
                                                      {{0x7C7, uint8_t(cooler_flag_ ? 0x0E : 0x0C)}},
                                                      {{0x706, 65}}};
     std::string log = "--- EC Initialization ---";
@@ -424,15 +437,16 @@ bool Controller::initialize(std::vector<std::string>& errors) {
     uint8_t state = 0;
     for (unsigned i = 0; i <= 30 && !acknowledged; ++i) {
         state = session_.transport().read(0x741);
-        acknowledged = (state & 5) == 1;
+        acknowledged = (state & (ack ? 5 : 1)) == 1;
         if (!acknowledged && i != 30) wait_(100);
     }
+    std::string required = ack ? "bit 0 set, bit 2 cleared required" : "bit 0 set required";
     if (!acknowledged)
-        errors.push_back(
-            "EC activation not acknowledged (0x741 bit 0 set, bit 2 cleared required); the EC may ignore power limit and fan writes");
+        errors.push_back("EC activation not acknowledged (0x741 " + required +
+                         "); the EC may ignore power limit and fan writes");
     log += "\n  0x741 = " + hex_text(state) +
-           (acknowledged ? ": activation acknowledged"
-                         : ": activation not acknowledged (bit 0 set, bit 2 cleared required)");
+           (acknowledged ? ack ? ": activation acknowledged" : ": activated"
+                         : ": activation not acknowledged (" + required + ")");
     diagnostic_(log + (errors.empty() ? "\n  All steps completed"
                                       : "\n  Completed with " + std::to_string(errors.size()) + " error(s)"));
     return acknowledged;

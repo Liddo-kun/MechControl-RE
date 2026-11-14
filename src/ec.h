@@ -54,6 +54,7 @@ private:
     bool read_only_, recovering_ = false;
     std::set<int> allow_;
     std::map<int, config::Redirect> redirects_;
+    std::map<int, uint8_t> requests_; // Bits the EC takes as a request and clears, which a readback cannot confirm.
     std::function<void(unsigned)> wait_;
 };
 // Complete, model-range-checked EC groups. NVIDIA/thermal policy is the caller's responsibility.

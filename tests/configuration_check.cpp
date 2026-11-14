@@ -55,7 +55,7 @@ int main(int argc, char** argv) try {
     raw(encoding / "utf8.json", std::string("\xEF\xBB\xBF") + "{\"pl1\":80}");
     require(read_json(encoding / "utf8.json")["pl1"] == 80, "UTF-8 BOM input");
     auto files = manual_profiles(profiles);
-    require(files.size() == 46, "Runtime profile count");
+    require(files.size() == 47, "Runtime profile count");
     for (const auto& f : files) {
         if (f.stem() == "IDY_7Y_defaults") {
             fails([&] { load_machine(f); });
@@ -87,7 +87,7 @@ int main(int argc, char** argv) try {
     Identity unknown;
     unknown.cpu_vendor = "amd";
     auto manual = select_profile(profiles, unknown, [&](const auto& list) -> std::optional<std::filesystem::path> {
-        require(list.size() == 46, "Unfiltered manual list");
+        require(list.size() == 47, "Unfiltered manual list");
         return profiles / "IDY_7Y.json";
     });
     require(manual.method == "manual selection", "Manual selection");

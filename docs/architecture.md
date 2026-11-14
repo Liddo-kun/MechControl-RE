@@ -42,6 +42,12 @@ A `fanCurveLatch` bitfield selects read-modify-write of the `0x7C6` latch, and
 not Battery Saver. IDY_7Y uses `fanCurveLatch` because Intel EC 77.0 treats `0x7C6`
 bit 6 as a power-button request. Other profiles write the whole byte.
 
+EC init is the same on every model except where a profile says the firmware differs.
+`GMxZGxx.json` does: its EC never acknowledges activation (`activationAck` false), and bits
+6:5 of `0x7C5` are the NVIDIA Whisper Mode switch and its request (`whisperMode`,
+`whisperModeApply`), which init turns off instead of setting. The guard does not expect a
+request bit to read back.
+
 `ec.*` and `ec_session.*` own the OEM transport, activation and central WriteGuard.
 The guard admits one fixed set of addresses on every model, plus the EC bypass
 register of a profile that declares it.

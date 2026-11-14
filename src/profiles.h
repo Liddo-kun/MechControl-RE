@@ -61,6 +61,9 @@ struct MachineProfile {
     std::optional<std::map<std::string, Mode>> modes;
     std::optional<std::vector<std::string>> mode_presets; // EC presets extraction may expose; absent keeps all three.
     std::optional<EcBypass> ec_bypass;
+    // The EC clears 0x741 bit 2 once it has accepted activation. Firmware that gives the bit another use is told
+    // to activate with bit 0 alone.
+    bool activation_ack = true;
     int reg(const std::string& name) const;
     int tj_max() const;
     int tgp_offset() const;

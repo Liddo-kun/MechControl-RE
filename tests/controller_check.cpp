@@ -25,6 +25,7 @@ struct State {
     bool activated = false, repair_fans_on_activation = false;
     int fan_reads_before_activation = 0;
     bool amd = false;
+    std::optional<EcWrite> consumed; // A request bit the EC clears as soon as it is written.
     State() {
         for (auto [a, v] : std::initializer_list<std::pair<int, int>>{
                  {0x740, 26},   {0x741, 1},    {0x727, 128},  {0x7D2, 1},  {0x783, 100}, {0x784, 150},
@@ -61,6 +62,8 @@ public:
         if (s_->fail_write == a) throw std::system_error(ERROR_GEN_FAILURE, std::system_category());
         s_->writes.emplace_back(a, words[1]);
         if (s_->ignore != a) s_->bytes[a] = static_cast<uint8_t>(words[1]);
+        if (s_->consumed && s_->consumed->address == a)
+            s_->bytes[a] = static_cast<uint8_t>(s_->bytes[a] & ~s_->consumed->mask);
         if (a == 0x741 && words[1] == 5) {
             s_->activated = true;
             s_->bytes[a] = 1;
@@ -358,6 +361,33 @@ void startup_degradation(const std::filesystem::path& root) {
     check(errors.size() == 2 && errors[0].starts_with("0x741: ") &&
               errors[1].find("not acknowledged") != std::string::npos,
           "unacknowledged activation is a startup warning, not a controller failure");
+}
+// A GM7ZG as its owner's reports show it (baseboard GMxZGxx, EC 96.0): the EC keeps 0x741 bit 2 for itself, and
+// bits 6:5 of 0x7C5 switch NVIDIA Whisper Mode, bit 6 being a request the EC clears.
+void whisper_firmware(const std::filesystem::path& root) {
+    auto path = root / "whisper-firmware";
+    std::filesystem::create_directories(path);
+    auto s = std::make_shared<State>();
+    s->amd = true;
+    s->consumed = EcWrite{0x7C5, 0, 0x40};
+    for (auto [a, v] : {std::pair{0x740, 16}, {0x741, 0x24}, {0x7D2, 0}, {0x456, 0x80}, {0x7C5, 0xA0}, {0x7C6, 0x1B}})
+        s->bytes[a] = static_cast<uint8_t>(v);
+    EcSession session([&](const std::wstring&) { return std::make_unique<Fake>(s); }, [](const std::string&) {}, false,
+                      [](unsigned) {}, profiles_directory(), Identity{"GMxZGxx", "fixture", "amd", uint8_t{16}});
+    Controller c(session, path, [](const std::string&) {}, [](unsigned) {}, {}, false, {}, false);
+    auto errors = c.start();
+    auto written = [&](int address) {
+        std::vector<int> values;
+        for (auto [a, v] : s->writes)
+            if (a == address) values.push_back(v);
+        return values;
+    };
+    check(session.profile.project_id == "GMxZGxx" && session.selection.method == "baseboard pattern",
+          "the GMxZGxx baseboard selects its own profile ahead of the shared project ID");
+    check(errors.empty() && written(0x741) == std::vector<int>{0x21},
+          "activation sets bit 0 alone where the EC does not acknowledge with bit 2, and is not a warning");
+    check(written(0x7C5).front() == 0xC0 && s->bytes[0x7C5] == 0x80 && written(0x7C6).front() == 0x18,
+          "Whisper Mode is switched off and the driver told, the fan-curve bit kept and the request not rewritten");
 }
 void gpu_integration(const std::filesystem::path& root) {
     auto backend = std::make_unique<GpuFixture>();
@@ -2108,6 +2138,7 @@ int main(int argc, char** argv) {
             root = base / (stem + "-" + std::to_string(suffix));
         integration(root);
         startup_degradation(root);
+        whisper_firmware(root);
         gpu_integration(root);
         thermal(root);
         recovery(root);
