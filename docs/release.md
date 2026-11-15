@@ -17,7 +17,8 @@ hardware control tool at the same time.
 Extract the whole archive into a folder you can write to, and keep the `Profiles`
 folder next to `MechControl.exe`. Run `MechControl.exe` and approve elevation. It
 starts hidden in the notification area. Use the tray icon to show it. Closing the
-window hides it; choose **Exit** in the tray menu to stop it. Settings, the five
+window hides it; choose **Exit** in the tray menu to stop it. The window follows the
+light or dark app mode chosen in Windows' color settings. Settings, the five
 profile slots, lighting and cooler state and `mechcontrol.log` are kept next to the
 executable.
 

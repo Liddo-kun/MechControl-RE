@@ -1,4 +1,5 @@
 #include "fan_chart.h"
+#include "theme.h"
 #include <commctrl.h>
 #include <objidl.h>
 #include <windowsx.h>
@@ -17,15 +18,7 @@ using std::max;
 namespace mech {
 namespace {
 namespace gp = Gdiplus;
-// The reference drew its curves with GDI+. It starts on the first paint, so the hidden tray app never loads it.
-bool gdiplus() {
-    static const bool started = [] {
-        ULONG_PTR token = 0;
-        gp::GdiplusStartupInput input;
-        return gp::GdiplusStartup(&token, &input, nullptr) == gp::Ok;
-    }();
-    return started;
-}
+gp::Color color(COLORREF c, BYTE alpha = 255) { return {alpha, GetRValue(c), GetGValue(c), GetBValue(c)}; }
 // The reference FanCurvePanel.
 struct Chart {
     config::Curve curve; // Empty until the owner supplies real data. Fixture seeds live only in the fixture.
@@ -35,6 +28,7 @@ struct Chart {
     UINT dpi = 96;
     std::wstring title, tip;
     HWND tooltip = nullptr;
+    bool darkTip = false;
     // The reference drew its pixel constants unscaled on a 144 DPI screen; scaling from 144 DPI keeps its proportions.
     float ref(float n) const { return n * dpi / 144; }
     int count() const { return int(curve.temp_up.size()); }
@@ -113,7 +107,7 @@ struct Chart {
         auto dc = CreateCompatibleDC(target);
         auto bitmap = CreateCompatibleBitmap(target, std::max(1L, client.right), std::max(1L, client.bottom));
         auto oldBitmap = SelectObject(dc, bitmap);
-        FillRect(dc, &client, static_cast<HBRUSH>(GetStockObject(WHITE_BRUSH)));
+        FillRect(dc, &client, brush(palette().card));
         if (gdiplus()) draw(window, dc);
         BitBlt(target, 0, 0, client.right, client.bottom, dc, 0, 0, SRCCOPY);
         SelectObject(dc, oldBitmap);
@@ -125,10 +119,12 @@ struct Chart {
         g.SetSmoothingMode(gp::SmoothingModeAntiAlias);
         gp::Font bold(L"Segoe UI", 9.0f * dpi / 72, gp::FontStyleBold, gp::UnitPixel),
             tiny(L"Segoe UI", 7.0f * dpi / 72, gp::FontStyleRegular, gp::UnitPixel);
-        gp::SolidBrush black(gp::Color(0, 0, 0)), gray(gp::Color(105, 105, 105)), smoke(gp::Color(245, 245, 245)),
-            fill(gp::Color(30, 65, 105, 225)), blue(gp::Color(65, 105, 225)), orange(gp::Color(255, 69, 0));
-        gp::Pen grid(gp::Color(190, 195, 200)), axis(gp::Color(0, 0, 0)), line(gp::Color(65, 105, 225), ref(2)),
-            hysteresis(gp::Color(130, 65, 105, 225), ref(1.5f)), current(gp::Color(200, 220, 80, 80), ref(1.5f));
+        auto& c = palette();
+        gp::SolidBrush black(color(c.text)), gray(color(c.muted)), smoke(color(c.window)),
+            fill(color(c.link, c.dark ? 48 : 36)), blue(color(c.link)), orange(gp::Color(255, 112, 40));
+        gp::Pen grid(color(c.border)), axis(color(c.muted)), line(color(c.link), ref(2)),
+            hysteresis(color(c.link, 130), ref(1.5f)), current(color(c.error, 200), ref(1.5f)),
+            ring(color(c.card), ref(1.5f));
         hysteresis.SetDashStyle(gp::DashStyleDash);
         current.SetDashStyle(gp::DashStyleDot);
         auto label = [&](const std::wstring& s, float x, float y, bool center) {
@@ -196,7 +192,7 @@ struct Chart {
         for (int i = 0; i < n; ++i) {
             auto h = handle(p, i);
             g.FillEllipse(i == selected ? &orange : &blue, h.X - r, h.Y - r, 2 * r, 2 * r);
-            g.DrawEllipse(&axis, h.X - r, h.Y - r, 2 * r, 2 * r);
+            g.DrawEllipse(&ring, h.X - r, h.Y - r, 2 * r, 2 * r);
         }
     }
 };
@@ -224,6 +220,10 @@ LRESULT CALLBACK chartProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
     }
     case WM_ERASEBKGND: return 1;
     case WM_PAINT: {
+        if (c->darkTip != palette().dark) {
+            c->darkTip = palette().dark;
+            systemTheme(c->tooltip, L"DarkMode_Explorer");
+        }
         PAINTSTRUCT ps;
         auto dc = BeginPaint(window, &ps);
         c->paint(window, dc);
@@ -314,15 +314,15 @@ void registerFanChart(HINSTANCE instance) {
 }
 // The reference LinkedFanStatusBar.
 void paintLinkedStatus(HDC dc, const RECT& bar, const config::Json& status, UINT dpi) {
-    FrameRect(dc, &bar, GetSysColorBrush(COLOR_WINDOWFRAME));
+    auto& c = palette();
+    FrameRect(dc, &bar, brush(c.border));
     if (!gdiplus()) return;
     auto ref = [dpi](float n) { return n * dpi / 144; };
     auto number = [&](const char* key) { return status.value(key, 0); };
     gp::Graphics g(dc);
     float x = float(bar.left + 1), y = float(bar.top + 1), width = float(bar.right - bar.left - 2),
           height = float(bar.bottom - bar.top - 2), at = x + ref(4);
-    gp::SolidBrush back(gp::Color(245, 245, 245)), fill(gp::Color(80, 65, 105, 225)), black(gp::Color(0, 0, 0)),
-        gray(gp::Color(105, 105, 105));
+    gp::SolidBrush back(color(c.window)), fill(color(c.link, 80)), black(color(c.text)), gray(color(c.muted));
     g.FillRectangle(&back, x, y, width, height);
     g.FillRectangle(&fill, x, y, width * float(number("duty")) / 100, height);
     gp::Font font(L"Segoe UI", 9.0f * dpi / 72, gp::FontStyleRegular, gp::UnitPixel),

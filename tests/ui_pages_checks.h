@@ -63,6 +63,7 @@ void Application::checkPages(const std::filesystem::path& directory, const std::
         ReleaseDC(nullptr, screen);
     };
     wait([&] { return ready_; });
+    applyTheme(false); // Whatever Windows' app mode; the dark pages are captured at the end.
     show();
     wait([&] { return state_.contains("cpu"); });
     CHANGEFILTERSTRUCT filter{sizeof filter};
@@ -276,6 +277,36 @@ void Application::checkPages(const std::filesystem::path& directory, const std::
             capture(L"page-" + std::to_wstring(p) + L"-" + std::to_wstring(dpi));
         }
     }
+    applyTheme(true);
+    for (UINT dpi : {96u, 144u}) {
+        RECT r{80, 40, 80 + MulDiv(940, dpi, 96), 40 + MulDiv(760, dpi, 96)};
+        SendMessageW(window_, WM_DPICHANGED, MAKELONG(dpi, dpi), reinterpret_cast<LPARAM>(&r));
+        for (int p = 0; p < 7; ++p) {
+            page(p);
+            wait([&] { return !busy_; });
+            capture(L"dark-" + std::to_wstring(p) + L"-" + std::to_wstring(dpi));
+        }
+    }
+    // A device operation disables the pages; re-enabling one must not let the static control paint over its sections.
+    // Read from the screen, because capture() repaints everything.
+    page(1);
+    wait([&] { return !busy_; });
+    auto cardPixel = [&] {
+        GdiFlush();
+        DwmFlush();
+        RECT r{};
+        GetWindowRect(pages_[1].window, &r);
+        auto screen = GetDC(nullptr);
+        COLORREF c = GetPixel(screen, r.left + scale(40), r.top + scale(60));
+        ReleaseDC(nullptr, screen);
+        return c;
+    };
+    check(cardPixel() == palette().card, "the Fan Control page shows its first section");
+    busy(true);
+    pump();
+    busy(false);
+    pump();
+    check(cardPixel() == palette().card, "a page keeps its painted sections after a device operation");
     report
         << "Injected DPI/failures and synthetic hardware, not physical qualification. Production widgets/controllers were used.\n";
     DestroyWindow(window_);

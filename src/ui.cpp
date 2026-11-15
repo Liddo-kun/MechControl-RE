@@ -2,6 +2,7 @@
 #include "fan_chart.h"
 #include "config_text.h"
 #include "gpu_keepawake.h"
+#include "theme.h"
 #ifdef MECHCONTROL_WITH_CLI
 #include "cli_server.h"
 #endif
@@ -180,17 +181,16 @@ void openUnelevated(const std::wstring& address) {
 }
 // The charge limits offered, in the order of their list. 100 is no limit.
 constexpr int chargeLimits[]{100, 90, 85, 80, 75, 70, 65, 60, 55, 50, 45, 40};
-constexpr COLORREF okColor = RGB(46, 125, 50), warnColor = RGB(230, 124, 0), errorColor = RGB(198, 40, 40),
-                   frameColor = RGB(180, 180, 180);
 // Green up to normal, amber midway, red from limiting; unknown keeps the normal text color.
 COLORREF tint(std::optional<double> value, double normal, double limiting) {
-    if (!value) return GetSysColor(COLOR_BTNTEXT);
+    auto& p = palette();
+    if (!value) return p.text;
     auto mix = [](COLORREF a, COLORREF b, double x) {
         auto c = [x](int p, int q) { return int(p + (q - p) * x); };
         return RGB(c(GetRValue(a), GetRValue(b)), c(GetGValue(a), GetGValue(b)), c(GetBValue(a), GetBValue(b)));
     };
     double f = std::clamp((*value - normal) / (limiting - normal), 0.0, 1.0);
-    return f < 0.5 ? mix(okColor, warnColor, f * 2) : mix(warnColor, errorColor, f * 2 - 1);
+    return f < 0.5 ? mix(p.ok, p.warn, f * 2) : mix(p.warn, p.error, f * 2 - 1);
 }
 // GPU Limits (live): the four headings, then the seven rows, each with the reference tooltip.
 constexpr const wchar_t* liveCaptions[]{
@@ -264,7 +264,7 @@ struct Text {
 struct Support {
     const wchar_t *subject = L"", *also = L"";
     std::wstring reason;
-    COLORREF color = GetSysColor(COLOR_BTNTEXT);
+    COLORREF color = 0;
 };
 struct Page {
     HWND window = nullptr;
@@ -472,6 +472,9 @@ private:
             return 0;
         }
         if (message == WM_PARENTNOTIFY && LOWORD(wp) == WM_CREATE) return 0;
+        // A static control repaints itself in one color when enabled, over the painted sections; the page looks the
+        // same either way.
+        if (message == WM_ENABLE) return 0;
         if (message == WM_ERASEBKGND) return 1;
         if (message == WM_PAINT) {
             PAINTSTRUCT ps{};
@@ -480,6 +483,15 @@ private:
             EndPaint(window, &ps);
             return 0;
         }
+        // Transparent links paint the page behind them.
+        if (message == WM_PRINTCLIENT) {
+            RECT r{};
+            GetClientRect(window, &r);
+            app->paintPage(app->index(window), reinterpret_cast<HDC>(wp), r);
+            return 0;
+        }
+        if (message >= WM_CTLCOLORMSGBOX && message <= WM_CTLCOLORSTATIC)
+            return app->colors(message, reinterpret_cast<HDC>(wp), reinterpret_cast<HWND>(lp));
         // A static is transparent to the mouse; the live table's tooltips need it.
         if (message == WM_NCHITTEST && window == app->pages_[0].window) {
             auto hit = DefSubclassProc(window, message, wp, lp);
@@ -533,6 +545,7 @@ private:
         if (!child) throw std::runtime_error("Cannot create native control");
         if (id) controls_[id] = child;
         SetWindowSubclass(child, focusProcedure, 1, reinterpret_cast<DWORD_PTR>(this));
+        if (!wcscmp(type, TRACKBAR_CLASSW) || !wcscmp(type, WC_LINK)) paintWhole(child);
         return child;
     }
     HWND get(int id) const {
@@ -583,13 +596,21 @@ private:
     // Power page metrics are the reference PowerTab's pixel constants, which it drew unscaled on its 144 DPI
     // screen. Scaling them from 144 DPI keeps the same proportions to the text at every DPI.
     int ref(int n) const { return MulDiv(n, dpi_, 144); }
+    // Where a section's title sits in its card: below the top edge, and right of the accent mark that starts at the
+    // content's inset.
+    int titleTop() const { return ref(10); }
+    int titleLeft() const { return ref(29); }
     void place(HWND child, int x, int y, int width, int height) {
         MoveWindow(child, x, y, std::max(0, width), std::max(0, height), TRUE);
     }
     HWND row(int page, int id, const wchar_t* title, const wchar_t* type, DWORD style) {
         return control(pages_[page].window, type, title, style, id);
     }
-    void button(int page, int id, const wchar_t* title) { row(page, id, title, L"BUTTON", WS_TABSTOP | BS_PUSHBUTTON); }
+    // A primary button (Apply) is filled with the accent color.
+    void button(int page, int id, const wchar_t* title, bool primary = false) {
+        row(page, id, title, L"BUTTON", WS_TABSTOP | BS_PUSHBUTTON);
+        if (primary) primary_.insert(id);
+    }
     void check(int page, int id, const wchar_t* title) {
         row(page, id, title, L"BUTTON", WS_TABSTOP | BS_AUTOCHECKBOX);
     }
@@ -613,6 +634,7 @@ private:
             r.number = control(pages_[page].window, L"EDIT", L"", WS_TABSTOP | WS_BORDER | ES_NUMBER | ES_AUTOHSCROLL,
                                id + 1000);
             SendMessageW(r.number, EM_SETLIMITTEXT, 9, 0);
+            styleFrame(r.number);
         }
         value(id, initial, minimum, maximum);
     }
@@ -622,8 +644,10 @@ private:
             auto box = control(pages_[page].window, L"EDIT", L"0", WS_TABSTOP | WS_BORDER | ES_NUMBER | ES_RIGHT,
                                base + n + 1000);
             SendMessageW(box, EM_SETLIMITTEXT, 3, 0);
+            styleFrame(box);
             auto spin = control(pages_[page].window, UPDOWN_CLASSW, L"",
                                 UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_NOTHOUSANDS, base + n);
+            styleSpin(spin);
             SendMessageW(spin, UDM_SETBUDDY, reinterpret_cast<WPARAM>(box), 0);
             SendMessageW(spin, UDM_SETRANGE32, 0, 255);
         }
@@ -640,6 +664,7 @@ private:
         dpi_ = GetDpiForWindow(window_);
         updating_ = true;
         tabs_ = control(window_, WC_TABCONTROLW, L"", WS_TABSTOP | WS_CLIPSIBLINGS, tabsId);
+        styleTabs(tabs_);
         const wchar_t* names[]{L"Power",    L"Fan Control",   L"Thermal Failsafe", L"Battery",
                                L"Lighting", L"Liquid Cooler", L"System Info"};
         for (int i = 0; i < 7; ++i) {
@@ -673,7 +698,7 @@ private:
         slider(0, msId, L"MSVDD / Fabric current limit", 0, 1, 0);
         slider(0, inputId, L"Board input current limit", 0, 1, 0);
         SendMessageW(get(inputId), TBM_SETLINESIZE, 0, 100); // Board input moves in milliamps; arrow keys step 0.1 A.
-        button(0, powerApplyId, L"&Apply");
+        button(0, powerApplyId, L"&Apply", true);
         button(0, powerReadId, L"Read from EC");
         row(0, advancedId, L"<a>Show advanced controls</a>", WC_LINK, WS_TABSTOP | LWS_TRANSPARENT);
         support(0, cpuSupportId, L"CPU power control");
@@ -715,16 +740,16 @@ private:
                  L"% of the stock current; raising an older ceiling restarts the GPU."),
                 TTF_IDISHWND);
         check(1, boostId, L"Enable Fan Boost");
-        button(1, boostApplyId, L"Apply");
+        button(1, boostApplyId, L"Apply", true);
         check(1, switchId, L"Enable Fan Switch Speed");
         slider(1, switchMsId, L"Switch Speed", 1, 127, 3);
-        button(1, switchApplyId, L"Apply");
+        button(1, switchApplyId, L"Apply", true);
         check(1, curveId, L"Custom Fan Curve");
         check(1, linkId, L"Link Fans");
         support(1, fanSupportId, L"Fan control");
         row(1, cpuChartId, L"CPU Fan Curve", chartClass, WS_BORDER);
         row(1, gpuChartId, L"GPU Fan Curve", chartClass, WS_BORDER);
-        button(1, fanApplyId, L"Apply");
+        button(1, fanApplyId, L"Apply", true);
         button(1, fanReadId, L"Read from EC");
         row(1, debugCpuId, L"CPU (Sent to EC)", chartClass, WS_BORDER);
         row(1, debugGpuId, L"GPU (Sent to EC)", chartClass, WS_BORDER);
@@ -737,19 +762,19 @@ private:
         check(2, fanBoostId, L"Turn on fan boost when tripped");
         check(2, showWindowId,
               L"Bring up the MechControl window when tripped (safety alert, tray alert and sound remain enabled)");
-        button(2, protectionApplyId, L"Apply");
+        button(2, protectionApplyId, L"Apply", true);
         button(2, resetId, L"Reset");
         button(2, testId, L"Test Failsafe");
         row(2, detailsId, L"<a>Safety details and limitations</a>", WC_LINK, WS_TABSTOP | LWS_TRANSPARENT);
         combo(3, batteryModeId, {L"High Capacity (Performance)", L"Balanced", L"Stationary (Health)"});
-        button(3, batteryApplyId, L"Apply");
+        button(3, batteryApplyId, L"Apply", true);
         support(3, batterySupportId, L"Battery charge mode");
         combo(3, chargeLimitId, {L"Off (charge to 100%)"});
         for (int limit : chargeLimits)
             if (limit < 100)
                 SendMessageW(get(chargeLimitId), CB_ADDSTRING, 0,
                              reinterpret_cast<LPARAM>((std::to_wstring(limit) + L"%").c_str()));
-        button(3, chargeApplyId, L"Apply");
+        button(3, chargeApplyId, L"Apply", true);
         support(3, chargeSupportId, L"Battery charge limit");
         row(3, batteryTextId, L"Battery telemetry is read every two seconds only while this page is visible.", L"EDIT",
             ES_MULTILINE | ES_READONLY);
@@ -760,7 +785,7 @@ private:
             check(4, id, L"Enabled");
             slider(4, id + 4, L"Brightness", 0, 100, 0);
             rgb(4, id);
-            button(4, id + 5, L"Apply");
+            button(4, id + 5, L"Apply", true);
             button(4, id + 7, L"Pick Color…");
             if (zone != 2) button(4, id + 6, L"Save to EC");
         }
@@ -774,17 +799,21 @@ private:
         check(5, autoConnectId, L"Auto-connect on startup");
         check(5, coolerFanOnId, L"Fan On");
         slider(5, coolerFanId, L"Fan Duty", 0, 100, 50);
-        button(5, coolerFanApplyId, L"Apply");
+        button(5, coolerFanApplyId, L"Apply", true);
         check(5, coolerPumpOnId, L"Pump On");
         combo(5, voltageId, {L"7V", L"8V", L"11V", L"12V"});
         slider(5, coolerPumpId, L"Pump Duty", 0, 100, 60);
-        button(5, coolerPumpApplyId, L"Apply");
+        button(5, coolerPumpApplyId, L"Apply", true);
         check(5, coolerRgbOnId, L"LED On");
         rgb(5, coolerRgbOnId);
         combo(5, rgbModeId, {L"Static", L"Breathe", L"Colorful", L"Breathe Color"});
-        button(5, coolerRgbApplyId, L"Apply");
+        button(5, coolerRgbApplyId, L"Apply", true);
         progress_ = control(window_, PROGRESS_CLASSW, L"Device operation progress", PBS_MARQUEE, 0);
         ShowWindow(progress_, SW_HIDE);
+        for (int id : {cpuChartId, gpuChartId, debugCpuId, debugGpuId}) styleFrame(get(id));
+        // Elevated, the window gets Explorer's broadcast of a light/dark switch only if it allows it.
+        ChangeWindowMessageFilterEx(window_, WM_SETTINGCHANGE, MSGFLT_ALLOW, nullptr);
+        applyTheme(systemDark());
         applyDpi();
         selectPage();
         edited_.clear();
@@ -842,7 +871,42 @@ private:
         header_ = header;
         heading_ = heading;
         for (int id : {cpuChartId, gpuChartId, debugCpuId, debugGpuId}) SendMessageW(get(id), chartDpiMessage, dpi_, 0);
+        setThemeDpi(dpi_);
         layout();
+    }
+    // Windows' app mode chooses light or dark; the UI checks choose for themselves.
+    void applyTheme(bool dark) {
+        if (!setPalette(dark) && font_) return;
+        titleBar(window_);
+        systemTheme(tooltip_, L"DarkMode_Explorer");
+        for (auto& p : pages_) systemTheme(p.window, L"DarkMode_Explorer");
+        for (int id : {batteryModeId, chargeLimitId, idleId, devicesId, voltageId, rgbModeId}) {
+            systemTheme(get(id), L"DarkMode_CFD");
+            COMBOBOXINFO info{sizeof info};
+            if (GetComboBoxInfo(get(id), &info)) systemTheme(info.hwndList, L"DarkMode_Explorer");
+        }
+        // Painted texts take their colors in the layout.
+        if (font_) layout();
+        RedrawWindow(window_, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN);
+    }
+    // Edit boxes and lists have the field color; other children sit on their section or the page.
+    LRESULT colors(UINT message, HDC dc, HWND child) const {
+        auto& p = palette();
+        COLORREF back = message == WM_CTLCOLOREDIT || message == WM_CTLCOLORLISTBOX ? p.field : backdrop(child);
+        SetTextColor(dc, p.text);
+        SetBkColor(dc, back);
+        return reinterpret_cast<LRESULT>(brush(back));
+    }
+    COLORREF backdrop(HWND child) const {
+        int page = index(GetParent(child));
+        if (page < 0) return palette().window;
+        RECT r{};
+        GetWindowRect(child, &r);
+        MapWindowPoints(nullptr, pages_[page].window, reinterpret_cast<POINT*>(&r), 2);
+        POINT center{(r.left + r.right) / 2, (r.top + r.bottom) / 2};
+        for (auto& [frame, title] : pages_[page].frames)
+            if (PtInRect(&frame, center)) return palette().card;
+        return palette().window;
     }
     // One pass over a framed page: it measures the page and, with apply, also places the controls and keeps the
     // painted frames and texts. y runs down the scrolled page.
@@ -887,18 +951,19 @@ private:
             if (shown) app.place(child, cx, cy, w, h);
         }
         void open(const wchar_t* title) { open(title, x, right); }
+        // A section is a card with its title inside; paintPage draws it.
         void open(const wchar_t* title, int from, int to) {
             frames.push_back({{from, y, to, 0}, title});
-            y += titleHeight + ref(11);
+            y += app.titleTop() + titleHeight + ref(8);
         }
         void close() {
-            y += ref(13);
+            y += ref(14);
             frames.back().first.bottom = y;
             y += ref(12);
         }
         // The right edge of a section that fits its content (to contentRight) or its title, whichever is wider.
         int fit(const wchar_t* title, int from, int contentRight) {
-            return std::max(contentRight, from + ref(25) + extent(app.title_, title) + ref(15));
+            return std::max(contentRight, from + app.titleLeft() + extent(app.title_, title) + ref(15));
         }
         // A check box sized to its text.
         int checkWidth(int id, HFONT font) { return extent(font, text(app.get(id))) + ref(40); }
@@ -933,8 +998,8 @@ private:
             return int(r.bottom);
         }
         // Painted text on one line (height 0: the normal font's line). Returns its right edge.
-        int say(const std::wstring& s, int cx, int cy, COLORREF color = GetSysColor(COLOR_BTNTEXT),
-                HFONT font = nullptr, int h = 0) {
+        int say(const std::wstring& s, int cx, int cy, COLORREF color = palette().text, HFONT font = nullptr,
+                int h = 0) {
             int to = cx + extent(font ? font : app.font_, s);
             texts.push_back({{cx, cy, to, cy + (h ? h : line)}, s, color, font});
             return to;
@@ -980,7 +1045,7 @@ private:
             return y + scroll + ref(6);
         }
     };
-    void layoutPage(Page& p) {
+    void layoutPage(Page& p, bool redraw = true) {
         RECT rc{};
         GetClientRect(p.window, &rc);
         int page = index(p.window);
@@ -1004,11 +1069,11 @@ private:
         GetClientRect(p.window, &shown);
         // The scroll bar changed the width.
         if (shown.right != rc.right) {
-            layoutPage(p);
+            layoutPage(p, redraw);
             return;
         }
         sections(p.scroll, true);
-        RedrawWindow(p.window, nullptr, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN);
+        if (redraw) RedrawWindow(p.window, nullptr, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN);
     }
     Row& find(int id) {
         for (auto& p : pages_)
@@ -1028,13 +1093,13 @@ private:
         auto support = [&](int id, bool shown, COLORREF color, int top) {
             s.supportNote(id, shown, color, noteLeft, top, wrap);
         };
-        auto muted = GetSysColor(COLOR_GRAYTEXT);
+        auto muted = palette().muted;
         // Each section sizes its label and value columns to its own contents.
         s.open(L"CPU Power");
         auto c = s.columns({pl1Id, pl2Id, pl4Id, tempId}, L"000 °C");
         for (int id : {pl1Id, pl2Id, pl4Id, tempId}) s.slide(id, c, cpu);
-        support(cpuSupportId, true, errorColor, 0);
-        note(cpuNote_, errorColor, 0);
+        support(cpuSupportId, true, palette().error, 0);
+        note(cpuNote_, palette().error, 0);
         note(cpuPreset_, muted, ref(4));
         s.close();
         s.open(L"GPU Power");
@@ -1043,7 +1108,7 @@ private:
         s.check(dbOnId, gpu, bold_);
         s.slide(dbId, c, gpu);
         s.slide(gpuTargetId, c, gpu && tempTargetShown());
-        support(gpuSupportId, true, errorColor, 0);
+        support(gpuSupportId, true, palette().error, 0);
         if (gpu) note(powerHint_, muted, 0);
         s.check(keepAwakeId, true, font_);
         s.close();
@@ -1073,7 +1138,7 @@ private:
             note(
                 L"Keeps your PL1/PL2/PL4 under heavy CPU+GPU load instead of the EC lowering them. Fans run at full speed.",
                 muted, ref(2));
-            note(bypassText_, bypassColor_, ref(2));
+            note(bypassText_, bypassError_ ? palette().error : muted, ref(2));
         }
         support(bypassSupportId, expanded, muted, ref(2));
         s.check(coolerFlagId, expanded && flag, font_);
@@ -1154,11 +1219,11 @@ private:
             auto warning = L"Fan curve editing is not available (format: " +
                            w(state_.value("fanFormat", std::string{})) +
                            L"). Only fan boost and curve enable are supported.";
-            s.paragraph(warning, s.left + s.pad, s.y + ref(6), s.end - s.pad, warnColor, bold_);
+            s.paragraph(warning, s.left + s.pad, s.y + ref(6), s.end - s.pad, palette().warn, bold_);
             s.y += ref(94);
         } else {
             int top = s.y;
-            s.supportNote(fanSupportId, true, errorColor, s.left + s.pad, ref(6), s.end - s.left - 2 * s.pad);
+            s.supportNote(fanSupportId, true, palette().error, s.left + s.pad, ref(6), s.end - s.left - 2 * s.pad);
             s.y = std::max(top + ref(94), s.y + ref(6));
         }
         s.y += ref(3);
@@ -1170,7 +1235,7 @@ private:
             RECT r{s.left + ref(273) + s.pad, s.y + ref(14), s.end, s.y + ref(14)};
             SelectObject(s.dc, font_);
             DrawTextW(s.dc, fanValidation_.c_str(), -1, &r, DT_CALCRECT | DT_NOPREFIX);
-            s.texts.push_back({r, fanValidation_, fanValidation_ == L"Valid" ? okColor : errorColor});
+            s.texts.push_back({r, fanValidation_, fanValidation_ == L"Valid" ? palette().ok : palette().error});
             footer = std::max(footer, int(r.bottom) - s.y + ref(1));
         }
         s.y += footer + ref(3);
@@ -1187,7 +1252,7 @@ private:
     }
     // GPU Thermal Failsafe and its Status, as in the reference FailsafeTab.
     void layoutThermal(Sections& s) {
-        COLORREF gray = GetSysColor(COLOR_GRAYTEXT), black = GetSysColor(COLOR_BTNTEXT);
+        COLORREF gray = palette().muted, black = palette().text;
         RECT live{};
         // Text wrapped from 'from' to the section's edge. Returns its bottom.
         auto paragraph = [&](const std::wstring& t, int from, int top, COLORREF color, HFONT font) {
@@ -1203,7 +1268,7 @@ private:
                 unavailable ? L"Thermal failsafe unavailable: " + w(state_.value("thermalReason", std::string{})) + L"."
                             : L"",
                 state_.value("enabled", std::set<std::string>{}).contains("gpuPower"));
-        s.supportNote(thermalSupportId, true, errorColor, s.left + s.pad, ref(3), s.end - s.left - 2 * s.pad);
+        s.supportNote(thermalSupportId, true, palette().error, s.left + s.pad, ref(3), s.end - s.left - 2 * s.pad);
         s.check(protectionId, true, bold_, s.end - s.left);
         s.y += ref(6);
         s.slide(thresholdId, s.columns({thresholdId}, L"00 °C"));
@@ -1213,7 +1278,7 @@ private:
         s.y += ref(6);
         s.put(get(protectionApplyId), s.left, s.y, ref(110), s.button);
         paragraph(thermalText_[1], s.left + ref(120) + s.pad, s.y + (s.button - s.line) / 2,
-                  thermalText_[1] == L"Settings match saved profile" ? gray : warnColor, font_);
+                  thermalText_[1] == L"Settings match saved profile" ? gray : palette().warn, font_);
         s.y += s.button + ref(3);
         note(
             L"Applies to the current profile. Apply takes effect now; use the profile bar's Save button to keep these settings.");
@@ -1237,17 +1302,17 @@ private:
         };
         bool enabled = state_.value("protection", Json::object()).value("enabled", false);
         row(0, thermalText_[2],
-            tripped_                                               ? errorColor
+            tripped_                                               ? palette().error
             : !enabled                                             ? gray
-            : state_.value("temperature", Json(nullptr)).is_null() ? warnColor
-                                                                   : okColor,
+            : state_.value("temperature", Json(nullptr)).is_null() ? palette().warn
+                                                                   : palette().ok,
             tripped_);
         live = {column, s.y, s.end - s.pad, 0};
         row(1, L"", black, false);
         row(2, L"", black, false);
         live.bottom = s.y; // Readings are painted as they arrive.
         row(3, thermalText_[3], black, false);
-        if (!thermalText_[4].empty()) row(4, thermalText_[4], warnColor, false);
+        if (!thermalText_[4].empty()) row(4, thermalText_[4], palette().warn, false);
         s.y += ref(6);
         s.put(get(resetId), s.left, s.y, ref(110), s.button);
         s.put(get(testId), s.left + ref(120), s.y, ref(140), s.button);
@@ -1273,8 +1338,7 @@ private:
         s.put(get(batteryApplyId), s.left, s.y, ref(110), s.button);
         s.y += s.button;
         if (!modeNote_.empty())
-            s.y =
-                s.paragraph(modeNote_, s.left + s.pad, s.y + ref(8), s.end - s.pad, GetSysColor(COLOR_GRAYTEXT), font_);
+            s.y = s.paragraph(modeNote_, s.left + s.pad, s.y + ref(8), s.end - s.pad, palette().muted, font_);
         s.close();
         // Firmware known to have no charge hold gets no section.
         if (chargeOffered_) {
@@ -1287,18 +1351,18 @@ private:
             s.y += row + ref(8);
             s.y = s.paragraph(
                 L"On the adapter, charging stops at this level and resumes five points below it. The EC keeps charging blocked for up to a week while MechControl is not running. This is a setting of the machine, not of a profile.",
-                s.left + s.pad, s.y, s.end - s.pad, GetSysColor(COLOR_GRAYTEXT), font_);
+                s.left + s.pad, s.y, s.end - s.pad, palette().muted, font_);
             // The caveat shows while a limit is selected, applied or not, in the normal text colour so that it is
             // read.
             if (SendMessageW(get(chargeLimitId), CB_GETCURSEL, 0, 0) > 0)
                 s.y = s.paragraph(
                     L"This is a software-controlled charge limit. In rare cases the battery will not charge while the app is not running, such as when the laptop is put into deep sleep while plugged in, then unplugged, allowed to drain, and plugged in again without being woken.",
-                    s.left + s.pad, s.y + ref(4), s.end - s.pad, GetSysColor(COLOR_BTNTEXT), font_);
-            s.supportNote(chargeSupportId, true, errorColor, s.left + s.pad, ref(3), s.end - s.left - 2 * s.pad);
+                    s.left + s.pad, s.y + ref(4), s.end - s.pad, palette().text, font_);
+            s.supportNote(chargeSupportId, true, palette().error, s.left + s.pad, ref(3), s.end - s.left - 2 * s.pad);
             s.close();
         } else {
             for (int id : {chargeLimitId, chargeApplyId}) s.put(get(id), 0, 0, 0, 0, false);
-            s.supportNote(chargeSupportId, false, errorColor, 0, 0, 0);
+            s.supportNote(chargeSupportId, false, palette().error, 0, 0, 0);
         }
         s.open(L"Battery Telemetry");
         bool telemetry = support_.at(batterySupportId).reason.empty();
@@ -1306,7 +1370,7 @@ private:
         s.put(get(batteryTextId), s.left + ref(3), s.y + ref(3), s.end - s.left - ref(3),
               batteryLines_ * s.line + ref(4), telemetry);
         if (telemetry) s.y += batteryLines_ * s.line + ref(7);
-        s.supportNote(batterySupportId, true, errorColor, s.left + s.pad, ref(3), s.end - s.left - 2 * s.pad);
+        s.supportNote(batterySupportId, true, palette().error, s.left + s.pad, ref(3), s.end - s.left - 2 * s.pad);
         s.close();
     }
     // The logo, keyboard and light bar zones, then Idle Timer and Local Dimming, as in the reference LightingTab.
@@ -1318,7 +1382,7 @@ private:
         for (int zone : {2, 0, 1}) {
             int base = zoneBaseId + zone * 16;
             s.open(titles[zone]);
-            if (zone == 2) s.supportNote(logoSupportId, true, errorColor, s.left, 0, s.end - s.left);
+            if (zone == 2) s.supportNote(logoSupportId, true, palette().error, s.left, 0, s.end - s.left);
             s.y += ref(4);
             s.put(get(base), s.left, s.y, s.checkWidth(base, font_), s.box);
             s.y += s.box + ref(6);
@@ -1358,7 +1422,7 @@ private:
         RECT r{};
         GetWindowRect(get(devicesId), &r);
         int field = r.bottom - r.top; // A closed drop-down list is as tall as its font needs.
-        COLORREF gray = GetSysColor(COLOR_GRAYTEXT);
+        COLORREF gray = palette().muted;
         RECT swatch{};
         // A check box sized to its text; returns its right edge.
         auto check = [&](int id, int cy) {
@@ -1372,9 +1436,9 @@ private:
         };
         // The latest connection status: green while connected, amber while connecting or scanning, red for a problem.
         auto has = [&](const wchar_t* t) { return coolerStatus_.find(t) != std::wstring::npos; };
-        COLORREF tone = has(L"failed") || has(L"lost") || has(L"unavailable") ? errorColor
-                        : coolerConnected_                                    ? okColor
-                        : has(L"Connecting") || has(L"Scanning")              ? warnColor
+        COLORREF tone = has(L"failed") || has(L"lost") || has(L"unavailable") ? palette().error
+                        : coolerConnected_                                    ? palette().ok
+                        : has(L"Connecting") || has(L"Scanning")              ? palette().warn
                                                                               : gray;
         s.open(L"Liquid Cooler (BLE)");
         s.y = s.paragraph(coolerStatus_, s.left + s.pad, s.y + ref(4), s.end - s.pad, tone, bold_) + ref(6);
@@ -1425,7 +1489,7 @@ private:
     // contents; the readings are painted into their cells.
     void layoutInfo(Sections& s) {
         int left = s.x + ref(21), right = 0;
-        COLORREF black = GetSysColor(COLOR_BTNTEXT);
+        COLORREF black = palette().text;
         std::array<RECT, 8> cells{};
         auto open = [&](const wchar_t* title) {
             s.open(title, s.x, 0);
@@ -1509,23 +1573,23 @@ private:
         auto bitmap = CreateCompatibleBitmap(target, width, height);
         auto oldBitmap = SelectObject(dc, bitmap);
         SetViewportOrgEx(dc, -area.left, -area.top, nullptr);
-        FillRect(dc, &area, GetSysColorBrush(COLOR_BTNFACE));
+        auto& theme = palette();
+        FillRect(dc, &area, brush(theme.window));
         SetBkMode(dc, TRANSPARENT);
-        auto pen = CreatePen(PS_SOLID, 1, frameColor);
-        auto oldPen = SelectObject(dc, pen);
         auto oldFont = SelectObject(dc, title_);
-        SetTextColor(dc, GetSysColor(COLOR_BTNTEXT));
+        SetTextColor(dc, theme.text);
         for (auto& [r, title] : p.frames) {
-            // A thin frame whose top edge stops either side of the bold title.
+            RECT visible{};
+            if (!IntersectRect(&visible, &r, &area)) continue;
+            // A card with a short accent mark before its bold title.
+            roundRect(dc, r, ref(12), theme.card, theme.border);
             int n = int(wcslen(title));
             SIZE size{};
             GetTextExtentPoint32W(dc, title, n, &size);
-            int titleX = r.left + ref(10), middle = r.top + ref(2) + size.cy / 2;
-            // The reference measured the title with GDI's default padding, hence the wider gap after it.
-            POINT edge[]{{titleX - ref(2), middle},   {r.left, middle},      {r.left, r.bottom - 1},
-                         {r.right - 1, r.bottom - 1}, {r.right - 1, middle}, {titleX + size.cx + ref(15), middle}};
-            Polyline(dc, edge, 6);
-            TextOutW(dc, titleX, r.top + ref(2), title, n);
+            int top = r.top + titleTop();
+            RECT mark{r.left + ref(15), top + size.cy / 5, r.left + ref(20), top + size.cy - size.cy / 5};
+            roundRect(dc, mark, ref(3), theme.accent, theme.accent);
+            TextOutW(dc, r.left + titleLeft(), top, title, n);
         }
         for (auto& t : p.texts) {
             SelectObject(dc, t.font ? t.font : font_);
@@ -1539,33 +1603,26 @@ private:
         // The failsafe's GPU temperature and peak repaint on their own as readings arrive.
         if (index == 2) {
             SelectObject(dc, font_);
-            SetTextColor(dc, GetSysColor(COLOR_BTNTEXT));
+            SetTextColor(dc, palette().text);
             int pitch = (thermalLive_.bottom - thermalLive_.top) / 2;
             for (int i : {0, 1})
                 TextOutW(dc, thermalLive_.left, thermalLive_.top + ref(3) + i * pitch, thermalText_[5 + i].c_str(),
                          int(thermalText_[5 + i].size()));
         }
         // Each swatch shows the color in its R, G and B boxes.
-        auto swatch = [&](const RECT& r, int base) {
-            auto brush = CreateSolidBrush(color(base, false));
-            FillRect(dc, &r, brush);
-            DeleteObject(brush);
-            FrameRect(dc, &r, GetSysColorBrush(COLOR_WINDOWFRAME));
-        };
+        auto swatch = [&](const RECT& r, int base) { roundRect(dc, r, ref(6), color(base, false), theme.border); };
         if (index == 4)
             for (int zone = 0; zone < 3; ++zone) swatch(swatches_[zone], zoneBaseId + zone * 16);
         if (index == 5) swatch(coolerSwatch_, coolerRgbOnId);
         if (index == 6) {
             SelectObject(dc, font_);
-            SetTextColor(dc, GetSysColor(COLOR_BTNTEXT));
+            SetTextColor(dc, palette().text);
             for (int i = 0; i < 8; ++i)
                 if (infoCells_[i].right > infoCells_[i].left)
                     TextOutW(dc, infoCells_[i].left, infoCells_[i].top, infoText_[i].c_str(), int(infoText_[i].size()));
         }
         BitBlt(target, area.left, area.top, width, height, dc, area.left, area.top, SRCCOPY);
         SelectObject(dc, oldFont);
-        SelectObject(dc, oldPen);
-        DeleteObject(pen);
         SelectObject(dc, oldBitmap);
         DeleteObject(bitmap);
         DeleteDC(dc);
@@ -1617,7 +1674,7 @@ private:
         // From the reference, tuned on an RTX 5090 Laptop: GPU power and the core rails against what each reads
         // while limiting. Board input is enforced on fast peaks, so its average stays well below the limit while
         // limiting. IPC reached at most 37% from power peaks alone and 93.5% with board input clearly limiting.
-        COLORREF text = GetSysColor(COLOR_BTNTEXT), gray = GetSysColor(COLOR_GRAYTEXT);
+        COLORREF text = palette().text, gray = palette().muted;
         auto powerColor = tint(ratio(power, enforced), 0.94, 0.99), nvColor = tint(ratio(nvNow, nvLimit), 0.89, 0.99),
              msColor = tint(ratio(msNow, msLimit), 0.90, 0.99),
              inputColor = tint(ratio(inputNow, inputLimit), 0.68, 0.81);
@@ -1776,8 +1833,8 @@ private:
         int defaults = size.cx + ref(26), bar = layoutBar(r.right, r.bottom);
         for (int i = 0; i < 5; ++i) place(get(slotId + i), ref(7) + i * ref(126), ref(5), ref(120), ref(32));
         place(get(saveId), ref(637), ref(5), ref(80), ref(32));
-        place(get(readId), r.right - defaults - ref(86), ref(5), ref(80), ref(32));
-        place(get(defaultsId), r.right - defaults, 0, defaults, ref(40));
+        place(get(readId), r.right - defaults - ref(93), ref(5), ref(80), ref(32));
+        place(get(defaultsId), r.right - defaults - ref(7), ref(5), defaults, ref(32));
         place(tabs_, 0, ref(40), r.right, bar - ref(40));
         RECT page{};
         GetClientRect(tabs_, &page);
@@ -1800,7 +1857,7 @@ private:
         int line = metrics.tmHeight, pitch = line + ref(2), pad = line / 6, left = 1 + ref(4),
             right = width - 1 - ref(4), x = left, y = 1 + ref(6), lowest = y + pitch + line;
         std::vector<Text> texts;
-        auto gray = GetSysColor(COLOR_GRAYTEXT);
+        auto gray = palette().muted;
         auto put = [&](const std::wstring& s, bool bold, COLORREF color, int margin) {
             // The reference measured its labels slightly wider than GDI does, hence the extra space after each.
             SelectObject(dc, bold ? bold_ : font_);
@@ -1822,7 +1879,7 @@ private:
             lowest = std::max(lowest, int(r.bottom));
         };
         for (size_t i = 0; i < monitor_.size(); ++i) {
-            put(monitor_[i], true, GetSysColor(COLOR_BTNTEXT), ref(2));
+            put(monitor_[i], true, palette().text, ref(2));
             if (i + 1 < monitor_.size() || !status_.empty()) put(L"|", true, gray, 0);
         }
         if (!status_.empty()) put(status_, false, gray, ref(2));
@@ -1848,9 +1905,9 @@ private:
         auto dc = CreateCompatibleDC(target);
         auto bitmap = CreateCompatibleBitmap(target, width, height);
         auto oldBitmap = SelectObject(dc, bitmap);
-        RECT r{0, 0, width, height};
-        FillRect(dc, &r, GetSysColorBrush(COLOR_3DLIGHT));
-        FrameRect(dc, &r, GetSysColorBrush(COLOR_WINDOWFRAME));
+        RECT r{0, 0, width, height}, rule{0, 0, width, 1};
+        FillRect(dc, &r, brush(palette().bar));
+        FillRect(dc, &rule, brush(palette().border));
         SetBkMode(dc, TRANSPARENT);
         auto oldFont = SelectObject(dc, font_);
         for (auto& t : barText_) {
@@ -1870,59 +1927,88 @@ private:
         return id == saveId || id == defaultsId || id == readId || (id >= slotId && id < slotId + 5);
     }
     bool emptySlot(int i) const { return state_.contains("slots") && !state_.at("slots").at(i).get<bool>(); }
-    // The reference's flat profile buttons: the selected slot is filled with the highlight color, empty slots are gray.
+    // The reference's flat profile buttons: the selected slot is filled with the accent color, empty slots are gray.
     void drawButton(const DRAWITEMSTRUCT& d) {
+        auto& p = palette();
         int id = int(d.CtlID);
         bool slot = id >= slotId && id < slotId + 5, active = slot && target_ == id - slotId + 1,
-             disabled = (d.itemState & ODS_DISABLED) != 0;
-        COLORREF fill = GetSysColor(active ? COLOR_HIGHLIGHT : COLOR_BTNFACE),
-                 ink = GetSysColor(active                                         ? COLOR_HIGHLIGHTTEXT
-                                   : disabled || (slot && emptySlot(id - slotId)) ? COLOR_GRAYTEXT
-                                                                                  : COLOR_BTNTEXT);
-        double shade = d.itemState & ODS_SELECTED ? 0.84 : hot_ == d.hwndItem && !disabled ? 0.92 : 1.0;
-        fill = RGB(BYTE(GetRValue(fill) * shade), BYTE(GetGValue(fill) * shade), BYTE(GetBValue(fill) * shade));
-        auto brush = CreateSolidBrush(fill);
-        FillRect(d.hDC, &d.rcItem, brush);
-        DeleteObject(brush);
-        brush = CreateSolidBrush(ink);
-        FrameRect(d.hDC, &d.rcItem, brush);
-        DeleteObject(brush);
-        auto old = SelectObject(d.hDC, active || id == saveId ? bold_ : font_);
-        SetBkMode(d.hDC, TRANSPARENT);
-        SetTextColor(d.hDC, ink);
+             disabled = (d.itemState & ODS_DISABLED) != 0, pressed = (d.itemState & ODS_SELECTED) != 0,
+             hot = hot_ == d.hwndItem && !disabled,
+             focus = (d.itemState & ODS_FOCUS) && !(d.itemState & ODS_NOFOCUSRECT);
+        COLORREF fill = active    ? (hot && !pressed ? p.accentHot : p.accent)
+                        : pressed ? p.pressed
+                        : hot     ? p.hot
+                                  : p.control,
+                 ink = active                                         ? p.onAccent
+                       : disabled || (slot && emptySlot(id - slotId)) ? p.muted
+                                                                      : p.text;
+        auto dc = CreateCompatibleDC(d.hDC);
+        RECT r{0, 0, d.rcItem.right - d.rcItem.left, d.rcItem.bottom - d.rcItem.top};
+        auto bitmap = CreateCompatibleBitmap(d.hDC, r.right, r.bottom);
+        auto oldBitmap = SelectObject(dc, bitmap);
+        FillRect(dc, &r, brush(p.window));
+        roundRect(dc, r, ref(8), fill, focus ? p.text : active ? fill : p.border);
+        auto old = SelectObject(dc, active || id == saveId ? bold_ : font_);
+        SetBkMode(dc, TRANSPARENT);
+        SetTextColor(dc, ink);
         auto s = text(d.hwndItem);
-        RECT r = d.rcItem;
-        DrawTextW(d.hDC, s.c_str(), -1, &r,
+        DrawTextW(dc, s.c_str(), -1, &r,
                   DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS |
                       (d.itemState & ODS_NOACCEL ? DT_HIDEPREFIX : 0));
-        if ((d.itemState & ODS_FOCUS) && !(d.itemState & ODS_NOFOCUSRECT)) {
-            r = d.rcItem;
-            InflateRect(&r, -ref(3), -ref(3));
-            DrawFocusRect(d.hDC, &r);
+        BitBlt(d.hDC, d.rcItem.left, d.rcItem.top, r.right, r.bottom, dc, 0, 0, SRCCOPY);
+        SelectObject(dc, old);
+        SelectObject(dc, oldBitmap);
+        DeleteObject(bitmap);
+        DeleteDC(dc);
+    }
+    LRESULT customDraw(const NMCUSTOMDRAW& draw) {
+        int id = int(draw.hdr.idFrom);
+        if (draw.hdr.hwndFrom != get(id)) return CDRF_DODEFAULT;
+        // A support note takes the color of the painted note it stands in for; other link text is normal text.
+        if (id == advancedId || id == detailsId || support_.contains(id)) {
+            if (draw.dwDrawStage == CDDS_PREPAINT) return CDRF_NOTIFYITEMDRAW;
+            if (draw.dwDrawStage == CDDS_ITEMPREPAINT)
+                SetTextColor(draw.hdc, draw.dwItemSpec != UINT_PTR(-1) ? palette().link
+                                       : support_.contains(id)         ? support_.at(id).color
+                                                                       : palette().text);
+            return CDRF_DODEFAULT;
         }
-        SelectObject(d.hDC, old);
+        return drawControl(draw, primary_.contains(id));
     }
     void scroll(HWND window, UINT message, WPARAM wp) {
         for (auto& p : pages_)
             if (p.window == window) {
+                int target = p.scroll;
                 if (message == WM_MOUSEWHEEL)
-                    p.scroll -= GET_WHEEL_DELTA_WPARAM(wp) * scale(54) / WHEEL_DELTA;
+                    target -= GET_WHEEL_DELTA_WPARAM(wp) * scale(54) / WHEEL_DELTA;
                 else {
                     SCROLLINFO si{sizeof si, SIF_ALL};
                     GetScrollInfo(window, SB_VERT, &si);
                     switch (LOWORD(wp)) {
-                    case SB_LINEUP: p.scroll -= scale(28); break;
-                    case SB_LINEDOWN: p.scroll += scale(28); break;
-                    case SB_PAGEUP: p.scroll -= int(si.nPage); break;
-                    case SB_PAGEDOWN: p.scroll += int(si.nPage); break;
-                    case SB_THUMBTRACK: p.scroll = si.nTrackPos; break;
-                    case SB_TOP: p.scroll = 0; break;
-                    case SB_BOTTOM: p.scroll = si.nMax; break;
+                    case SB_LINEUP: target -= scale(28); break;
+                    case SB_LINEDOWN: target += scale(28); break;
+                    case SB_PAGEUP: target -= int(si.nPage); break;
+                    case SB_PAGEDOWN: target += int(si.nPage); break;
+                    case SB_THUMBTRACK: target = si.nTrackPos; break;
+                    case SB_TOP: target = 0; break;
+                    case SB_BOTTOM: target = si.nMax; break;
                     }
                 }
-                layoutPage(p);
+                scrollTo(p, target);
                 return;
             }
+    }
+    // Moves the page's painted bits and its controls in one step, so only the strip scrolled into view repaints and
+    // no control is shown for a frame where others have not moved yet.
+    void scrollTo(Page& p, int target) {
+        SCROLLINFO si{sizeof si, SIF_RANGE | SIF_PAGE};
+        GetScrollInfo(p.window, SB_VERT, &si);
+        target = std::clamp(target, 0, std::max(0, si.nMax + 1 - int(si.nPage)));
+        if (target == p.scroll) return;
+        ScrollWindowEx(p.window, 0, p.scroll - target, nullptr, nullptr, nullptr, nullptr,
+                       SW_SCROLLCHILDREN | SW_INVALIDATE);
+        p.scroll = target;
+        layoutPage(p, false); // The frames and texts it paints follow; the controls are already in place.
     }
     void reveal(HWND child) {
         int page = index(GetParent(child));
@@ -1933,12 +2019,9 @@ private:
         GetWindowRect(child, &r);
         MapWindowPoints(nullptr, p.window, reinterpret_cast<POINT*>(&r), 2);
         if (r.top < 0)
-            p.scroll += r.top;
+            scrollTo(p, p.scroll + r.top);
         else if (r.bottom > rc.bottom)
-            p.scroll += r.bottom - rc.bottom;
-        else
-            return;
-        layoutPage(p);
+            scrollTo(p, p.scroll + r.bottom - rc.bottom);
     }
     void selectPage() {
         int page = TabCtrl_GetCurSel(tabs_);
@@ -2624,7 +2707,7 @@ private:
             enable(coolerFlagId, flag.value("available", false));
             // The status line only explains an automatic turn-off or a failure to clear.
             bypassText_ = clearing || (!active && status != L"Off (turned off)") ? status : L"";
-            bypassColor_ = clearing ? errorColor : GetSysColor(COLOR_GRAYTEXT);
+            bypassError_ = clearing;
             // Only the EC firmware image can show that a model or EC version handles the bypass the same way.
             explain(bypassSupportId,
                     bypass.value("available", false)
@@ -3415,9 +3498,15 @@ private:
             RECT r{};
             GetClientRect(window_, &r);
             r.bottom = bar_.top;
-            FillRect(reinterpret_cast<HDC>(wp), &r, GetSysColorBrush(COLOR_BTNFACE));
+            FillRect(reinterpret_cast<HDC>(wp), &r, brush(palette().window));
             return 1;
         }
+        case WM_CTLCOLORBTN:
+        case WM_CTLCOLORSTATIC: return colors(message, reinterpret_cast<HDC>(wp), reinterpret_cast<HWND>(lp));
+        case WM_SETTINGCHANGE:
+            if (lp && !wcscmp(reinterpret_cast<const wchar_t*>(lp), L"ImmersiveColorSet")) applyTheme(systemDark());
+            break;
+        case WM_SYSCOLORCHANGE: applyTheme(systemDark()); break; // High contrast.
         case WM_PAINT: {
             PAINTSTRUCT ps{};
             auto dc = BeginPaint(window_, &ps);
@@ -3442,17 +3531,9 @@ private:
                 thermalDetails_ = !thermalDetails_;
                 layoutPage(pages_[2]);
             }
-            if (auto note = support_.find(int(n->idFrom)); note != support_.end()) {
+            if (n->code == NM_CUSTOMDRAW) return customDraw(*reinterpret_cast<NMCUSTOMDRAW*>(lp));
+            if (auto note = support_.find(int(n->idFrom)); note != support_.end())
                 if (n->code == NM_CLICK || n->code == NM_RETURN) openUnelevated(issueUrl(note->second));
-                // A support note takes the color of the painted note it stands in for; its link keeps the link color.
-                if (n->code == NM_CUSTOMDRAW) {
-                    auto draw = reinterpret_cast<NMCUSTOMDRAW*>(lp);
-                    if (draw->dwDrawStage == CDDS_PREPAINT) return CDRF_NOTIFYITEMDRAW;
-                    if (draw->dwDrawStage == CDDS_ITEMPREPAINT && draw->dwItemSpec == UINT_PTR(-1))
-                        SetTextColor(draw->hdc, note->second.color);
-                    return CDRF_DODEFAULT;
-                }
-            }
             if (n->idFrom == advancedId && (n->code == NM_CLICK || n->code == NM_RETURN)) {
                 advanced_ = !advanced_;
                 SetWindowTextW(get(advancedId),
@@ -3561,9 +3642,10 @@ private:
     std::wstring modeNote_;     // What the battery modes do on this firmware; empty where that is not known.
     std::map<int, int> detectedMa_;
     std::wstring cpuNote_, cpuPreset_, powerHint_, liveReason_, powerKey_, dlppcTip_, bypassText_;
-    COLORREF bypassColor_ = 0;
+    bool bypassError_ = false; // The bypass status reports a failure to clear.
     bool advanced_ = false;
     std::map<int, Support> support_;
+    std::set<int> primary_;
     std::array<HPOWERNOTIFY, 2> powerNotifications_{};
     std::array<Page, 7> pages_;
     std::map<int, HWND> controls_;
