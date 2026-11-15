@@ -231,6 +231,12 @@ int main(int argc, char** argv) try {
     presets = preset.extract_modes(false);
     require(presets && !presets->contains("turbo") && !presets->at("batterySaver").tcc_offset,
             "0x7A7 stays Battery Saver without RamFan1p5");
+    // An X6AR's bytes: its Turbo preset is the 210 W the encoder accepts.
+    preset.bytes = {{0x727, 0x80}, {0x78E, 0xFC}, {0x7A7, 210}, {0x7A8, 210}, {0x7A9, 210}, {0x7DA, 10}};
+    presets = preset.extract_modes(false);
+    require(presets && presets->at("turbo").pl1 == 210 && presets->at("turbo").pl2 == 210 &&
+                presets->at("turbo").pl4 == 420 && presets->at("turbo").tcc_offset == 95,
+            "a preset at the 210 W maximum is kept");
     auto read = [](int a) -> uint8_t {
         if (a == 0x463) return 10;
         if (a == 0x7A6) return 8;

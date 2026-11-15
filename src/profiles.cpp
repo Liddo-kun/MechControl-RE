@@ -338,10 +338,10 @@ std::optional<std::map<std::string, Mode>> Hardware::extract_modes(bool absolute
         // Unread bytes become 255, which every range check below rejects.
         int a = at(base).value_or(255), b = at(base + 1).value_or(255), c = at(base + 2).value_or(255),
             t = tcc ? at(tcc).value_or(255) : 255;
-        if (a < 5 || a > 200) continue;
+        if (a < 5 || a > encoding::power_max) continue;
         Mode m;
         m.pl1 = a;
-        m.pl2 = (b >= 5 && b <= 200) ? b : a;
+        m.pl2 = (b >= 5 && b <= encoding::power_max) ? b : a;
         if (auto d = pl4_doubled(); d && c >= 5 && c <= 250) m.pl4 = *d ? c * 2 : c;
         if (absolute && t >= 60 && t <= 120)
             m.tcc_offset = t;
