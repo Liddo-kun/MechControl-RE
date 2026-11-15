@@ -33,6 +33,7 @@ using namespace mech;
 using namespace mech::config;
 constexpr wchar_t mainClass[] = L"MechControl.Native.Main";
 constexpr UINT trayMessage = WM_APP + 2, fanEditMessage = WM_APP + 4;
+constexpr int appIconId = 1;  // resources/app.rc; the lowest icon ID is the one Explorer shows for the executable.
 // GUID_CONSOLE_DISPLAY_STATE and GUID_ACDC_POWER_SOURCE.
 constexpr GUID displayState{0x6FE69556, 0x704A, 0x47A0, {0x8F, 0x24, 0xC2, 0x8D, 0x93, 0x6F, 0xDA, 0x47}},
     powerSource{0x5D3E9A59, 0xE9D5, 0x4B00, {0xA6, 0xBD, 0xFF, 0x34, 0xFF, 0x51, 0x65, 0x48}};
@@ -421,6 +422,7 @@ public:
         for (auto icon : slotIcons_)
             if (icon) DestroyIcon(icon);
         for (auto icon : animation_) DestroyIcon(icon);
+        if (appIcon_) DestroyIcon(appIcon_);
     }
     HWND create() {
         auto dpi = GetDpiForSystem();
@@ -3231,6 +3233,7 @@ private:
                                                  LR_DEFAULTCOLOR);
             if (icon) animation_.push_back(icon);
         }
+        LoadIconMetric(instance_, MAKEINTRESOURCEW(appIconId), LIM_SMALL, &appIcon_);
     }
     void tray(bool add = false) {
         if (closing_) return;
@@ -3243,7 +3246,7 @@ private:
                    : !warning_.empty() ? L"MechControl — CONFIGURATION WARNING"
                                        : L"MechControl";
         wcscpy_s(icon.szTip, tip);
-        icon.hIcon = LoadIconW(nullptr, tripped_ ? IDI_ERROR : !warning_.empty() ? IDI_WARNING : IDI_APPLICATION);
+        icon.hIcon = tripped_ || !warning_.empty() ? LoadIconW(nullptr, tripped_ ? IDI_ERROR : IDI_WARNING) : appIcon_;
         if (!tripped_ && warning_.empty() && target_ >= 1 && target_ <= 5)
             icon.hIcon = target_ == 5 && !animation_.empty() ? animation_[animationFrame_] : slotIcons_[target_ - 1];
         const bool wasAdded = trayAdded_, adding = add || !wasAdded;
@@ -3547,6 +3550,7 @@ private:
     std::set<int> edited_;
     std::array<HICON, 5> slotIcons_{};
     std::vector<HICON> animation_;
+    HICON appIcon_ = nullptr;
     size_t animationFrame_ = 0;
     int trayState_ = -3, lostAlerts_ = 0;
     bool closing_ = false, trayAdded_ = false, updating_ = false, busy_ = false, ready_ = false, tripped_ = false,
@@ -3621,14 +3625,15 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
                                                ICC_UPDOWN_CLASS};
         if (!InitCommonControlsEx(&cc)) throw std::runtime_error("Cannot initialize native controls");
         registerFanChart(instance);
-        WNDCLASSW type{};
+        WNDCLASSEXW type{sizeof type};
         type.hInstance = instance;
         type.lpfnWndProc = Application::procedure;
         type.lpszClassName = mainClass;
         type.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-        type.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+        LoadIconMetric(instance, MAKEINTRESOURCEW(appIconId), LIM_LARGE, &type.hIcon);
+        LoadIconMetric(instance, MAKEINTRESOURCEW(appIconId), LIM_SMALL, &type.hIconSm);
         type.hbrBackground = GetSysColorBrush(COLOR_BTNFACE);
-        if (!RegisterClassW(&type)) throw std::runtime_error("Cannot register main window");
+        if (!RegisterClassExW(&type)) throw std::runtime_error("Cannot register main window");
 #ifdef MECHCONTROL_PAGE_CHECK
         Application app(instance, ui_page_options(checks, fixture));
 #else
