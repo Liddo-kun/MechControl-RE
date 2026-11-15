@@ -10,7 +10,7 @@ MechControl is a native C++ Windows app. It needs no .NET runtime and keeps its 
 ## Features
 
 - **CPU power:** PL1, PL2, PL4 and the CPU temperature limit
-- **GPU power:** TGP and Dynamic Boost. With an RTX 40 or newer GPU, an optional NVIDIA unlock raises the power ceiling and lets you change the GPU current limits.
+- **GPU power:** TGP, Dynamic Boost and the NVIDIA GPU temperature target. With an RTX 40 or newer GPU, an optional NVIDIA unlock raises the power ceiling and lets you change the GPU current limits.
 - **Fans:** boost, custom fan curves, linked CPU/GPU fans, fan ramp speed
 - **Thermal failsafe:** holds the GPU at minimum power if it stays too hot
 - **Battery:** charge modes and battery info
