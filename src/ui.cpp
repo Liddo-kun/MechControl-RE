@@ -485,9 +485,11 @@ private:
         }
         // Transparent links paint the page behind them.
         if (message == WM_PRINTCLIENT) {
+            // Only the area behind the asking control, which the clip region gives.
+            auto dc = reinterpret_cast<HDC>(wp);
             RECT r{};
-            GetClientRect(window, &r);
-            app->paintPage(app->index(window), reinterpret_cast<HDC>(wp), r);
+            if (GetClipBox(dc, &r) <= NULLREGION) GetClientRect(window, &r);
+            app->paintPage(app->index(window), dc, r);
             return 0;
         }
         if (message >= WM_CTLCOLORMSGBOX && message <= WM_CTLCOLORSTATIC)
@@ -1592,6 +1594,8 @@ private:
             TextOutW(dc, r.left + titleLeft(), top, title, n);
         }
         for (auto& t : p.texts) {
+            RECT visible{};
+            if (!IntersectRect(&visible, &t.rect, &area)) continue;
             SelectObject(dc, t.font ? t.font : font_);
             SetTextColor(dc, t.color);
             RECT r = t.rect;
