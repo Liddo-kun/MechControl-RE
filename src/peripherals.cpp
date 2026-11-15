@@ -454,25 +454,49 @@ void set_local_dimming(bool enabled) {
         throw std::runtime_error(winrt::to_string(e.message()));
     }
 }
-void ensure_uefi_flags(const std::function<void(const std::string&)>& log) {
-    Handle token;
+namespace {
+constexpr auto oemVariableGuid = L"{9f33f85c-13ca-4fd1-9c4a-96217722c593}";
+// Windows hands out firmware variables only to a process holding this privilege.
+bool uefi_privilege() {
     HANDLE raw = nullptr;
-    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &raw)) {
-        log("UEFI privilege unavailable");
-        return;
-    }
-    token = Handle(raw);
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &raw)) return false;
+    Handle token(raw);
     TOKEN_PRIVILEGES privilege{};
     privilege.PrivilegeCount = 1;
     privilege.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
-    if (!LookupPrivilegeValueW(nullptr, SE_SYSTEM_ENVIRONMENT_NAME, &privilege.Privileges[0].Luid)) return;
+    if (!LookupPrivilegeValueW(nullptr, SE_SYSTEM_ENVIRONMENT_NAME, &privilege.Privileges[0].Luid)) return false;
     SetLastError(0);
     AdjustTokenPrivileges(token.get(), FALSE, &privilege, 0, nullptr, nullptr);
-    if (GetLastError() != 0) {
+    return GetLastError() == 0;
+}
+}
+Json uefi_diagnostic() {
+    if (!uefi_privilege()) return {{"error", "UEFI privilege unavailable"}};
+    std::array<uint8_t, 4096> data{};
+    for (auto name : {"OemMagicVariable", "UniWillVariable"}) {
+        auto size = GetFirmwareEnvironmentVariableW(wide(name).c_str(), oemVariableGuid, data.data(),
+                                                    static_cast<DWORD>(data.size()));
+        if (!size) continue;
+        std::vector<std::string> rows;
+        char text[8];
+        for (DWORD i = 0; i < size; ++i) {
+            if (i % 16 == 0) {
+                snprintf(text, sizeof text, "%02X:", static_cast<unsigned>(i));
+                rows.emplace_back(text);
+            }
+            snprintf(text, sizeof text, " %02X", data[i]);
+            rows.back() += text;
+        }
+        return {{"name", name}, {"size", size}, {"bytes", rows}};
+    }
+    return {{"error", "No OEM variable; Windows error " + std::to_string(GetLastError())}};
+}
+void ensure_uefi_flags(const std::function<void(const std::string&)>& log) {
+    if (!uefi_privilege()) {
         log("UEFI privilege unavailable");
         return;
     }
-    constexpr auto name = L"OemMagicVariable", guid = L"{9f33f85c-13ca-4fd1-9c4a-96217722c593}";
+    constexpr auto name = L"OemMagicVariable", guid = oemVariableGuid;
     std::array<uint8_t, 4096> data{};
     auto size = GetFirmwareEnvironmentVariableW(name, guid, data.data(), static_cast<DWORD>(data.size()));
     if (!size) {

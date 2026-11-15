@@ -53,6 +53,9 @@ private:
 bool local_dimming_available();
 void set_local_dimming(bool);
 void ensure_uefi_flags(const std::function<void(const std::string&)>&);
+// The OEM's UEFI variable as the BIOS holds it, for a diagnostic report: the BIOS keeps the Control Center's
+// boot-time settings in it, and some BIOSes name it UniWillVariable (re/notes/ec_firmware_GMxTG0x_findings.md).
+config::Json uefi_diagnostic();
 config::Json battery_telemetry(EcTransport&);
 // What the EC's charge-voltage routine keeps (re/register_reference.md 11.6.1): the voltage the pack requests, the
 // lower one the EC gives the charger, and the cell count. No profile or version number says which firmware has

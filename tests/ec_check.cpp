@@ -302,6 +302,7 @@ void worker_owner(const std::filesystem::path& scratch) {
     WorkerOptions options;
     options.once = true;
     options.report = scratch / L"diagnostic.json";
+    options.peripheral_hardware = false; // Keeps the report off this machine's UEFI variables.
     options.identity = config::Identity{"X6AR55xY", "fixture", "intel", uint8_t{26}};
     options.channel_factory = [&](const std::wstring&, HANDLE) {
         owner = std::this_thread::get_id();

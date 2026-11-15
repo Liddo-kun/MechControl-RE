@@ -188,6 +188,7 @@ void ControlWorker::run(std::stop_token stop) {
             if (!options_.report.empty()) {
                 auto report = session->diagnostic_report();
                 report["ecRam"] = ram;
+                if (options_.peripheral_hardware) report["uefi"] = uefi_diagnostic();
                 config::write_json(options_.report, report, false);
                 // The NVIDIA readings go in last, with the report already written: they call into the GPU driver,
                 // also on GPU generations nobody has run them on, and must not cost the EC part of the report.

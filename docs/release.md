@@ -73,7 +73,8 @@ are not saved.
 ## Diagnostic report
 
 `MechControl.exe --diagnose report.json` writes a read-only report of the model, EC
-power limits, fan tables, sensors and the EC's memory, then exits. With an NVIDIA GPU it
+power limits, fan tables, sensors, the EC's memory and the settings the OEM software
+keeps in the BIOS, then exits. With an NVIDIA GPU it
 adds the driver's power and current limits and live readings, which wakes the GPU if it
 is asleep. It can run while MechControl is running. Attach it, or `mechcontrol.log`, when
 reporting a problem with your model. The first session in the log records the EC's memory
