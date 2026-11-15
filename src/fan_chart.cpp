@@ -104,15 +104,9 @@ struct Chart {
     void paint(HWND window, HDC target) const {
         RECT client{};
         GetClientRect(window, &client);
-        auto dc = CreateCompatibleDC(target);
-        auto bitmap = CreateCompatibleBitmap(target, std::max(1L, client.right), std::max(1L, client.bottom));
-        auto oldBitmap = SelectObject(dc, bitmap);
-        FillRect(dc, &client, brush(palette().card));
-        if (gdiplus()) draw(window, dc);
-        BitBlt(target, 0, 0, client.right, client.bottom, dc, 0, 0, SRCCOPY);
-        SelectObject(dc, oldBitmap);
-        DeleteObject(bitmap);
-        DeleteDC(dc);
+        Buffer buffer(target, client);
+        FillRect(buffer.dc, &client, brush(palette().card));
+        if (gdiplus()) draw(window, buffer.dc);
     }
     void draw(HWND window, HDC dc) const {
         gp::Graphics g(dc);

@@ -5,7 +5,7 @@
 namespace mech {
 // The window's colors. Windows' app mode chooses light or dark; with high contrast on, the system colors are used.
 struct Palette {
-    bool dark = false;
+    bool dark = false, contrast = false;
     COLORREF window, card, border, text, muted, accent, accentHot, onAccent, link, control, hot, pressed, field, bar,
         ok, warn, error;
     bool operator==(const Palette&) const = default;
@@ -23,6 +23,21 @@ HBRUSH brush(COLORREF color);
 bool gdiplus();
 // An antialiased rounded rectangle; a border of another color is drawn on r's edge pixels.
 void roundRect(HDC dc, const RECT& r, int radius, COLORREF fill, COLORREF border);
+// Paints an area off screen and copies it to the target when destroyed. Text is drawn transparently. The bitmap is a
+// DIB section, which GDI+ draws into about twice as fast as into a compatible bitmap.
+struct Buffer {
+    Buffer(HDC target, const RECT& area);
+    ~Buffer();
+    Buffer(const Buffer&) = delete;
+    Buffer& operator=(const Buffer&) = delete;
+    const HDC dc;
+
+private:
+    HDC target_;
+    RECT area_;
+    HBITMAP bitmap_;
+    HGDIOBJ old_;
+};
 // NM_CUSTOMDRAW for a push button, check box or trackbar: draws it in the palette over the brush its parent returns
 // for WM_CTLCOLORBTN. Other controls draw themselves.
 LRESULT drawControl(const NMCUSTOMDRAW& draw, bool primary);

@@ -54,7 +54,6 @@ constexpr Palette lightColors{.dark = false,
                .error = RGB(240, 96, 92)};
 Palette current = lightColors;
 std::map<COLORREF, HBRUSH> brushes;
-constexpr wchar_t hotProperty[] = L"MechControl.Hot";
 
 gp::Color color(COLORREF c, BYTE alpha = 255) { return {alpha, GetRValue(c), GetGValue(c), GetBValue(c)}; }
 UINT dpi = 96;
@@ -100,38 +99,29 @@ HBRUSH backdrop(HWND control, HDC dc) {
     return b ? b : brush(current.window);
 }
 bool shown(HWND window, WORD flag) { return !(SendMessageW(window, WM_QUERYUISTATE, 0, 0) & flag); }
-int hot(HWND window) { return int(INT_PTR(GetPropW(window, hotProperty))); }
-// Tracks the part under the mouse (0: none) and repaints when it changes.
-void hover(HWND window, int part) {
-    if (part == hot(window)) return;
-    if (part) {
-        SetPropW(window, hotProperty, HANDLE(INT_PTR(part)));
-        TRACKMOUSEEVENT t{sizeof t, TME_LEAVE, window};
-        TrackMouseEvent(&t);
-    } else
-        RemovePropW(window, hotProperty);
-    InvalidateRect(window, nullptr, FALSE);
-}
-// Paints off screen: these controls repaint while the mouse moves.
-template <class Draw> void buffered(HWND window, HDC target, Draw draw) {
+RECT client(HWND window) {
     RECT r{};
     GetClientRect(window, &r);
-    if (r.right <= 0 || r.bottom <= 0 || !gdiplus()) return;
-    auto dc = CreateCompatibleDC(target);
-    auto bitmap = CreateCompatibleBitmap(target, r.right, r.bottom);
-    auto old = SelectObject(dc, bitmap);
-    auto font = SelectObject(dc, reinterpret_cast<HFONT>(SendMessageW(window, WM_GETFONT, 0, 0)));
-    SetBkMode(dc, TRANSPARENT);
-    {
-        gp::Graphics g(dc);
-        g.SetSmoothingMode(gp::SmoothingModeAntiAlias);
-        draw(dc, g, r);
+    return r;
+}
+// Keeps the part under the mouse (0: none) as the subclass's reference data and repaints when it changes.
+void hover(HWND window, SUBCLASSPROC procedure, DWORD_PTR hot, DWORD_PTR part) {
+    if (part == hot) return;
+    SetWindowSubclass(window, procedure, 2, part);
+    if (part) {
+        TRACKMOUSEEVENT t{sizeof t, TME_LEAVE, window};
+        TrackMouseEvent(&t);
     }
-    BitBlt(target, 0, 0, r.right, r.bottom, dc, 0, 0, SRCCOPY);
-    SelectObject(dc, font);
-    SelectObject(dc, old);
-    DeleteObject(bitmap);
-    DeleteDC(dc);
+    InvalidateRect(window, nullptr, FALSE);
+}
+// Paints an area of a control off screen: these controls repaint while the mouse moves.
+template <class Draw> void buffered(HWND window, HDC target, const RECT& area, Draw draw) {
+    if (IsRectEmpty(&area) || !gdiplus()) return;
+    Buffer buffer(target, area);
+    SelectObject(buffer.dc, reinterpret_cast<HFONT>(SendMessageW(window, WM_GETFONT, 0, 0)));
+    gp::Graphics g(buffer.dc);
+    g.SetSmoothingMode(gp::SmoothingModeAntiAlias);
+    draw(buffer.dc, g, area);
 }
 
 LRESULT drawButton(const NMCUSTOMDRAW& d, bool primary) {
@@ -142,7 +132,7 @@ LRESULT drawButton(const NMCUSTOMDRAW& d, bool primary) {
     bool disabled = d.uItemState & CDIS_DISABLED, hot = d.uItemState & CDIS_HOT, pressed = d.uItemState & CDIS_SELECTED,
          focus = (d.uItemState & CDIS_FOCUS) && shown(window, UISF_HIDEFOCUS);
     UINT prefix = shown(window, UISF_HIDEACCEL) ? 0 : DT_HIDEPREFIX;
-    buffered(window, d.hdc, [&](HDC dc, gp::Graphics& g, RECT r) {
+    buffered(window, d.hdc, client(window), [&](HDC dc, gp::Graphics& g, RECT r) {
         FillRect(dc, &r, backdrop(window, dc));
         auto title = text(window);
         if (type == BS_CHECKBOX || type == BS_AUTOCHECKBOX) {
@@ -171,6 +161,7 @@ LRESULT drawButton(const NMCUSTOMDRAW& d, bool primary) {
             }
             return;
         }
+        bool accent = primary && !disabled;
         COLORREF inside = disabled  ? p.control
                           : primary ? (hot && !pressed ? p.accentHot : p.accent)
                           : pressed ? p.pressed
@@ -178,8 +169,19 @@ LRESULT drawButton(const NMCUSTOMDRAW& d, bool primary) {
                                     : p.control,
                  ink = disabled  ? p.muted
                        : primary ? p.onAccent
-                                 : p.text;
-        fill(g, r, float(px(5)), inside, focus ? p.text : primary && !disabled ? inside : p.border);
+                                 : p.text,
+                 edge = focus    ? p.text
+                        : accent ? inside
+                                 : p.border;
+        // High contrast has one face color and one for text and borders: the frame shows the mouse and a focus
+        // rectangle the keyboard.
+        if (p.contrast && (hot || pressed)) edge = accent ? p.text : p.accent;
+        fill(g, r, float(px(5)), inside, edge);
+        if (p.contrast && focus) {
+            RECT inner = r;
+            InflateRect(&inner, -px(3), -px(3));
+            DrawFocusRect(dc, &inner);
+        }
         if (pressed) OffsetRect(&r, 0, 1);
         SetTextColor(dc, ink);
         DrawTextW(dc, title.c_str(), -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | prefix);
@@ -192,7 +194,7 @@ LRESULT drawTrack(const NMCUSTOMDRAW& d) {
     if (d.dwDrawStage != CDDS_PREPAINT) return CDRF_DODEFAULT;
     auto window = d.hdr.hwndFrom;
     auto& p = current;
-    buffered(window, d.hdc, [&](HDC dc, gp::Graphics& g, RECT r) {
+    buffered(window, d.hdc, client(window), [&](HDC dc, gp::Graphics& g, RECT r) {
         FillRect(dc, &r, backdrop(window, dc));
         RECT channel{}, thumb{};
         SendMessageW(window, TBM_GETCHANNELRECT, 0, reinterpret_cast<LPARAM>(&channel));
@@ -211,20 +213,25 @@ LRESULT drawTrack(const NMCUSTOMDRAW& d) {
         bool focus = GetFocus() == window && shown(window, UISF_HIDEFOCUS);
         circle(g, cx + 0.5f, cy + 0.5f, radius, p.control, focus ? p.text : p.border);
         circle(g, cx + 0.5f, cy + 0.5f, radius * 0.45f, enabled ? p.accent : p.muted, enabled ? p.accent : p.muted);
+        if (p.contrast && focus) DrawFocusRect(dc, &r);
     });
     return CDRF_SKIPDEFAULT;
 }
-// Text tabs over a rule; the selected one is underlined in the accent color.
-void paintTabs(HWND window, HDC target) {
+// Text tabs over a rule; the selected one is underlined in the accent color and the one under the mouse shaded.
+void paintTabs(HWND window, HDC target, int over) {
     auto& p = current;
-    buffered(window, target, [&](HDC dc, gp::Graphics& g, RECT r) {
+    // The control spans the pages, which cover all but a margin of it below the tabs. Only the tabs are buffered.
+    RECT strip = client(window), below = strip, first{};
+    TabCtrl_GetItemRect(window, 0, &first);
+    strip.bottom = below.top = first.bottom + 1;
+    FillRect(target, &below, brush(p.window));
+    buffered(window, target, strip, [&](HDC dc, gp::Graphics& g, RECT r) {
         FillRect(dc, &r, brush(p.window));
-        int selected = TabCtrl_GetCurSel(window), over = hot(window) - 1, bottom = 0;
+        int selected = TabCtrl_GetCurSel(window);
         bool focus = GetFocus() == window && shown(window, UISF_HIDEFOCUS);
         for (int i = 0, n = TabCtrl_GetItemCount(window); i < n; ++i) {
             RECT item{};
             TabCtrl_GetItemRect(window, i, &item);
-            bottom = std::max(bottom, int(item.bottom));
             wchar_t name[64]{};
             TCITEMW t{TCIF_TEXT};
             t.pszText = name;
@@ -246,18 +253,18 @@ void paintTabs(HWND window, HDC target) {
                 DrawFocusRect(dc, &label);
             }
         }
-        RECT rule{0, bottom, r.right, bottom + 1};
+        RECT rule{0, r.bottom - 1, r.right, r.bottom};
         FillRect(dc, &rule, brush(p.border));
     });
 }
-// Two arrow buttons that continue the buddy edit box.
-void paintSpin(HWND window, HDC target) {
+// Two arrow buttons that continue the buddy edit box; over is the one under the mouse (1: up, 2: down).
+void paintSpin(HWND window, HDC target, int over) {
     auto& p = current;
-    buffered(window, target, [&](HDC dc, gp::Graphics& g, RECT r) {
+    buffered(window, target, client(window), [&](HDC dc, gp::Graphics& g, RECT r) {
         FillRect(dc, &r, brush(p.field));
         FrameRect(dc, &r, brush(p.border));
         bool enabled = IsWindowEnabled(window), down = GetCapture() == window && (GetKeyState(VK_LBUTTON) & 0x8000);
-        int mid = r.bottom / 2, over = hot(window), s = px(3);
+        int mid = r.bottom / 2, s = px(3);
         for (int part : {1, 2}) {
             RECT half{1, part == 1 ? 1 : mid, r.right - 1, part == 1 ? mid : r.bottom - 1};
             if (enabled && over == part) FillRect(dc, &half, brush(down ? p.pressed : p.hot));
@@ -270,50 +277,45 @@ void paintSpin(HWND window, HDC target) {
         }
     });
 }
-LRESULT CALLBACK tabsProcedure(HWND window, UINT message, WPARAM wp, LPARAM lp, UINT_PTR, DWORD_PTR) {
+// hot is the tab under the mouse plus one.
+LRESULT CALLBACK tabsProcedure(HWND window, UINT message, WPARAM wp, LPARAM lp, UINT_PTR, DWORD_PTR hot) {
     switch (message) {
     case WM_ERASEBKGND: return 1;
     case WM_PAINT: {
         PAINTSTRUCT ps{};
         auto dc = BeginPaint(window, &ps);
-        paintTabs(window, dc);
+        paintTabs(window, dc, int(hot) - 1);
         EndPaint(window, &ps);
         return 0;
     }
     case WM_MOUSEMOVE: {
         TCHITTESTINFO hit{{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)}};
-        hover(window, TabCtrl_HitTest(window, &hit) + 1);
+        hover(window, tabsProcedure, hot, TabCtrl_HitTest(window, &hit) + 1);
         break;
     }
-    case WM_MOUSELEAVE: hover(window, 0); break;
-    case WM_NCDESTROY: RemovePropW(window, hotProperty); break;
+    case WM_MOUSELEAVE: hover(window, tabsProcedure, hot, 0); break;
     }
     return DefSubclassProc(window, message, wp, lp);
 }
-LRESULT CALLBACK spinProcedure(HWND window, UINT message, WPARAM wp, LPARAM lp, UINT_PTR, DWORD_PTR) {
+// hot is the arrow under the mouse.
+LRESULT CALLBACK spinProcedure(HWND window, UINT message, WPARAM wp, LPARAM lp, UINT_PTR, DWORD_PTR hot) {
     switch (message) {
     case WM_ERASEBKGND: return 1;
     case WM_PAINT: {
         PAINTSTRUCT ps{};
         auto dc = BeginPaint(window, &ps);
-        paintSpin(window, dc);
+        paintSpin(window, dc, int(hot));
         EndPaint(window, &ps);
         return 0;
     }
-    case WM_MOUSEMOVE: {
-        RECT r{};
-        GetClientRect(window, &r);
-        hover(window, GET_Y_LPARAM(lp) < r.bottom / 2 ? 1 : 2);
-        break;
-    }
-    case WM_MOUSELEAVE: hover(window, 0); break;
+    case WM_MOUSEMOVE: hover(window, spinProcedure, hot, GET_Y_LPARAM(lp) < client(window).bottom / 2 ? 1 : 2); break;
+    case WM_MOUSELEAVE: hover(window, spinProcedure, hot, 0); break;
     case WM_LBUTTONDOWN:
     case WM_LBUTTONUP: {
         auto result = DefSubclassProc(window, message, wp, lp);
         InvalidateRect(window, nullptr, FALSE);
         return result;
     }
-    case WM_NCDESTROY: RemovePropW(window, hotProperty); break;
     }
     return DefSubclassProc(window, message, wp, lp);
 }
@@ -356,6 +358,7 @@ bool setPalette(bool dark) {
         (contrast.dwFlags & HCF_HIGHCONTRASTON)) {
         auto c = GetSysColor;
         next = {.dark = false,
+                .contrast = true,
                 .window = c(COLOR_BTNFACE),
                 .card = c(COLOR_BTNFACE),
                 .border = c(COLOR_BTNTEXT),
@@ -398,6 +401,22 @@ void roundRect(HDC dc, const RECT& r, int radius, COLORREF inside, COLORREF bord
     gp::Graphics g(dc);
     g.SetSmoothingMode(gp::SmoothingModeAntiAlias);
     fill(g, r, float(radius), inside, border);
+}
+Buffer::Buffer(HDC target, const RECT& area) : dc(CreateCompatibleDC(target)), target_(target), area_(area) {
+    BITMAPINFO info{};
+    info.bmiHeader = {sizeof(BITMAPINFOHEADER), area.right - area.left, area.top - area.bottom, 1, 32, BI_RGB};
+    void* bits = nullptr;
+    bitmap_ = CreateDIBSection(target, &info, DIB_RGB_COLORS, &bits, nullptr, 0);
+    old_ = SelectObject(dc, bitmap_);
+    SetViewportOrgEx(dc, -area.left, -area.top, nullptr);
+    SetBkMode(dc, TRANSPARENT);
+}
+Buffer::~Buffer() {
+    BitBlt(target_, area_.left, area_.top, area_.right - area_.left, area_.bottom - area_.top, dc, area_.left,
+           area_.top, SRCCOPY);
+    SelectObject(dc, old_);
+    DeleteObject(bitmap_);
+    DeleteDC(dc);
 }
 LRESULT drawControl(const NMCUSTOMDRAW& draw, bool primary) {
     wchar_t type[32]{};

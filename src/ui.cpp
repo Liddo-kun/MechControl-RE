@@ -33,6 +33,8 @@ namespace {
 using namespace mech;
 using namespace mech::config;
 constexpr wchar_t mainClass[] = L"MechControl.Native.Main";
+// A window that only holds controls: a page or the failsafe alert.
+constexpr wchar_t panelClass[] = L"MechControl.Native.Panel";
 constexpr UINT trayMessage = WM_APP + 2, fanEditMessage = WM_APP + 4;
 constexpr int appIconId = 1;  // resources/app.rc; the lowest icon ID is the one Explorer shows for the executable.
 // GUID_CONSOLE_DISPLAY_STATE and GUID_ACDC_POWER_SOURCE.
@@ -472,9 +474,6 @@ private:
             return 0;
         }
         if (message == WM_PARENTNOTIFY && LOWORD(wp) == WM_CREATE) return 0;
-        // A static control repaints itself in one color when enabled, over the painted sections; the page looks the
-        // same either way.
-        if (message == WM_ENABLE) return 0;
         if (message == WM_ERASEBKGND) return 1;
         if (message == WM_PAINT) {
             PAINTSTRUCT ps{};
@@ -483,22 +482,18 @@ private:
             EndPaint(window, &ps);
             return 0;
         }
-        // Transparent links paint the page behind them.
+        // Links, sliders, check boxes and combo boxes (for their corners) ask for the page behind them. The clip region
+        // gives the asking control's area, which lies in one section or outside all of them.
         if (message == WM_PRINTCLIENT) {
-            // Only the area behind the asking control, which the clip region gives.
             auto dc = reinterpret_cast<HDC>(wp);
             RECT r{};
-            if (GetClipBox(dc, &r) <= NULLREGION) GetClientRect(window, &r);
-            app->paintPage(app->index(window), dc, r);
+            GetClipBox(dc, &r);
+            FillRect(dc, &r,
+                     brush(app->backdrop(app->index(window), {(r.left + r.right) / 2, (r.top + r.bottom) / 2})));
             return 0;
         }
         if (message >= WM_CTLCOLORMSGBOX && message <= WM_CTLCOLORSTATIC)
             return app->colors(message, reinterpret_cast<HDC>(wp), reinterpret_cast<HWND>(lp));
-        // A static is transparent to the mouse; the live table's tooltips need it.
-        if (message == WM_NCHITTEST && window == app->pages_[0].window) {
-            auto hit = DefSubclassProc(window, message, wp, lp);
-            return hit == HTTRANSPARENT ? HTCLIENT : hit;
-        }
         return DefSubclassProc(window, message, wp, lp);
     }
     static LRESULT CALLBACK focusProcedure(HWND window, UINT message, WPARAM wp, LPARAM lp, UINT_PTR, DWORD_PTR data) {
@@ -528,14 +523,6 @@ private:
         }
         if (message == WM_CLOSE) {
             DestroyWindow(window);
-            return 0;
-        }
-        // The alert is a STATIC, which would draw its title over the message.
-        if (message == WM_PAINT) {
-            PAINTSTRUCT ps{};
-            auto dc = BeginPaint(window, &ps);
-            FillRect(dc, &ps.rcPaint, GetSysColorBrush(COLOR_BTNFACE));
-            EndPaint(window, &ps);
             return 0;
         }
         if (message == WM_NCDESTROY) app->alert_ = nullptr;
@@ -674,7 +661,7 @@ private:
             item.mask = TCIF_TEXT;
             item.pszText = const_cast<wchar_t*>(names[i]);
             TabCtrl_InsertItem(tabs_, i, &item);
-            pages_[i].window = CreateWindowExW(WS_EX_CONTROLPARENT, L"STATIC", L"",
+            pages_[i].window = CreateWindowExW(WS_EX_CONTROLPARENT, panelClass, L"",
                                                WS_CHILD | WS_VSCROLL | WS_CLIPCHILDREN | WS_CLIPSIBLINGS, 0, 0, 0, 0,
                                                window_, nullptr, instance_, nullptr);
             SetWindowPos(pages_[i].window, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
@@ -874,7 +861,7 @@ private:
         heading_ = heading;
         for (int id : {cpuChartId, gpuChartId, debugCpuId, debugGpuId}) SendMessageW(get(id), chartDpiMessage, dpi_, 0);
         setThemeDpi(dpi_);
-        layout();
+        layout(true);
     }
     // Windows' app mode chooses light or dark; the UI checks choose for themselves.
     void applyTheme(bool dark) {
@@ -900,14 +887,16 @@ private:
         return reinterpret_cast<LRESULT>(brush(back));
     }
     COLORREF backdrop(HWND child) const {
-        int page = index(GetParent(child));
-        if (page < 0) return palette().window;
         RECT r{};
         GetWindowRect(child, &r);
-        MapWindowPoints(nullptr, pages_[page].window, reinterpret_cast<POINT*>(&r), 2);
-        POINT center{(r.left + r.right) / 2, (r.top + r.bottom) / 2};
-        for (auto& [frame, title] : pages_[page].frames)
-            if (PtInRect(&frame, center)) return palette().card;
+        MapWindowPoints(nullptr, GetParent(child), reinterpret_cast<POINT*>(&r), 2);
+        return backdrop(index(GetParent(child)), {(r.left + r.right) / 2, (r.top + r.bottom) / 2});
+    }
+    // The color painted at a point of a page (-1: outside the pages).
+    COLORREF backdrop(int page, POINT at) const {
+        if (page >= 0)
+            for (auto& [frame, title] : pages_[page].frames)
+                if (PtInRect(&frame, at)) return palette().card;
         return palette().window;
     }
     // One pass over a framed page: it measures the page and, with apply, also places the controls and keeps the
@@ -1568,17 +1557,13 @@ private:
     }
     void paintPage(int index, HDC target, const RECT& area) {
         auto& p = pages_[index];
-        int width = area.right - area.left, height = area.bottom - area.top;
-        if (width <= 0 || height <= 0) return;
+        if (IsRectEmpty(&area)) return;
         // Readings repaint small areas often, so the buffer covers only the area being painted.
-        auto dc = CreateCompatibleDC(target);
-        auto bitmap = CreateCompatibleBitmap(target, width, height);
-        auto oldBitmap = SelectObject(dc, bitmap);
-        SetViewportOrgEx(dc, -area.left, -area.top, nullptr);
+        Buffer buffer(target, area);
+        auto dc = buffer.dc;
         auto& theme = palette();
         FillRect(dc, &area, brush(theme.window));
-        SetBkMode(dc, TRANSPARENT);
-        auto oldFont = SelectObject(dc, title_);
+        SelectObject(dc, title_);
         SetTextColor(dc, theme.text);
         for (auto& [r, title] : p.frames) {
             RECT visible{};
@@ -1625,11 +1610,6 @@ private:
                 if (infoCells_[i].right > infoCells_[i].left)
                     TextOutW(dc, infoCells_[i].left, infoCells_[i].top, infoText_[i].c_str(), int(infoText_[i].size()));
         }
-        BitBlt(target, area.left, area.top, width, height, dc, area.left, area.top, SRCCOPY);
-        SelectObject(dc, oldFont);
-        SelectObject(dc, oldBitmap);
-        DeleteObject(bitmap);
-        DeleteDC(dc);
     }
     // Each limit next to the clock: its setting, reading, share of the setting and the clock cap of the driver
     // controller enforcing it. No verdicts: several limits hold the clock back at once, so only numbers are shown.
@@ -1823,8 +1803,9 @@ private:
         } else
             InvalidateRect(pages_[0].window, &liveTable_, FALSE);
     }
-    // The reference MainForm: the profile bar, the tabs and the monitor bar fill the window edge to edge.
-    void layout() {
+    // The reference MainForm: the profile bar, the tabs and the monitor bar fill the window edge to edge. A hidden page
+    // is laid out when it is selected, unless all are asked for.
+    void layout(bool all = false) {
         if (!tabs_) return;
         RECT r{};
         GetClientRect(window_, &r);
@@ -1846,7 +1827,7 @@ private:
         MapWindowPoints(tabs_, window_, reinterpret_cast<POINT*>(&page), 2);
         for (auto& p : pages_) {
             place(p.window, page.left, page.top, page.right - page.left, page.bottom - page.top);
-            layoutPage(p);
+            if (all || &p == &pages_[TabCtrl_GetCurSel(tabs_)]) layoutPage(p);
         }
         place(progress_, 1, bar + 1, r.right - 2, ref(5));
         InvalidateRect(window_, &bar_, FALSE);
@@ -1904,28 +1885,18 @@ private:
             InvalidateRect(window_, &bar_, FALSE);
     }
     void paintBar(HDC target) {
-        int width = bar_.right - bar_.left, height = bar_.bottom - bar_.top;
-        if (width <= 0 || height <= 0) return;
-        auto dc = CreateCompatibleDC(target);
-        auto bitmap = CreateCompatibleBitmap(target, width, height);
-        auto oldBitmap = SelectObject(dc, bitmap);
-        RECT r{0, 0, width, height}, rule{0, 0, width, 1};
-        FillRect(dc, &r, brush(palette().bar));
+        if (IsRectEmpty(&bar_)) return;
+        Buffer buffer(target, bar_);
+        auto dc = buffer.dc;
+        RECT rule{bar_.left, bar_.top, bar_.right, bar_.top + 1};
+        FillRect(dc, &bar_, brush(palette().bar));
         FillRect(dc, &rule, brush(palette().border));
-        SetBkMode(dc, TRANSPARENT);
-        auto oldFont = SelectObject(dc, font_);
         for (auto& t : barText_) {
             SelectObject(dc, t.font ? t.font : font_);
             SetTextColor(dc, t.color);
-            RECT tr = t.rect;
-            OffsetRect(&tr, 0, -bar_.top);
-            DrawTextW(dc, t.text.c_str(), -1, &tr, DT_WORDBREAK | DT_NOPREFIX);
+            RECT r = t.rect;
+            DrawTextW(dc, t.text.c_str(), -1, &r, DT_WORDBREAK | DT_NOPREFIX);
         }
-        BitBlt(target, bar_.left, bar_.top, width, height, dc, 0, 0, SRCCOPY);
-        SelectObject(dc, oldFont);
-        SelectObject(dc, oldBitmap);
-        DeleteObject(bitmap);
-        DeleteDC(dc);
     }
     bool flat(int id) const {
         return id == saveId || id == defaultsId || id == readId || (id >= slotId && id < slotId + 5);
@@ -1945,25 +1916,28 @@ private:
                                   : p.control,
                  ink = active                                         ? p.onAccent
                        : disabled || (slot && emptySlot(id - slotId)) ? p.muted
-                                                                      : p.text;
-        auto dc = CreateCompatibleDC(d.hDC);
-        RECT r{0, 0, d.rcItem.right - d.rcItem.left, d.rcItem.bottom - d.rcItem.top};
-        auto bitmap = CreateCompatibleBitmap(d.hDC, r.right, r.bottom);
-        auto oldBitmap = SelectObject(dc, bitmap);
+                                                                      : p.text,
+                 edge = focus    ? p.text
+                        : active ? fill
+                                 : p.border;
+        // As for the other buttons, high contrast shows the mouse in the frame and the keyboard in a focus rectangle.
+        if (p.contrast && (hot || pressed)) edge = active ? p.text : p.accent;
+        Buffer buffer(d.hDC, d.rcItem);
+        auto dc = buffer.dc;
+        RECT r = d.rcItem;
         FillRect(dc, &r, brush(p.window));
-        roundRect(dc, r, ref(8), fill, focus ? p.text : active ? fill : p.border);
-        auto old = SelectObject(dc, active || id == saveId ? bold_ : font_);
-        SetBkMode(dc, TRANSPARENT);
+        roundRect(dc, r, ref(8), fill, edge);
+        if (p.contrast && focus) {
+            RECT inner = r;
+            InflateRect(&inner, -ref(3), -ref(3));
+            DrawFocusRect(dc, &inner);
+        }
+        SelectObject(dc, active || id == saveId ? bold_ : font_);
         SetTextColor(dc, ink);
         auto s = text(d.hwndItem);
         DrawTextW(dc, s.c_str(), -1, &r,
                   DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS |
                       (d.itemState & ODS_NOACCEL ? DT_HIDEPREFIX : 0));
-        BitBlt(d.hDC, d.rcItem.left, d.rcItem.top, r.right, r.bottom, dc, 0, 0, SRCCOPY);
-        SelectObject(dc, old);
-        SelectObject(dc, oldBitmap);
-        DeleteObject(bitmap);
-        DeleteDC(dc);
     }
     LRESULT customDraw(const NMCUSTOMDRAW& draw) {
         int id = int(draw.hdr.idFrom);
@@ -2029,6 +2003,7 @@ private:
     }
     void selectPage() {
         int page = TabCtrl_GetCurSel(tabs_);
+        layoutPage(pages_[page]); // The window may have been resized while the page was hidden.
         for (int i = 0; i < 7; ++i) ShowWindow(pages_[i].window, i == page ? SW_SHOW : SW_HIDE);
         enable(readId, !busy_ && !(page == 1 && state_.value("linked", false)));
         if (ready_ && IsWindowVisible(window_)) bindPage(page);
@@ -3401,7 +3376,7 @@ private:
             selectPage();
         }
         if (alert_) return;
-        alert_ = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW, L"STATIC", L"MechControl — Thermal Failsafe",
+        alert_ = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW, panelClass, L"MechControl — Thermal Failsafe",
                                  WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT,
                                  scale(560), scale(200), window_, nullptr, instance_, nullptr);
         SetWindowSubclass(alert_, alertProcedure, 1, reinterpret_cast<DWORD_PTR>(this));
@@ -3525,6 +3500,9 @@ private:
             auto r = reinterpret_cast<RECT*>(lp);
             SetWindowPos(window_, nullptr, r->left, r->top, r->right - r->left, r->bottom - r->top,
                          SWP_NOZORDER | SWP_NOACTIVATE);
+            // An edit box chooses its margins from its width when its font is set, so the hidden pages take their new
+            // size before the fonts change.
+            layout(true);
             applyDpi();
             return 0;
         }
@@ -3740,6 +3718,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         LoadIconMetric(instance, MAKEINTRESOURCEW(appIconId), LIM_SMALL, &type.hIconSm);
         type.hbrBackground = GetSysColorBrush(COLOR_BTNFACE);
         if (!RegisterClassExW(&type)) throw std::runtime_error("Cannot register main window");
+        type.lpfnWndProc = DefWindowProcW;
+        type.lpszClassName = panelClass;
+        if (!RegisterClassExW(&type)) throw std::runtime_error("Cannot register panel window");
 #ifdef MECHCONTROL_PAGE_CHECK
         Application app(instance, ui_page_options(checks, fixture));
 #else
