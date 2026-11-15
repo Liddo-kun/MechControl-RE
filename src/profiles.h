@@ -123,6 +123,9 @@ struct Hardware {
         return (*v & 0x80) != 0;
     }
     bool liquid_cooling() const { return (at(0x7A4).value_or(0) & 0x80) != 0; }
+    // What the preset at 0x7A7 is. The OEM service picks its RamFan1p5 fan managers by support byte 6 (0x78E) bit 6,
+    // and those read it as the Turbo defaults; its older ones read it as Battery Saver.
+    bool turbo_preset() const { return (at(0x78E).value_or(0) & 0x40) != 0; }
     // Firmware older than the GPU module ID (0x7D2): it leaves that 0 and reports a GPU in system ID (0x456)
     // bit 7. The one such image read (GMxTG0x, EC 79.0) also has no charge hold.
     bool before_gpu_module() const { return at(0x7D2) == 0 && (at(0x456).value_or(0) & 0x80) != 0; }

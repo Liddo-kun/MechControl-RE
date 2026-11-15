@@ -220,6 +220,17 @@ int main(int argc, char** argv) try {
     require(p.limits.at("PL1").max == 150 && p.modes->empty(), "ECSpec limits replace the profile's; empty modes stay");
     h.ecspec->at(9) = 0;
     require(h.extract_limits().empty(), "ECSpec marker validated");
+    // A GM5TG0O's bytes: support byte 6 says RamFan1p5, so 0x7A7 holds the Turbo defaults and 0x7DA their limit.
+    Hardware preset;
+    preset.bytes = {{0x727, 0x40}, {0x78E, 0x6C}, {0x7A7, 75}, {0x7A8, 75}, {0x7A9, 200}, {0x7DA, 5}};
+    auto presets = preset.extract_modes(false);
+    require(presets && !presets->contains("batterySaver") && presets->at("turbo").pl1 == 75 &&
+                presets->at("turbo").pl4 == 200 && presets->at("turbo").tcc_offset == 100,
+            "0x7A7 is the Turbo preset on RamFan1p5 firmware");
+    preset.bytes[0x78E] = 0x2C;
+    presets = preset.extract_modes(false);
+    require(presets && !presets->contains("turbo") && !presets->at("batterySaver").tcc_offset,
+            "0x7A7 stays Battery Saver without RamFan1p5");
     auto read = [](int a) -> uint8_t {
         if (a == 0x463) return 10;
         if (a == 0x7A6) return 8;

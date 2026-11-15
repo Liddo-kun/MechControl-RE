@@ -1514,8 +1514,8 @@ void x6fr(const std::filesystem::path& root) {
     EcSession session([&](const std::wstring&) { return std::make_unique<Fake>(s); }, [](const std::string&) {}, false,
                       [](unsigned) {}, profiles_directory(), Identity{"X6FR5xxY", "fixture", "amd", uint8_t{26}});
     check(session.profile.project_id == "X6FR5xxY" && session.profile.modes &&
-              !session.profile.modes->contains("batterySaver"),
-          "X6FR reviewed 145 W preset is not exposed as Battery Saver");
+              !session.profile.modes->contains("batterySaver") && !session.profile.modes->contains("turbo"),
+          "X6FR reviewed 145 W preset is not exposed");
     Controller c(session, path, [](const std::string&) {}, [](unsigned) {}, {}, false, {}, false);
     c.start();
     s->writes.clear();

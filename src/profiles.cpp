@@ -332,8 +332,9 @@ std::map<std::string, Limit> Hardware::extract_limits() const {
 }
 std::optional<std::map<std::string, Mode>> Hardware::extract_modes(bool absolute) const {
     std::map<std::string, Mode> r;
+    bool turbo = turbo_preset();
     for (auto [name, base, tcc] : {std::tuple{"gaming", 0x730, 0x7D8}, std::tuple{"office", 0x734, 0x7D9},
-                                   std::tuple{"batterySaver", 0x7A7, 0}}) {
+                                   std::tuple{turbo ? "turbo" : "batterySaver", 0x7A7, turbo ? 0x7DA : 0}}) {
         // Unread bytes become 255, which every range check below rejects.
         int a = at(base).value_or(255), b = at(base + 1).value_or(255), c = at(base + 2).value_or(255),
             t = tcc ? at(tcc).value_or(255) : 255;

@@ -37,7 +37,9 @@ come from that model and runtime validation, not assumptions about this host.
 Limits the EC reports (ECSpec) replace the profile's, and startup validation disables
 a feature whose registers read outside their sane range.
 A `fanCurveLatch` bitfield selects read-modify-write of the `0x7C6` latch, and
-`modePresets` limits which EC presets are exposed. X6FR5xxY uses both: firmware
+`modePresets` limits which EC presets are exposed; the one at `0x7A7` is named Turbo where
+support byte 6 reports RamFan1p5, as the OEM service reads it, and Battery Saver elsewhere.
+X6FR5xxY uses both: firmware
 `XxFR5xxx_Pro_14.810` shares other bits in `0x7C6`, and its `0x7A7` preset is 145 W,
 not Battery Saver. IDY_7Y uses `fanCurveLatch` because Intel EC 77.0 treats `0x7C6`
 bit 6 as a power-button request. Other profiles write the whole byte.

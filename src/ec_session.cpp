@@ -229,8 +229,9 @@ void EcSession::describe(const std::function<void(const std::string&)>& log, con
                            : to_string(105 - *v) + "C (offset=" + to_string(*v) + ")";
     };
     s = "--- Per-Mode PL Defaults (EC Registers) ---";
-    for (auto [name, base, t] :
-         {std::tuple{"Gaming: ", 0x730, 0x7D8}, {"Office: ", 0x734, 0x7D9}, {"BatSave:", 0x7A7, 0}})
+    for (auto [name, base, t] : {std::tuple{"Gaming: ", 0x730, 0x7D8},
+                                 {"Office: ", 0x734, 0x7D9},
+                                 {h.turbo_preset() ? "Turbo:  " : "BatSave:", 0x7A7, 0}})
         s += "\n  " + std::string(name) + " PL1=" + watts(base) + " PL2=" + watts(base + 1) +
              " PL4=" + raw_pl4(base + 2) + " D=" + byte(base + 3) + (t ? " TCC=" + tcc(t) : "");
     s += "\n  Turbo TCC: " + tcc(0x7DA);
