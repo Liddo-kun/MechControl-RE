@@ -492,6 +492,49 @@ void Api::set_dlppc(bool active) {
     call_(0x4d1c7d6e, b);
     require((policy_control(p->first)[72 + p->first * 168 + 4] != 0) == active, "DLPPC readback");
 }
+// The temperature target is the driver's client thermal policy, which the OEM app and MSI Afterburner also set.
+// Values are 1/256 degrees C. The first policy is the GPU's own; its status entry is found by the same controller.
+Bytes Api::temp_status(uint32_t controller, size_t& entry) {
+    auto b = packet(0x38, 0x20038);
+    call_(0xe9c425a1, b);
+    version(b, 0x20038);
+    auto count = u32(b, 4);
+    require(count >= 1 && count <= 4, "thermal policy status count");
+    for (uint32_t i = 0; i < count; ++i)
+        if (u32(b, 8 + i * 12) == controller) {
+            entry = 8 + i * 12;
+            return b;
+        }
+    throw Unsupported("Unsupported NVIDIA thermal policy status");
+}
+std::optional<TempTarget> Api::temp_target() {
+    auto info = packet(0x68, 0x20068);
+    call_(0x0d258bb5, info);
+    version(info, 0x20068);
+    if (!info[4]) return {};
+    require(info[4] <= 4, "thermal policy count");
+    auto min = int32_t(u32(info, 16)), def = int32_t(u32(info, 20)), max = int32_t(u32(info, 24));
+    require(0 < min && min <= def && def <= max && max < 150 * 256, "thermal policy range");
+    size_t e = 0;
+    auto s = temp_status(u32(info, 8), e);
+    auto current = int32_t(u32(s, e + 4));
+    require(current >= min && current <= max, "thermal policy target");
+    // Whole degrees inside the driver's range; the BIOS values are whole degrees in practice.
+    return TempTarget{(min + 255) / 256, (def + 128) / 256, max / 256, (current + 128) / 256};
+}
+void Api::set_temp_target(int celsius) {
+    auto t = temp_target();
+    require(t.has_value(), "thermal policy");
+    require(celsius >= t->min && celsius <= t->max, "temperature target range");
+    auto info = packet(0x68, 0x20068);
+    call_(0x0d258bb5, info);
+    size_t e = 0;
+    auto b = temp_status(u32(info, 8), e);
+    put(b, e + 4, uint32_t(celsius * 256));
+    call_(0x34c0b13d, b);
+    auto after = temp_target();
+    require(after && after->current == celsius, "temperature target readback");
+}
 std::optional<double> Api::inline_activity() {
     if (inline_unsupported_) return {};
     try {
@@ -741,6 +784,13 @@ config::Json Api::diagnostic() {
     j["dlppc"] = section([&] {
         auto d = dlppc();
         return d ? Json{{"active", d->active}, {"policy", d->policy}, {"controllers", d->controllers}} : Json(nullptr);
+    });
+    j["tempTarget"] = section([&] {
+        auto t = temp_target();
+        if (!t) return Json(nullptr);
+        Json limits = range(t->min, t->def, t->max);
+        limits["current"] = t->current;
+        return limits;
     });
     return j;
 }

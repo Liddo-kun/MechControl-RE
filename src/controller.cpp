@@ -103,6 +103,7 @@ Controller::Controller(EcSession& session, std::filesystem::path directory,
     if (nvidia_hardware && features_.gpu_power()) {
         auto device = nv::Store::device();
         nvidia_available_ = dlppc_available_ = device && nv::supported_generation(*device);
+        temp_target_available_ = device.has_value(); // Any generation; the driver decides on first use.
         char id[8]{};
         if (device) sprintf_s(id, "%04X", *device);
         if (!nvidia_available_)
@@ -111,7 +112,7 @@ Controller::Controller(EcSession& session, std::filesystem::path directory,
     }
     nvidia_ = std::move(driver);
     if (nvidia_) {
-        nvidia_available_ = dlppc_available_ = true;
+        nvidia_available_ = dlppc_available_ = temp_target_available_ = true;
         gpu_unlocked_ = nvidia_->enabled;
         nvidia_min_watts_ = nvidia_->minimum_watts();
     }
@@ -656,6 +657,12 @@ void Controller::apply_profile(const UserProfile& profile, const nv::ProfilePlan
             if (!thermal_->verified(Gpu) || !matches(Gpu)) emergency(Gpu);
         } else
             apply_gpu(g);
+        // Driver-only and independent of the rest of the slot, so a failure is logged like a peripheral's.
+        if (g.temp_target) try {
+                apply_temp_target(*g.temp_target);
+            } catch (const std::exception& e) {
+                diagnostic_(std::string("Slot GPU temperature target not applied: ") + e.what());
+            }
     }
     if (fan_saved) {
         boost(profile.fan->boost);
@@ -1041,6 +1048,8 @@ UserProfile Controller::capture(int slot) {
             (g.tgp < l.min || g.tgp > l.max || g.total() > nvidia_->stock_watts() || c.nv.current > c.nv.stock_max ||
              (c.ms && c.ms->current > c.ms->stock_max) || (c.input && c.input->current > c.input->stock_max));
     }
+    // The target as last read or written; never read, it is saved as null and loading leaves the driver's.
+    if (profile.gpu && temp_target_) profile.gpu->temp_target = temp_target_->current;
     profile.protection = thermal_->settings();
     profile.fan.reset();
     if (features_.fan_control()) {
@@ -1392,10 +1401,13 @@ ControlResult Controller::run(const GpuApply& c) {
             configure_gpu(plan);
             cpu_apply();
             if (c.power) apply_gpu(g);
+            if (g.temp_target) apply_temp_target(*g.temp_target); // After the GPU restart, which resets it.
         });
     } else {
         validate_currents(g);
         explicit_apply([&] {
+            // First, so a target outside the driver's range is refused before any other write.
+            if (g.temp_target) apply_temp_target(*g.temp_target);
             if (g.nvvdd_ma || g.msvdd_ma || g.board_input_ma)
                 nvidia_work([&] { nvidia_->configure(gpu_unlocked_, g, false); });
             cpu_apply();
@@ -1738,6 +1750,15 @@ ControlResult Controller::run(const DefaultsApply& request) {
             thermal_->enforce();
             driver_failure = e.what();
             diagnostic_("NVIDIA defaults failed independently: " + driver_failure);
+        }
+        thermal_->enforce();
+    }
+    if (key.empty() && temp_target_ && temp_target_->current != temp_target_->def) {
+        try {
+            apply_temp_target(temp_target_->def);
+        } catch (const std::exception& e) {
+            driver_failure += (driver_failure.empty() ? "" : "; ") + std::string(e.what());
+            diagnostic_(std::string("NVIDIA temperature target default failed: ") + e.what());
         }
         thermal_->enforce();
     }

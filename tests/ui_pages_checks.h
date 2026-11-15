@@ -120,6 +120,9 @@ void Application::checkPages(const std::filesystem::path& directory, const std::
     capture(L"power-live-bottom");
     bottom(false);
     capture(L"power-live");
+    check(IsWindowVisible(get(gpuTargetId)) && IsWindowEnabled(get(gpuTargetId)) &&
+              text(get(gpuTargetId + 1000)) == L"83 °C",
+          "the GPU temperature target shows the driver's value where the driver offers a range");
     // The advanced controls are collapsed until the link is clicked.
     check(std::ranges::none_of(std::array{unlockId, dlppcId, nvId, msId, inputId, bypassId, coolerFlagId},
                                [&](int id) { return IsWindowVisible(get(id)) != FALSE; }),

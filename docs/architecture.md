@@ -24,8 +24,9 @@ a controller. Its report and log session carry the EC's RAM from `0x300` up. So 
 the first session of a log, read before the first write, because retention keeps that
 session and the log is what users send. With an NVIDIA adapter the report then gets an
 `nvidia` section (`nv::diagnostic`): the GPU BIOS limits where the parser knows the
-table, the driver's policy tables as returned, power and current limits, telemetry and
-DLPPC. Each reading stands alone, so a refused one is an error entry beside the others.
+table, the driver's policy tables as returned, power and current limits, telemetry,
+DLPPC and the temperature target. Each reading stands alone, so a refused one is an
+error entry beside the others.
 The laptop power budget is left out, because that read calls driver internals found by
 signature. The report is written before these driver calls and again after them.
 
@@ -76,6 +77,8 @@ the reason and a link that opens a GitHub issue prefilled with it and the model.
 Controls that cannot work on the hardware are hidden instead. The NVIDIA unlock, DLPPC,
 current limits, live table and driver readings are shown only with an NVIDIA GPU from
 RTX 40 on, decided at startup from the adapter's PCI device ID without waking the driver.
+The GPU temperature target is shown on any NVIDIA GPU whose driver reports an adjustable
+client thermal policy.
 The bypass is never saved, and the controller clears it on turn-off, sleep, display off,
 AC loss, a thermal trip, EC reinitialization, exit and a leftover value at startup;
 while a clear is pending, other EC writes are refused. The liquid cooler connection
@@ -107,6 +110,14 @@ the delayed GPU check reapplies currents a driver reload reset. Overrides staged
 by older releases (maximum only) are replaced for the next GPU start. NVML is opened
 and closed around each reading, because its handles crash when used after a GPU reset
 (a driver reset on waking from Modern Standby, a GPU restart or a driver install).
+The GPU temperature target is the driver's client thermal policy (`Api::temp_target`), the
+interface the OEM app uses; the GPU BIOS sets its range and the EC is not involved. It is
+saved per slot (`tempTargetC`; null leaves the driver's value) and restored by the delayed
+GPU check after a driver reload. Power Apply and mcctl refuse a value outside the driver's
+range before any write; a slot's is logged and skipped like a peripheral failure. DLPPC
+and the target need only NVAPI, so without `nv::Power` (an older GPU or unsupported BIOS
+limits) the controller uses a plain `nv::Api`; `nv::Power` replaces it when it opens.
+Status reads the target only while it is unknown, and never from a sleeping GPU.
 `gpu_keepawake.*` is the opt-in GPU keep-awake (`gpuKeepAwake` in `settings.json`; the controller
 only stores it). It runs on the UI thread from the window's display, suspend, display-change and
 timer messages, because it must not share the worker's waits. While the screen is off, the PC is

@@ -314,14 +314,24 @@ private:
     void cooler_flag(bool connected);
     void ensure_cooler_flag(const char* when);
     config::Json advanced_status() const;
+    void open_api(bool& available, const std::string& unavailable, const char* feature);
     void open_dlppc();
     std::optional<nv::Dlppc> read_dlppc();
     void write_dlppc(bool active);
+    bool gpu_awake();
+    nv::TempTarget& read_temp_target();
+    void apply_temp_target(int celsius);
+    config::Json temp_target_status();
     std::unique_ptr<nv::Power> nvidia_;
-    std::unique_ptr<nv::Api>
-        dlppc_api_; // DLPPC needs only NVAPI; used while nvidia_ is unavailable (unsupported BIOS limits).
+    // DLPPC and the temperature target need only NVAPI; used while nvidia_ is unavailable (an older GPU or
+    // unsupported BIOS limits).
+    std::unique_ptr<nv::Api> api_;
     bool nvidia_available_ = false, nvidia_busy_ = false, dlppc_available_ = false, dlppc_disabled_ = false,
          on_ac_ = false;
+    // The temperature target works on any NVIDIA GPU whose driver has a client thermal policy.
+    bool temp_target_available_ = false;
+    std::optional<nv::TempTarget> temp_target_; // As last read or written.
+    std::optional<int> temp_target_request_;    // What this run applied; the delayed GPU check restores it.
     bool nvidia_offered_ = false; // Fixed at startup; nvidia_available_ also goes false when the driver refuses.
     bool gpu_unlocked_ = false, gpu_driver_uncertain_ = false;
     int nvidia_min_watts_ = 1;

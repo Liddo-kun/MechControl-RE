@@ -145,6 +145,7 @@ struct Driver {
           status = packet(0xb00b8, 0xb00b8), last_get, last_set;
     Bytes therm_info = packet(0x94c, 0x1094c), therm_status = packet(0xa48, 0x10a48);
     Bytes d_info = packet(0x164c, 0x1164c), d_control = packet(0x1548, 0x11548), d_set;
+    Bytes t_info = packet(0x68, 0x20068), t_status = packet(0x38, 0x20038), t_set;
     int nv, ms, input, current, power, board, input_channel, sets = 0;
     bool ignore = false, change_unselected = false;
     explicit Driver(bool alternate = false) {
@@ -199,6 +200,16 @@ struct Driver {
         put(d_info, 76 + 3 * 176 + 48, 0x52);
         put(d_control, 72 + 3 * 168, 0);
         d_control[72 + 3 * 168 + 4] = 1;
+        // Client thermal policy as an RTX 5090 Laptop GPU reports it: 75-87 C, default and current 87 C.
+        t_info[4] = 1;
+        t_info[5] = 1;
+        put(t_info, 12, 1);
+        put(t_info, 16, 75 * 256);
+        put(t_info, 20, 87 * 256);
+        put(t_info, 24, 87 * 256);
+        put(t_info, 28, 1);
+        put(t_status, 4, 1);
+        put(t_status, 12, 87 * 256);
     }
     // RTX 40 driver as mVolt expects it: NVVDD is policy type 13 and there is no MSVDD policy.
     void ada() {
@@ -268,6 +279,12 @@ struct Driver {
             d_set = b;
             d_control = b;
             break;
+        case 0x0d258bb5: b = t_info; break;
+        case 0xe9c425a1: b = t_status; break;
+        case 0x34c0b13d:
+            t_set = b;
+            t_status = b;
+            break;
         default: throw std::runtime_error("Unsupported fixture call");
         }
     }
@@ -297,6 +314,30 @@ void packets() {
         old[72 + 3 * 168 + 4] = 0;
         check(d.d_set == old && api.dlppc()->active == false,
               "DLPPC SET changes only selected activation byte and retains packet metadata");
+    }
+    {
+        Driver d;
+        Api api([&](auto id, auto& b) { d.call(id, b); });
+        check(api.temp_target() == TempTarget{75, 87, 87, 87},
+              "temperature target decodes the driver's 1/256 C range and current target");
+        auto expected = d.t_status;
+        put(expected, 12, 80 * 256);
+        api.set_temp_target(80);
+        check(d.t_set == expected && api.temp_target()->current == 80,
+              "temperature target SET changes only the target and keeps the rest of the status packet");
+        refuses([&] { api.set_temp_target(88); }, "a temperature target above the driver's maximum is refused");
+        refuses([&] { api.set_temp_target(74); }, "a temperature target below the driver's minimum is refused");
+        put(d.t_info, 8, 1); // The policy's controller is 1; status lists controller 0 first.
+        put(d.t_status, 4, 2);
+        put(d.t_status, 12, 90 * 256);
+        put(d.t_status, 20, 1);
+        put(d.t_status, 24, 85 * 256);
+        check(api.temp_target()->current == 85, "the status entry is matched by the policy's controller, not position");
+        d.t_info[4] = 0;
+        check(!api.temp_target(), "a driver without a client thermal policy reports no temperature target");
+        d.t_info[4] = 1;
+        put(d.t_info, 0, 0x10068);
+        refuses([&] { api.temp_target(); }, "an unexpected thermal policy structure version is refused");
     }
     for (int mutation = 0; mutation < 7; ++mutation) {
         Driver d;
@@ -597,6 +638,12 @@ int live(bool same_values) {
     }
     auto d = api.dlppc();
     std::cout << "DLPPC " << (d ? d->active : -1) << '\n';
+    auto target = api.temp_target();
+    if (target)
+        std::cout << "Temperature target " << target->current << " C (" << target->min << '-' << target->max
+                  << " C, default " << target->def << " C)\n";
+    else
+        std::cout << "Temperature target unavailable\n";
     auto t = api.telemetry();
     std::cout << "Measured " << t.nv << '/' << t.ms.value_or(0) << " mA clock " << t.clock_mhz.value_or(0)
               << " MHz GPU power " << t.gpu_mw.value_or(0) << " mW\n";
@@ -614,6 +661,10 @@ int live(bool same_values) {
         if (d) {
             api.set_dlppc(d->active);
             check(api.dlppc()->active == d->active, "live same-value DLPPC SET/readback");
+        }
+        if (target) {
+            api.set_temp_target(target->current);
+            check(api.temp_target() == target, "live same-value temperature target SET/readback");
         }
         if (p.requested) {
             api.set_power(*p.requested);

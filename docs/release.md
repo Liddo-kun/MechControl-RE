@@ -52,6 +52,15 @@ because nothing is running to stop it. One plugged in while asleep may do the sa
 **Off** before you remove MechControl; otherwise charging stays blocked until that week
 runs out.
 
+## GPU temperature target
+
+**Power > GPU Temp Target** sets the temperature at which the NVIDIA driver starts lowering
+GPU clocks, as the OEM Control Center does. The GPU's own BIOS sets the range, and laptops
+usually allow only lowering it. It is saved with the profile; profiles saved before this
+setting existed leave it as it is. The slider is hidden on GPUs whose driver offers no
+adjustable target. On a laptop in hybrid mode it appears once the Power page has been shown
+while the GPU was awake.
+
 ## Display-off wake crash workaround
 
 **Power > Display-off wake crash workaround (dGPU mode)** works around an NVIDIA driver fault
@@ -66,7 +75,7 @@ sleeps. It is off by default.
 ## Command line
 
 The `-cli` archive includes `mcctl.exe`. From an elevated shell it reads and changes
-CPU and GPU power, NVIDIA current limits, fan boost, the EC power-limit bypass and
+CPU and GPU power, NVIDIA current limits and temperature target, fan boost, the EC power-limit bypass and
 the liquid cooler flag on the running app. Run `mcctl help` for the commands. Changes apply immediately but
 are not saved.
 

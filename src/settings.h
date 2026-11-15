@@ -10,6 +10,7 @@ struct GpuSettings {
     bool dynamic_boost_enabled = false;
     std::optional<bool> bios_override_enabled;
     std::optional<int> nvvdd_ma, msvdd_ma, board_input_ma;
+    std::optional<int> temp_target; // NVIDIA GPU temperature target, degrees C. Empty leaves the driver's as it is.
     int boost() const { return dynamic_boost_enabled ? dynamic_boost_watts : 0; }
     int total() const { return tgp + boost(); }
 };

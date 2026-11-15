@@ -54,7 +54,7 @@ public:
 };
 class UiPageGpu final : public mech::nv::Power {
     std::shared_ptr<UiPageState> state_;
-    int requested_ = 95;
+    int requested_ = 95, target_ = 83;
 
 public:
     explicit UiPageGpu(std::shared_ptr<UiPageState> s) : state_(std::move(s)) { enabled = true; }
@@ -93,6 +93,8 @@ public:
         return {250000, 350000};
     }
     std::optional<mech::nv::Dlppc> dlppc() override { return mech::nv::Dlppc{true, 7, 2048}; }
+    std::optional<mech::nv::TempTarget> temp_target() override { return mech::nv::TempTarget{75, 87, 87, target_}; }
+    void set_temp_target(int celsius) override { target_ = celsius; }
     bool needs_restart(bool, const mech::config::GpuSettings&) override { return false; }
     void configure(bool unlock, const mech::config::GpuSettings&, bool) override { enabled = unlock; }
     void apply(int watts, bool) override { requested_ = watts; }

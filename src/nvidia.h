@@ -67,6 +67,11 @@ struct Dlppc {
     int policy;
     uint32_t controllers;
 };
+// The GPU temperature target in whole degrees C. The GPU BIOS sets the range; laptops usually allow only lowering it.
+struct TempTarget {
+    int min, def, max, current;
+    bool operator==(const TempTarget&) const = default;
+};
 struct Telemetry {
     uint32_t nv = 0;
     std::optional<uint32_t> ms, input, nv_prediction, ms_prediction, nv_limit, ms_limit, input_limit;
@@ -94,6 +99,8 @@ public:
     void set_budget(Budget);
     std::optional<Dlppc> dlppc();
     void set_dlppc(bool);
+    std::optional<TempTarget> temp_target(); // Empty when the driver has no client thermal policy for this GPU.
+    void set_temp_target(int celsius);
     // What a diagnostic report records: every reading above, each on its own, plus the driver's policy tables as it
     // returns them. Reads only. A reading the driver or this code refuses becomes {"error": text}.
     config::Json diagnostic();
@@ -123,6 +130,7 @@ private:
     Bytes power_control(int);
     Bytes policy_control(int);
     std::optional<std::pair<int, uint32_t>> find_dlppc();
+    Bytes temp_status(uint32_t controller, size_t& entry);
     std::optional<double> inline_activity();
     uint32_t inline_mask_ = 0, inline_khz_ = 0;
     bool inline_unsupported_ = false;
@@ -146,6 +154,7 @@ public:
     bool awake() const;
     // The device's last power state as Windows recorded it: 0-3 for D0-D3, -1 when unknown. Does not touch the GPU.
     static int power_state(const std::wstring& instance);
+    static int adapter_power_state(); // power_state of the adapter device() finds, for callers without a Store.
     Bios open(const Bytes&, bool& staged, bool& discarded);
     void stage(const Bios&, const std::vector<Record>&);
     bool matches(const std::vector<Record>&);
@@ -182,6 +191,8 @@ public:
     virtual Budget budget() { return api_->budget(); }
     virtual std::optional<Dlppc> dlppc() { return api_->dlppc(); }
     virtual void set_dlppc(bool active) { api_->set_dlppc(active); }
+    virtual std::optional<TempTarget> temp_target() { return api_->temp_target(); }
+    virtual void set_temp_target(int celsius) { api_->set_temp_target(celsius); }
     virtual bool needs_restart(bool, const config::GpuSettings&);
     virtual void configure(bool, const config::GpuSettings&, bool allow_restart);
     virtual void apply(int watts, bool dynamic_boost);

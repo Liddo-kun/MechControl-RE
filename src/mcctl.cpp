@@ -8,7 +8,7 @@ constexpr auto usage = R"(mcctl - control a running MechControl (elevated shell 
 
   mcctl status [--json]
   mcctl watch [--interval ms] [--json]  (default 1000, minimum 250)
-  mcctl gpu [--tgp W] [--db W|on|off] [--nvvdd A] [--msvdd A] [--board-input A] [--json]
+  mcctl gpu [--tgp W] [--db W|on|off] [--nvvdd A] [--msvdd A] [--board-input A] [--temp-target C] [--json]
   mcctl cpu [--pl1 W] [--pl2 W] [--pl4 W] [--temp-limit C] [--json]
   mcctl fan boost on|off [--json]
   mcctl ec-bypass on|off [--json]    (EC power-limit bypass; turns itself off on sleep, display off, AC loss, exit)

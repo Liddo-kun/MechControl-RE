@@ -192,7 +192,8 @@ Json Controller::gpu_status(bool presentation) {
               {"dynamicBoostWatts", setting(v.dynamic_boost_watts, limits_.dynamic_boost)},
               {"unlocked", gpu_unlocked_},
               {"unlockAvailable", gpu_extend() && nvidia_available_},
-              {"nvidia", nvidia_unavailable()}};
+              {"nvidia", nvidia_unavailable()},
+              {"tempTarget", temp_target_status()}};
     if (presentation) {
         g["stockWatts"] = nvidia_ ? nvidia_->stock_watts() : 0;
         g["unlockMin"] = gpu_unlock_min();

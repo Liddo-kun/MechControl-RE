@@ -96,6 +96,12 @@ static std::string text_status(const Json& j) {
             << (j.at("unlocked").get<bool>()          ? "on"
                 : j.at("unlockAvailable").get<bool>() ? "off"
                                                       : "unavailable");
+        if (auto& t = j.at("tempTarget"); t.is_null())
+            out << "; temp target unavailable";
+        else if (t.contains("error"))
+            out << "; temp target unavailable (" << t.at("error").get<std::string>() << ")";
+        else
+            out << "; temp target " << setting_text(t, "C") << ", default " << t.at("default").get<int>() << " C";
         if (!j.at("nvidia").is_null())
             out << "\r\n      NVIDIA: " << j.at("nvidia").get<std::string>();
         else {
@@ -175,7 +181,8 @@ cli::Reply Controller::cli(const std::vector<std::string>& arguments) {
                 throw std::invalid_argument("Expected one or more option/value pairs");
             std::map<std::string, std::string> options;
             const std::set<std::string> cpu_options = {"--pl1", "--pl2", "--pl4", "--temp-limit"},
-                                        gpu_options = {"--tgp", "--db", "--nvvdd", "--msvdd", "--board-input"};
+                                        gpu_options = {"--tgp",   "--db",          "--nvvdd",
+                                                       "--msvdd", "--board-input", "--temp-target"};
             const auto& allowed = is_cpu ? cpu_options : gpu_options;
             for (size_t i = 1; i < args.size(); i += 2) {
                 if (!allowed.contains(args[i]) || !options.emplace(args[i], args[i + 1]).second)
@@ -218,6 +225,7 @@ cli::Reply Controller::cli(const std::vector<std::string>& arguments) {
                     if (auto it = options.find("--board-input"); it != options.end())
                         g.board_input_ma = milliamps(it->second);
                 }
+                if (auto it = options.find("--temp-target"); it != options.end()) g.temp_target = whole(it->second);
                 command = GpuApply{g, power};
                 group = "gpu";
             }

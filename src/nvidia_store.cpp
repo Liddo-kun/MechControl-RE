@@ -101,6 +101,19 @@ std::optional<uint16_t> Store::device() {
     }
     return id;
 }
+int Store::adapter_power_state() {
+    int state = -1;
+    try {
+        adapters([&](HDEVINFO set, SP_DEVINFO_DATA info, const std::wstring& hw) {
+            if (_wcsnicmp(hw.c_str(), L"PCI\\VEN_10DE&", 13) != 0) return false;
+            wchar_t instance_id[512]{};
+            if (SetupDiGetDeviceInstanceIdW(set, &info, instance_id, 512, nullptr)) state = power_state(instance_id);
+            return true;
+        });
+    } catch (const std::system_error&) {
+    }
+    return state;
+}
 std::filesystem::path Store::recovery_path() {
     PWSTR p = nullptr;
     auto hr = SHGetKnownFolderPath(FOLDERID_ProgramData, 0, nullptr, &p);

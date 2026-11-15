@@ -194,6 +194,15 @@ struct GpuFixture : nv::Power {
         ++sets;
         dlppc_active = active;
     }
+    nv::TempTarget target{75, 87, 87, 87};
+    std::optional<nv::TempTarget> temp_target() override {
+        read();
+        return target;
+    }
+    void set_temp_target(int celsius) override {
+        ++sets;
+        target.current = celsius;
+    }
     bool needs_restart(bool unlock, const GpuSettings& g) override {
         return unlock != enabled || (g.nvvdd_ma && *g.nvvdd_ma > int(rails.nv.max)) ||
                (g.msvdd_ma && *g.msvdd_ma > int(rails.ms->max));
@@ -698,6 +707,45 @@ void gpu_integration(const std::filesystem::path& root) {
     check(not_saved.code == 1 && not_saved.partial && saved_gpu->dlppc_active &&
               read_json(startup_path / "settings.json")["disableDlppc"] == true,
           "DLPPC save failure rolls back stored preference, reports unsaved hardware change without invented rollback");
+}
+// The GPU temperature target: per slot, within the driver's range, restored after a driver reset and by defaults.
+void gpu_temp_target(const std::filesystem::path& root) {
+    auto owned = std::make_unique<GpuFixture>();
+    auto driver = owned.get();
+    auto path = root / "gpu-temp-target";
+    Rig r(path, true, std::move(owned));
+    auto& c = *r.controller;
+    auto status = parse(c.execute(CliCommand{{"status", "--json"}}).text);
+    check(status["gpu"]["tempTarget"] == Json{{"value", 87}, {"min", 75}, {"max", 87}, {"default", 87}},
+          "status reports the driver's GPU temperature target and range");
+    int sets = driver->sets;
+    check(c.execute(CliCommand{{"gpu", "--temp-target", "88"}}).code == 1 && driver->sets == sets,
+          "a temperature target above the driver's maximum is refused without writes");
+    auto set = c.execute(CliCommand{{"gpu", "--temp-target", "80", "--json"}});
+    check(set.code == 0 && driver->target.current == 80 && parse(set.text)["tempTarget"]["value"] == 80 &&
+              r.state->writes.empty(),
+          "the CLI sets the temperature target through the driver alone");
+    auto p = profile();
+    p.gpu->temp_target = 70;
+    write_json(path / "userprofile_1.json", p, true);
+    r.state->writes.clear();
+    check(c.execute(SlotLoad{1}).code == 0 && !r.state->writes.empty() && driver->target.current == 80,
+          "a slot temperature target outside the GPU's range is skipped and the rest of the slot applies");
+    p.gpu->temp_target = 78;
+    write_json(path / "userprofile_1.json", p, true);
+    check(c.execute(SlotLoad{1}).code == 0 && driver->target.current == 78, "a slot applies its temperature target");
+    driver->target.current = 87; // A driver reload starts the target at its default again.
+    c.execute(AcEvent{false});
+    c.execute(AcEvent{true});
+    c.tick(GetTickCount64() + 6000);
+    check(driver->target.current == 78, "the delayed GPU check restores a temperature target the driver reset");
+    check(c.execute(SlotSave{2}).code == 0 && read_json(path / "userprofile_2.json")["gpu"]["tempTargetC"] == 78,
+          "a saved slot records the temperature target");
+    write_json(path / "userprofile_3.json", profile(), true);
+    check(c.execute(SlotLoad{3}).code == 0 && driver->target.current == 78,
+          "a slot saved without a temperature target leaves the driver's as it is");
+    c.execute(DefaultsApply{""});
+    check(driver->target.current == 87, "firmware defaults restore the driver's default temperature target");
 }
 void integration(const std::filesystem::path& root) {
     Rig r(root / "integrated");
@@ -2140,6 +2188,7 @@ int main(int argc, char** argv) {
         startup_degradation(root);
         whisper_firmware(root);
         gpu_integration(root);
+        gpu_temp_target(root);
         thermal(root);
         recovery(root);
         defaults_and_no_slot(root);

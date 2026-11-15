@@ -27,7 +27,7 @@ nv::Power& Controller::open_nvidia() {
     if (nvidia_) return *nvidia_;
     if (!nvidia_available_)
         throw std::runtime_error(nvidia_error_.empty() ? "No NVIDIA GPU control on this machine" : nvidia_error_);
-    dlppc_api_.reset(); // One NVAPI owner: Power replaces the DLPPC-only Api; a refusal reopens it on demand.
+    api_.reset(); // One NVAPI owner: Power replaces the NVAPI-only Api; a refusal reopens it on demand.
     try {
         std::unique_ptr<nv::Power> opened;
         nvidia_work([&] { opened = std::make_unique<nv::Power>(limits_.tgp.min, diagnostic_); });
@@ -198,6 +198,12 @@ void Controller::apply_gpu(GpuSettings g) {
     thermal_->enforce(true);
 }
 void Controller::check_gpu() {
+    // A driver reload (resume, GPU restart) starts the target at its default again. This needs only NVAPI.
+    if (temp_target_request_ && (nvidia_ || api_) && !gpu_driver_uncertain_ && gpu_awake()) try {
+            apply_temp_target(*temp_target_request_);
+        } catch (const std::exception& ex) {
+            diagnostic_(std::string("NVIDIA temperature target check failed: ") + ex.what());
+        }
     if (!nvidia_ || gpu_driver_uncertain_ || !nvidia_->awake()) return; // All delayed reads are sleep-gated too.
     if (dlppc_disabled_) try {
             nvidia_work([&] {
@@ -254,30 +260,82 @@ ControlResult Controller::run(const GpuUnlock& c) {
     apply_gpu(g);
     return {.applied = true};
 }
-// DLPPC needs only NVAPI, so unsupported BIOS limits (no nv::Power) do not block it.
-void Controller::open_dlppc() {
+// DLPPC and the temperature target need only NVAPI, so unsupported BIOS limits (no nv::Power) do not block them.
+// A refused connection clears the feature's flag.
+void Controller::open_api(bool& available, const std::string& unavailable, const char* feature) {
     if (nvidia_busy_) throw std::runtime_error("NVIDIA operation in progress; try again in a few seconds");
     if (gpu_driver_uncertain_) throw std::runtime_error(nvidia_error_);
-    if (nvidia_ || dlppc_api_) return;
-    if (!dlppc_available_) throw std::runtime_error(nvidia_unavailable());
+    if (nvidia_ || api_) return;
+    if (!available) throw std::runtime_error(unavailable);
     std::unique_ptr<nv::Api> opened;
     try {
         nvidia_work([&] { opened = std::make_unique<nv::Api>(); });
     } catch (const std::exception& ex) {
-        dlppc_available_ = false;
-        diagnostic_(std::string("NVIDIA DLPPC unavailable: ") + ex.what());
+        available = false;
+        diagnostic_(std::string("NVIDIA ") + feature + " unavailable: " + ex.what());
         throw;
     }
-    dlppc_api_ = std::move(opened);
+    api_ = std::move(opened);
 }
+void Controller::open_dlppc() { open_api(dlppc_available_, nvidia_unavailable(), "DLPPC"); }
 // Call inside nvidia_work after open_dlppc.
-std::optional<nv::Dlppc> Controller::read_dlppc() { return nvidia_ ? nvidia_->dlppc() : dlppc_api_->dlppc(); }
+std::optional<nv::Dlppc> Controller::read_dlppc() { return nvidia_ ? nvidia_->dlppc() : api_->dlppc(); }
 void Controller::write_dlppc(bool active) {
     if (nvidia_)
         nvidia_->set_dlppc(active);
     else
-        dlppc_api_->set_dlppc(active);
+        api_->set_dlppc(active);
     diagnostic_(std::string("NVIDIA DLPPC (AI-controlled memory clock) ") + (active ? "enabled" : "disabled"));
+}
+bool Controller::gpu_awake() { return nvidia_ ? nvidia_->awake() : nv::Store::adapter_power_state() == 0; }
+// Connecting wakes a sleeping GPU, so passive callers check gpu_awake() first.
+nv::TempTarget& Controller::read_temp_target() {
+    open_api(temp_target_available_, "No NVIDIA GPU temperature target on this machine", "temperature target");
+    std::optional<nv::TempTarget> t;
+    nvidia_work([&] { t = nvidia_ ? nvidia_->temp_target() : api_->temp_target(); });
+    if (!t) {
+        temp_target_available_ = false;
+        diagnostic_("NVIDIA GPU temperature target unavailable: the driver has no thermal policy for this GPU");
+        throw std::runtime_error("This GPU/driver has no temperature target");
+    }
+    if (!temp_target_)
+        diagnostic_("NVIDIA GPU temperature target " + std::to_string(t->current) + " C (range " +
+                    std::to_string(t->min) + "-" + std::to_string(t->max) + " C, default " + std::to_string(t->def) +
+                    " C)");
+    return *(temp_target_ = t);
+}
+// Lowering the target only makes the GPU slow down sooner, so a thermal hold does not stop it.
+void Controller::apply_temp_target(int celsius) {
+    auto& t = read_temp_target();
+    if (celsius < t.min || celsius > t.max)
+        throw std::runtime_error("GPU temperature target outside this GPU's range (" + std::to_string(t.min) + "-" +
+                                 std::to_string(t.max) + " C)");
+    temp_target_request_ = celsius;
+    if (t.current == celsius) return;
+    int was = t.current;
+    writes_started_ = true;
+    nvidia_work([&] { nvidia_ ? nvidia_->set_temp_target(celsius) : api_->set_temp_target(celsius); });
+    t.current = celsius;
+    diagnostic_("NVIDIA GPU temperature target set to " + std::to_string(celsius) + " C (was " + std::to_string(was) +
+                " C)");
+}
+// What the Power tab and mcctl status show: the target as last read or written, read here only while unknown.
+// Null hides the control: no NVIDIA GPU, or a driver without the policy.
+config::Json Controller::temp_target_status() {
+    if (!temp_target_available_) return nullptr;
+    if (!temp_target_) {
+        if (!gpu_awake()) return Json{{"error", "GPU asleep, not read"}};
+        Json error;
+        try {
+            read_temp_target();
+        } catch (const std::exception& e) {
+            if (temp_target_available_) error = {{"error", e.what()}};
+        }
+        thermal_->enforce(true);
+        if (!temp_target_) return error;
+    }
+    const auto& t = *temp_target_;
+    return {{"value", t.current}, {"min", t.min}, {"max", t.max}, {"default", t.def}};
 }
 ControlResult Controller::run(const DlppcApply& c) {
     if (!nvidia_ && nvidia_available_) try {

@@ -71,6 +71,7 @@ enum Id {
     boardSupportId,
     bypassSupportId,
     keepAwakeId,
+    gpuTargetId,
     boostId = 300,
     switchId,
     switchMsId,
@@ -666,6 +667,7 @@ private:
         check(0, dlppcId, L"Disable DLPPC (AI-controlled GPU memory clock)");
         check(0, dbOnId, L"Enable Dynamic Boost");
         slider(0, dbId, L"Dynamic Boost Max", 0, 1, 0);
+        slider(0, gpuTargetId, L"GPU Temp Target", 0, 1, 0);
         check(0, keepAwakeId, L"Display-off wake crash workaround (dGPU mode)");
         slider(0, nvId, L"NVVDD / Core current limit", 0, 1, 0);
         slider(0, msId, L"MSVDD / Fabric current limit", 0, 1, 0);
@@ -691,6 +693,10 @@ private:
             L"Turns off on sleep, display off, AC loss, a failsafe trip and exit. Not saved.", TTF_IDISHWND);
         tip(reinterpret_cast<UINT_PTR>(get(coolerFlagId)),
             L"The flag the OEM app sets when its cooler connects. Saved with the profile. Does not connect the cooler.",
+            TTF_IDISHWND);
+        tip(reinterpret_cast<UINT_PTR>(get(gpuTargetId)),
+            L"The NVIDIA driver lowers GPU clocks to keep the GPU at or below this temperature. The GPU BIOS sets the "
+            L"range. Saved with the profile.",
             TTF_IDISHWND);
         tip(reinterpret_cast<UINT_PTR>(get(keepAwakeId)),
             L"Works around an NVIDIA driver fault: if the GPU wakes just after Windows powered it down with the screen "
@@ -1032,10 +1038,11 @@ private:
         note(cpuPreset_, muted, ref(4));
         s.close();
         s.open(L"GPU Power");
-        c = s.columns({tgpId, dbId}, L"000 W");
+        c = s.columns({tgpId, dbId, gpuTargetId}, L"000 W");
         s.slide(tgpId, c, gpu);
         s.check(dbOnId, gpu, bold_);
         s.slide(dbId, c, gpu);
+        s.slide(gpuTargetId, c, gpu && tempTargetShown());
         support(gpuSupportId, true, errorColor, 0);
         if (gpu) note(powerHint_, muted, 0);
         s.check(keepAwakeId, true, font_);
@@ -1685,6 +1692,11 @@ private:
                w(state_.value("disabled", Json::object()).value(feature, std::string("register validation failed"))) +
                L".";
     }
+    // Hidden where the GPU cannot change its temperature target: no NVIDIA thermal policy, or a fixed range.
+    bool tempTargetShown() const {
+        auto t = gpuTelemetry_.is_object() ? gpuTelemetry_.value("tempTarget", Json(nullptr)) : Json(nullptr);
+        return t.is_object() && t.contains("value") && t["min"].get<int>() < t["max"].get<int>();
+    }
     void refreshPower() {
         const Json& g = gpuTelemetry_;
         auto nvidia = g.is_object() ? g.value("nvidia", Json(nullptr)) : Json(nullptr);
@@ -1738,7 +1750,7 @@ private:
         // Text that changes the layout relays out the page; live readings only repaint the table.
         auto key = cpuNote_ + L'\n' + cpuPreset_ + L'\n' + powerHint_ + L'\n' + liveReason_ + L'\n' +
                    text(get(unlockId)) + L'\n' + bypassText_ +
-                   std::to_wstring(int(advanced_) + 4 * offered +
+                   std::to_wstring(int(advanced_) + 4 * offered + 16 * tempTargetShown() +
                                    2 * state_.value("advanced", Json::object())
                                            .value("coolerFlag", Json::object())
                                            .value("available", false));
@@ -1942,11 +1954,12 @@ private:
     void checked(int id, bool value) {
         if (!edited_.contains(id)) SendMessageW(get(id), BM_SETCHECK, value ? BST_CHECKED : BST_UNCHECKED, 0);
     }
-    // Power, fan switch, failsafe trigger, lighting brightness and cooler
+    // Power, GPU temperature target, fan switch, failsafe trigger, lighting brightness and cooler
     // duty values are slider positions; the other sliders have an edit box.
     static bool positional(int id) {
-        return (id >= pl1Id && id <= inputId) || id == switchMsId || id == thresholdId || id == coolerFanId ||
-               id == coolerPumpId || (id >= zoneBaseId && id < zoneBaseId + 48 && (id - zoneBaseId) % 16 == 4);
+        return (id >= pl1Id && id <= inputId) || id == gpuTargetId || id == switchMsId || id == thresholdId ||
+               id == coolerFanId || id == coolerPumpId ||
+               (id >= zoneBaseId && id < zoneBaseId + 48 && (id - zoneBaseId) % 16 == 4);
     }
     // A lighting zone's R, G and B boxes. Unless strict, an invalid box keeps its last valid value.
     COLORREF color(int base, bool strict = true) const {
@@ -2003,7 +2016,7 @@ private:
         return i != detectedMa_.end() && position == i->second / step ? i->second : position * step;
     }
     std::wstring display(int id, int v) const {
-        if (id == tempId || id == thresholdId) return std::to_wstring(v) + L" °C";
+        if (id == tempId || id == thresholdId || id == gpuTargetId) return std::to_wstring(v) + L" °C";
         if (id >= nvId && id <= inputId) return compact(milliamps(id, v) / 1000.0) + L" A";
         if (id >= pl1Id && id <= dbId) return std::to_wstring(v) + L" W";
         if (id == switchMsId) return std::to_wstring(v * 100) + L" ms";
@@ -2129,6 +2142,7 @@ private:
         if (IsWindowEnabled(get(nvId))) g.nvvdd_ma = milliamps(nvId, number(nvId));
         if (IsWindowEnabled(get(msId))) g.msvdd_ma = milliamps(msId, number(msId));
         if (IsWindowEnabled(get(inputId))) g.board_input_ma = milliamps(inputId, number(inputId));
+        if (tempTargetShown() && IsWindowEnabled(get(gpuTargetId))) g.temp_target = number(gpuTargetId);
         if (state_.contains("gpu") && !state_["gpu"].is_null())
             g.bios_override_enabled = state_["gpu"]["unlocked"].get<bool>();
         return g;
@@ -2167,6 +2181,7 @@ private:
         } else {
             eraseEdits(pl1Id, inputId);
             edited_.erase(dbOnId);
+            edited_.erase(gpuTargetId);
             auto cpu = pendingCpu_;
             pendingCpu_.reset();
             request(GpuApply{plan.at("gpu").get<GpuSettings>(), true, restart, cpu});
@@ -2593,7 +2608,7 @@ private:
             if (gpu)
                 gpuLive(gpuTelemetry_, powerRead_);
             else
-                for (int id : {nvId, msId, inputId, unlockId, dlppcId}) enable(id, false);
+                for (int id : {nvId, msId, inputId, unlockId, dlppcId, gpuTargetId}) enable(id, false);
             enable(dbId, gpu && checked(dbOnId));
             powerRead_ = false;
             enable(powerApplyId, cpu || gpu);
@@ -2753,6 +2768,11 @@ private:
             value(id, v["value"], v["min"], v["max"]);
         }
         checked(dbOnId, gpu.value("dynamicBoost", false));
+        enable(gpuTargetId, tempTargetShown());
+        if (tempTargetShown()) {
+            auto& t = gpu.at("tempTarget");
+            value(gpuTargetId, t["value"], t["min"], t["max"]);
+        }
         checked(unlockId, gpu.value("unlocked", false));
         checked(dlppcId, state_.value("dlppcDisabled", false));
         enable(unlockId, gpu.value("unlockAvailable", false));
