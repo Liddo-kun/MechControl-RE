@@ -27,7 +27,7 @@ try {
     & $cmake --build $BuildDirectory --config $Configuration --parallel
     if ($LASTEXITCODE) { throw 'Native build failed.' }
     if ($Check) {
-        & $ctest --test-dir $BuildDirectory -C $Configuration --output-on-failure --timeout 45
+        & $ctest --test-dir $BuildDirectory -C $Configuration --output-on-failure --timeout 45 --parallel
         if ($LASTEXITCODE) { throw 'Native checks failed.' }
     }
 } finally {

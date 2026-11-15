@@ -8,7 +8,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 add_compile_definitions(UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00)
-add_compile_options(/W4 /permissive- /EHsc /utf-8 /Zc:__cplusplus)
+add_compile_options(/W4 /permissive- /EHsc /utf-8 /Zc:__cplusplus /MP)
 # Keep release diagnostics outside the runtime package without sacrificing optimization.
 add_compile_options($<$<CONFIG:Release>:/Zi>)
 add_link_options($<$<CONFIG:Release>:/DEBUG:FULL> $<$<CONFIG:Release>:/OPT:REF> $<$<CONFIG:Release>:/OPT:ICF>)
@@ -52,9 +52,10 @@ target_link_options(MechControl PRIVATE /DELAYLOAD:gdiplus.dll /DELAYLOAD:d3d11.
   /DELAYLOAD:wevtapi.dll /MANIFEST:EMBED
   "/MANIFESTUAC:level='requireAdministrator' uiAccess='false'"
   /MANIFESTINPUT:${CMAKE_CURRENT_SOURCE_DIR}/resources/app.manifest)
-add_custom_command(TARGET MechControl POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/Profiles/MECHREVO"
-    "$<TARGET_FILE_DIR:MechControl>/Profiles/MECHREVO")
+# The checks find the profiles beside their executables, so they depend on this copy rather than on MechControl.
+add_custom_target(profiles COMMAND ${CMAKE_COMMAND} -E copy_directory
+  "${CMAKE_CURRENT_SOURCE_DIR}/Profiles/MECHREVO" "$<TARGET_FILE_DIR:MechControl>/Profiles/MECHREVO")
+add_dependencies(MechControl profiles)
 
 # Registration is explicit and temporary. Nothing registers counters at application startup.
 file(READ resources/counters.man COUNTER_MANIFEST)
@@ -64,24 +65,24 @@ file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/MechControl-counters
 if(BUILD_TESTING)
   add_executable(peripheral-check tests/peripheral_check.cpp)
   target_link_libraries(peripheral-check PRIVATE foundation)
-  add_dependencies(peripheral-check MechControl)
+  add_dependencies(peripheral-check profiles)
   add_test(NAME peripheral COMMAND peripheral-check)
   add_executable(nvidia-check tests/nvidia_check.cpp)
   target_link_libraries(nvidia-check PRIVATE ec)
   add_test(NAME nvidia COMMAND nvidia-check)
   add_executable(controller-check tests/controller_check.cpp)
   target_link_libraries(controller-check PRIVATE foundation)
-  add_dependencies(controller-check MechControl)
+  add_dependencies(controller-check profiles)
   add_test(NAME controller COMMAND controller-check)
   add_executable(ec-check tests/ec_check.cpp)
   target_link_libraries(ec-check PRIVATE foundation)
-  add_dependencies(ec-check MechControl)
+  add_dependencies(ec-check profiles)
   add_test(NAME ec COMMAND ec-check)
   add_executable(ui-pages-check WIN32 src/ui.cpp src/fan_chart.cpp src/gpu_keepawake.cpp resources/app.rc "${CMAKE_CURRENT_BINARY_DIR}/counters.rc")
   target_compile_definitions(ui-pages-check PRIVATE MECHCONTROL_PAGE_CHECK)
   target_link_libraries(ui-pages-check PRIVATE foundation comctl32 shell32 gdi32 comdlg32 gdiplus d3d11 dxgi wevtapi cfgmgr32 delayimp dwmapi)
   target_link_options(ui-pages-check PRIVATE /DELAYLOAD:gdiplus.dll /DELAYLOAD:d3d11.dll /DELAYLOAD:dxgi.dll /DELAYLOAD:wevtapi.dll /MANIFEST:EMBED "/MANIFESTUAC:level='requireAdministrator' uiAccess='false'" /MANIFESTINPUT:${CMAKE_CURRENT_SOURCE_DIR}/resources/app.manifest)
-  add_dependencies(ui-pages-check MechControl)
+  add_dependencies(ui-pages-check profiles)
   add_executable(configuration-check tests/configuration_check.cpp)
   target_link_libraries(configuration-check PRIVATE configuration)
   add_test(NAME configuration COMMAND configuration-check "${CMAKE_CURRENT_SOURCE_DIR}/Profiles/MECHREVO"
