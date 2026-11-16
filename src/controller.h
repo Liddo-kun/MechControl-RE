@@ -55,6 +55,10 @@ struct ChargeLimitApply {
 struct GpuKeepAwakeApply {
     bool enabled;
 };
+// Millivolts below stock, stored in the BIOS and not in a slot; see VoltageOffset.
+struct VoltageOffsetApply {
+    int millivolts;
+};
 struct LightingApply {
     int zone;
     config::Zone settings;
@@ -141,7 +145,7 @@ using ControlCommand =
                  SlotRename, SlotClear, DefaultsApply, ThermalReset, ThermalTest, Visibility, Resume, AcEvent,
                  GpuUnlock, DlppcApply, CliCommand, LightingApply, LightingIdle, DimmingApply, PeripheralRead,
                  CoolerRequest, BatteryPage, UiRead, UiPage, UiPreflight, FanMaster, FanEdit, FanRead, PowerTransition,
-                 EcBypassApply, CoolerFlag, ChargeLimitApply, GpuKeepAwakeApply>;
+                 EcBypassApply, CoolerFlag, ChargeLimitApply, GpuKeepAwakeApply, VoltageOffsetApply>;
 // How the worker treats each command. Every command needs an entry: command_traits() fails to compile without one.
 struct CommandTraits {
     bool notification = false; // Lifecycle event, run even during the wait for a blocking device operation.
@@ -173,6 +177,7 @@ inline CommandTraits traits(const ProtectionApply&) { return {.stale = tab::fail
 inline CommandTraits traits(const BatteryApply&) { return {.stale = tab::battery}; }
 inline CommandTraits traits(const ChargeLimitApply&) { return {.stale = tab::battery}; }
 inline CommandTraits traits(const GpuKeepAwakeApply&) { return {.present = true}; }
+inline CommandTraits traits(const VoltageOffsetApply&) { return {.present = true}; }
 inline CommandTraits traits(const LightingApply&) { return {.stale = tab::lighting}; }
 inline CommandTraits traits(const LightingIdle&) { return {.stale = tab::lighting}; }
 inline CommandTraits traits(const DimmingApply&) { return {.stale = tab::lighting}; }
@@ -289,7 +294,7 @@ private:
         run(const CoolerRequest&), run(const BatteryPage&), run(const UiRead&), run(const UiPage&),
         run(const UiPreflight&), run(const FanMaster&), run(const FanEdit&), run(const FanRead&),
         run(const PowerTransition&), run(const EcBypassApply&), run(const CoolerFlag&), run(const ChargeLimitApply&),
-        run(const GpuKeepAwakeApply&);
+        run(const GpuKeepAwakeApply&), run(const VoltageOffsetApply&);
     cli::Reply cli(const std::vector<std::string>&);
     config::Json status();
     config::Json cpu_status(), gpu_status(bool presentation = false), fans_status(), gpu_telemetry(), gpu_budget();
@@ -342,6 +347,8 @@ private:
     bool bypass_supported_ = false, bypass_active_ = false, bypass_clearing_ = false, emergency_ = false,
          cooler_flag_ = false;
     std::string bypass_unavailable_, bypass_status_, bypass_reason_, gpu_unprotected_;
+    VoltageOffset voltage_{.unavailable = "not read"}; // What the BIOS held when last read or written.
+    std::string voltage_note_;
     std::function<void(std::function<void()>)> run_blocking_; // Existing joined wait path; never moves EC work.
     EcSession& session_;
     const config::Validation& features_;

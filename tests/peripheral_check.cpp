@@ -274,6 +274,74 @@ IAsyncOperation<BluetoothLEDevice> delayed(std::shared_ptr<Pending> p) {
     SetEvent(p->returned.get());
     co_return nullptr;
 }
+// The UniWillVariable a GM5TG0O (BIOS N.1.07A05) reported with the OEM app's offset at -50 mV.
+std::vector<uint8_t> uniwill_variable() {
+    std::vector<uint8_t> v(180, 0xFF);
+    for (auto [at, bytes] : std::initializer_list<std::pair<int, std::vector<uint8_t>>>{
+             {0x00, {0x05, 0x1D, 0x46, 0x11, 0xA0, 0xF4, 0x07, 0x01, 0xB4}},
+             {0x0D, {0x00, 0x0A}},
+             {0x2F, {0x01}},
+             {0x33, {0x01, 0x00, 0x00, 0xD0, 0x07, 0x00, 0x00, 0x00, 0x00, 0x64}},
+             {0x3D, std::vector<uint8_t>(0x20, 0)},
+             {0x5D, {0x01, 0x01, 0x00, 0x01, 0x01, 0x04, 0x00, 0x32, 0x00, 0x01, 0x00, 0x56, 0x02, 0xEC, 0x10}},
+             {0xB3, {0x00}}})
+        std::ranges::copy(bytes, v.begin() + at);
+    return v;
+}
+void voltage_offset_check() {
+    auto held = uniwill_variable();
+    auto v = voltage_offset(held);
+    check(v.unavailable.empty() && v.millivolts == 50 && v.max == 100 && !v.recovery,
+          "a reported UniWillVariable gives its offset and the range the BIOS advertises");
+    auto differ = [&](const std::vector<uint8_t>& changed) {
+        std::vector<int> at;
+        for (int i = 0; i < 180; ++i)
+            if (changed[i] != held[i]) at.push_back(i);
+        return at;
+    };
+    auto lower = with_voltage_offset(held, 48);
+    check(differ(lower) == std::vector{0x64} && lower[0x64] == 48, "a new offset changes only the request");
+    // The positive offset the OEM app left at -50 mV in a later report, with ApExistFlag cleared and the recovery
+    // request raised.
+    auto odd = held;
+    odd[0x3A] = 50;
+    odd[0x5C] = 1;
+    odd[0x5D] = 0;
+    check(voltage_offset(odd).recovery, "the recovery request is read");
+    auto reset = with_voltage_offset(odd, 0);
+    // Apart from the request, as the first reported variable: no positive offset or recovery request, ApExistFlag set.
+    check(reset[0x64] == 0 && differ(reset) == std::vector{0x64},
+          "a request clears the positive offset and the recovery request and sets ApExistFlag");
+    auto refused = [&](std::vector<uint8_t> data, int millivolts) {
+        try {
+            with_voltage_offset(data, millivolts);
+        } catch (const std::exception&) {
+            return true;
+        }
+        return false;
+    };
+    check(refused(held, 101) && refused(held, -1) && !refused(held, 100), "an offset outside 0 to -100 mV is refused");
+    auto narrow = held;
+    narrow[0x3C] = 30;
+    narrow[0x64] = 20;
+    check(voltage_offset(narrow).max == 30 && refused(narrow, 31) && !refused(narrow, 30),
+          "the BIOS's own maximum limits the offset");
+    auto wide = held;
+    wide[0x3C] = 0xE8, wide[0x3D] = 0x03;
+    check(voltage_offset(wide).max == 100 && refused(wide, 101),
+          "a wider BIOS range still stops at the OEM app's 100 mV");
+    // The X6AR's OemMagicVariable advertises no range, and its BIOS does not apply the request it holds.
+    auto none = held, both = held, shorter = held, voltage = held, beyond = held;
+    none[0x3C] = 0;
+    both[0x66] = 2;
+    shorter.pop_back();
+    voltage[0x34] = 10; // The BIOS would apply it with the offset.
+    beyond[0x65] = 1;   // -306 mV, which the slider could not show.
+    for (const auto& data : {none, both, shorter, voltage, beyond, std::vector<uint8_t>{}})
+        check(!voltage_offset(data).unavailable.empty() && refused(data, 10),
+              "no range, another range type or size, a core voltage, an offset outside the range or no variable: not "
+              "offered and never written");
+}
 void pending(const std::filesystem::path& root) {
     auto log = [](const std::string& s) { std::cout << s << std::endl; };
     ProfileStore store(root, false, log);
@@ -615,6 +683,7 @@ int wmain(int argc, wchar_t** argv) {
             lighting(root);
             keyboard_on_ec(root);
             light_bar_on_ec(root);
+            voltage_offset_check();
             pending(root);
         }
         uninit_apartment();

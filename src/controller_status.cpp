@@ -298,9 +298,15 @@ Json Controller::fans_status() {
             {"cpuTempC", s.cpu_temp.value_or(0)},
             {"gpuTempC", s.gpu_temp.value_or(0)}};
 }
-// Owned state only, no EC reads: the bypass and the live liquid cooler flag.
+// Owned state only, no EC reads: the bypass, the live liquid cooler flag and the voltage offset the BIOS held when
+// it was last read or written.
 Json Controller::advanced_status() const {
-    return {{"ecBypass",
+    return {{"voltageOffset",
+             {{"available", voltage_.unavailable.empty()},
+              {"millivolts", voltage_.millivolts},
+              {"max", voltage_.max},
+              {"note", voltage_note_}}},
+            {"ecBypass",
              {{"available", bypass_supported_},
               {"reason", bypass_unavailable_},
               {"active", bypass_active_},

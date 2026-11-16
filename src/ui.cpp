@@ -74,6 +74,8 @@ enum Id {
     boardSupportId,
     bypassSupportId,
     keepAwakeId,
+    voltageOffsetId,
+    voltageApplyId,
     gpuTargetId,
     boostId = 300,
     switchId,
@@ -696,6 +698,8 @@ private:
         support(0, boardSupportId, L"Board input current limit");
         check(0, bypassId, L"Bypass EC power throttling");
         support(0, bypassSupportId, L"EC power-limit bypass", L"a link to your model's BIOS/EC update");
+        slider(0, voltageOffsetId, L"CPU core voltage offset", 0, 1, 0);
+        button(0, voltageApplyId, L"Apply offset");
         check(0, coolerFlagId, L"Tell the EC a liquid cooler is connected");
         tooltip_ = CreateWindowExW(WS_EX_TOPMOST, TOOLTIPS_CLASSW, nullptr, WS_POPUP | TTS_ALWAYSTIP | TTS_NOPREFIX,
                                    CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, window_, nullptr,
@@ -1132,6 +1136,19 @@ private:
             note(bypassText_, bypassError_ ? palette().error : muted, ref(2));
         }
         support(bypassSupportId, expanded, muted, ref(2));
+        // Only where the BIOS takes the offset from its UEFI variable. It has its own Apply: the request is kept by
+        // the BIOS, not in a profile.
+        bool voltage = expanded && advanced.value("voltageOffset", Json::object()).value("available", false);
+        if (voltage) s.y += ref(8);
+        s.slide(voltageOffsetId, s.columns({voltageOffsetId}, L"-100 mV"), voltage);
+        s.put(get(voltageApplyId), s.left, s.y + ref(2), ref(140), s.button, voltage);
+        if (voltage) {
+            s.y += ref(2) + s.button;
+            note(
+                L"Lowers the CPU core voltage. Stored in the BIOS, not in a profile, and takes effect after two restarts. If the laptop then fails to start, hold Ctrl+B while pressing the power button to start without it.",
+                muted, ref(4));
+            note(voltageText_, muted, ref(2));
+        }
         s.check(coolerFlagId, expanded && flag, font_);
         if (expanded && flag)
             note(
@@ -1790,8 +1807,11 @@ private:
         }
         // Text that changes the layout relays out the page; live readings only repaint the table.
         auto key = cpuNote_ + L'\n' + cpuPreset_ + L'\n' + powerHint_ + L'\n' + liveReason_ + L'\n' +
-                   text(get(unlockId)) + L'\n' + bypassText_ +
+                   text(get(unlockId)) + L'\n' + bypassText_ + L'\n' + voltageText_ +
                    std::to_wstring(int(advanced_) + 4 * offered + 16 * tempTargetShown() +
+                                   8 * state_.value("advanced", Json::object())
+                                           .value("voltageOffset", Json::object())
+                                           .value("available", false) +
                                    2 * state_.value("advanced", Json::object())
                                            .value("coolerFlag", Json::object())
                                            .value("available", false));
@@ -2016,11 +2036,11 @@ private:
     void checked(int id, bool value) {
         if (!edited_.contains(id)) SendMessageW(get(id), BM_SETCHECK, value ? BST_CHECKED : BST_UNCHECKED, 0);
     }
-    // Power, GPU temperature target, fan switch, failsafe trigger, lighting brightness and cooler
+    // Power, voltage offset, GPU temperature target, fan switch, failsafe trigger, lighting brightness and cooler
     // duty values are slider positions; the other sliders have an edit box.
     static bool positional(int id) {
-        return (id >= pl1Id && id <= inputId) || id == gpuTargetId || id == switchMsId || id == thresholdId ||
-               id == coolerFanId || id == coolerPumpId ||
+        return (id >= pl1Id && id <= inputId) || id == voltageOffsetId || id == gpuTargetId || id == switchMsId ||
+               id == thresholdId || id == coolerFanId || id == coolerPumpId ||
                (id >= zoneBaseId && id < zoneBaseId + 48 && (id - zoneBaseId) % 16 == 4);
     }
     // A lighting zone's R, G and B boxes. Unless strict, an invalid box keeps its last valid value.
@@ -2082,6 +2102,7 @@ private:
         if (id >= nvId && id <= inputId) return compact(milliamps(id, v) / 1000.0) + L" A";
         if (id >= pl1Id && id <= dbId) return std::to_wstring(v) + L" W";
         if (id == switchMsId) return std::to_wstring(v * 100) + L" ms";
+        if (id == voltageOffsetId) return std::to_wstring(-v) + L" mV"; // The position is millivolts below stock.
         if ((id >= zoneBaseId && id < zoneBaseId + 48) || id == coolerFanId || id == coolerPumpId)
             return std::to_wstring(v) + L" %";
         return std::to_wstring(v);
@@ -2376,6 +2397,15 @@ private:
                     L"Stop the EC from throttling your CPU power limits?\n\nPL1/PL2/PL4 apply under heavy load within about 24 s, the fans run at full speed and the battery covers what the adapter can't supply. It turns off on sleep, display off, AC loss, a failsafe trip and exit.",
                     L"Bypass EC Power Throttling"))
                 request(EcBypassApply{on});
+            break;
+        }
+        case voltageApplyId: {
+            int millivolts = number(voltageOffsetId);
+            std::wstring message =
+                L"Store a CPU core voltage offset of -" + std::to_wstring(millivolts) +
+                L" mV in the BIOS?\n\nIt takes effect after two restarts and stays until you change it here. Too low a voltage makes the laptop crash or fail to start.\n\nIf it does not start, hold Ctrl+B while pressing the power button: the BIOS then starts without the offset.\n\nMechControl cannot read what the CPU applies. Check it with HWiNFO or ThrottleStop.";
+            if (millivolts && !confirm(message.c_str(), L"CPU Core Voltage Offset")) break;
+            request(VoltageOffsetApply{millivolts});
             break;
         }
         case boostId:
@@ -2684,6 +2714,10 @@ private:
             enable(bypassId, bypass.value("available", false));
             checked(coolerFlagId, flag.value("connected", false));
             enable(coolerFlagId, flag.value("available", false));
+            auto offset = advanced.value("voltageOffset", Json::object());
+            if (offset.value("available", false))
+                value(voltageOffsetId, offset.value("millivolts", 0), 0, offset.value("max", 0));
+            voltageText_ = w(offset.value("note", std::string{}));
             // The status line only explains an automatic turn-off or a failure to clear.
             bypassText_ = clearing || (!active && status != L"Off (turned off)") ? status : L"";
             bypassError_ = clearing;
@@ -3226,6 +3260,9 @@ private:
                     }
                     if (!r.code && operation_ && std::holds_alternative<ProtectionApply>(*operation_))
                         eraseEdits(protectionId, showWindowId);
+                    // A refused offset stays in the slider as an edit; a stored one is the BIOS's value again.
+                    if (!r.code && operation_ && std::holds_alternative<VoltageOffsetApply>(*operation_))
+                        edited_.erase(voltageOffsetId);
                     if (!r.code && operation_ &&
                         (std::holds_alternative<ThermalReset>(*operation_) ||
                          std::holds_alternative<SlotLoad>(*operation_) ||
@@ -3623,7 +3660,7 @@ private:
     bool chargeOffered_ = true; // The Battery page has its Charge Limit section.
     std::wstring modeNote_;     // What the battery modes do on this firmware; empty where that is not known.
     std::map<int, int> detectedMa_;
-    std::wstring cpuNote_, cpuPreset_, powerHint_, liveReason_, powerKey_, dlppcTip_, bypassText_;
+    std::wstring cpuNote_, cpuPreset_, powerHint_, liveReason_, powerKey_, dlppcTip_, bypassText_, voltageText_;
     bool bypassError_ = false; // The bypass status reports a failure to clear.
     bool advanced_ = false;
     std::map<int, Support> support_;

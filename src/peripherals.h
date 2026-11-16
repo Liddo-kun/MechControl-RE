@@ -61,6 +61,23 @@ void ensure_uefi_flags(const std::function<void(const std::string&)>&);
 // The OEM's UEFI variable as the BIOS holds it, for a diagnostic report: the BIOS keeps the Control Center's
 // boot-time settings in it, and some BIOSes name it UniWillVariable (re/notes/ec_firmware_GMxTG0x_findings.md).
 config::Json uefi_diagnostic();
+// The CPU core voltage offset that a BIOS copies from its UniWillVariable into the CPU settings at boot, which is
+// how the OEM app sets it (re/notes/ec_firmware_GMxTG0x_findings.md). The BIOS does not check the value, so it is
+// offered only where the variable has what that BIOS was read to apply: 180 bytes, negative offsets only (range
+// type 1) and a maximum the BIOS itself advertises.
+struct VoltageOffset {
+    std::string unavailable; // Why it is not offered; empty where it is.
+    int millivolts = 0;      // Below stock: 50 is -50 mV.
+    int max = 0;             // The largest the BIOS advertises, and never more than the OEM app's 100.
+    bool recovery = false;   // The BIOS asks for the request to be reset: Ctrl+B at power-on, or its setup option.
+};
+VoltageOffset voltage_offset(std::span<const uint8_t> variable);
+// The variable with that offset requested and a recovery request answered. Refuses an offset outside the range.
+std::vector<uint8_t> with_voltage_offset(std::span<const uint8_t> variable, int millivolts);
+// The UniWillVariable as the BIOS holds it; none where it has none or the UEFI privilege is unavailable.
+std::vector<uint8_t> read_uniwill_variable();
+// Writes held with that offset requested, unless it already holds it, and requires it to read back.
+VoltageOffset store_voltage_offset(std::span<const uint8_t> held, int millivolts);
 config::Json battery_telemetry(EcTransport&);
 // What the EC's charge-voltage routine keeps (re/register_reference.md 11.6.1): the voltage the pack requests, the
 // lower one the EC gives the charger, and the cell count. No profile or version number says which firmware has

@@ -500,17 +500,78 @@ bool uefi_privilege() {
     AdjustTokenPrivileges(token.get(), FALSE, &privilege, 0, nullptr, nullptr);
     return GetLastError() == 0;
 }
+constexpr auto oemMagicVariable = L"OemMagicVariable", uniwillVariable = L"UniWillVariable";
+// An OEM variable's bytes; none where the firmware has no variable of that name.
+std::vector<uint8_t> oem_variable(const wchar_t* name) {
+    std::array<uint8_t, 4096> data{};
+    auto size = GetFirmwareEnvironmentVariableW(name, oemVariableGuid, data.data(), static_cast<DWORD>(data.size()));
+    return {data.begin(), data.begin() + size};
+}
+}
+VoltageOffset voltage_offset(std::span<const uint8_t> variable) {
+    auto word = [&](int at) { return variable[at] | variable[at + 1] << 8; };
+    VoltageOffset v;
+    if (variable.empty())
+        v.unavailable = "no UniWillVariable could be read";
+    else if (variable.size() != 180 || variable[0x5C] > 1 || variable[0x5D] > 1)
+        v.unavailable = "the layout of this BIOS's UniWillVariable is unknown";
+    else if (variable[0x66] != 1)
+        v.unavailable =
+            "this BIOS reports voltage offset range type " + std::to_string(variable[0x66]) + ", which is unverified";
+    else if (!word(0x3C))
+        v.unavailable = "this BIOS advertises no voltage offset range";
+    // The BIOS copies 0x34 into the CPU settings together with the offset, and a request sets the flag for both.
+    else if (word(0x34))
+        v.unavailable = "this BIOS's UniWillVariable also holds a core voltage, which the BIOS applies with the offset";
+    if (!v.unavailable.empty()) return v;
+    v.max = std::min(word(0x3C), 100);
+    if (word(0x64) > v.max)
+        return {.unavailable = "this BIOS holds an offset of -" + std::to_string(word(0x64)) +
+                               " mV, outside the 0 to -" + std::to_string(v.max) + " mV offered"};
+    v.millivolts = word(0x64);
+    v.recovery = variable[0x5C] == 1;
+    return v;
+}
+std::vector<uint8_t> with_voltage_offset(std::span<const uint8_t> variable, int millivolts) {
+    auto v = voltage_offset(variable);
+    if (!v.unavailable.empty()) throw std::runtime_error("CPU core voltage offset unavailable: " + v.unavailable);
+    if (millivolts < 0 || millivolts > v.max)
+        throw std::out_of_range("CPU core voltage offset must be 0 to -" + std::to_string(v.max) + " mV");
+    std::vector<uint8_t> data(variable.begin(), variable.end());
+    // As the OEM app writes a negative offset: its size at 0x64 and ApExistFlag, without which the BIOS leaves the CPU
+    // settings as they are. 0x5C is the recovery request. Range type 1 makes the BIOS ignore the positive offset at
+    // 0x3A, where the OEM app sometimes leaves the same value; it is cleared anyway, because 0 can never raise it.
+    data[0x64] = static_cast<uint8_t>(millivolts);
+    data[0x65] = data[0x3A] = data[0x3B] = data[0x5C] = 0;
+    data[0x5D] = 1;
+    return data;
+}
+std::vector<uint8_t> read_uniwill_variable() {
+    if (!uefi_privilege()) return {};
+    return oem_variable(uniwillVariable);
+}
+VoltageOffset store_voltage_offset(std::span<const uint8_t> held, int millivolts) {
+    auto wanted = with_voltage_offset(held, millivolts);
+    if (!uefi_privilege()) throw std::runtime_error("UEFI privilege unavailable");
+    if (!std::ranges::equal(wanted, held)) {
+        if (!SetFirmwareEnvironmentVariableW(uniwillVariable, oemVariableGuid, wanted.data(),
+                                             static_cast<DWORD>(wanted.size())))
+            throw std::runtime_error("The BIOS refused the CPU core voltage offset: Windows error " +
+                                     std::to_string(GetLastError()));
+        if (oem_variable(uniwillVariable) != wanted)
+            throw std::runtime_error("The BIOS did not keep the CPU core voltage offset: UniWillVariable reads back "
+                                     "differently");
+    }
+    return voltage_offset(wanted);
 }
 Json uefi_diagnostic() {
     if (!uefi_privilege()) return {{"error", "UEFI privilege unavailable"}};
-    std::array<uint8_t, 4096> data{};
-    for (auto name : {"OemMagicVariable", "UniWillVariable"}) {
-        auto size = GetFirmwareEnvironmentVariableW(wide(name).c_str(), oemVariableGuid, data.data(),
-                                                    static_cast<DWORD>(data.size()));
-        if (!size) continue;
+    for (auto name : {oemMagicVariable, uniwillVariable}) {
+        auto data = oem_variable(name);
+        if (data.empty()) continue;
         std::vector<std::string> rows;
         char text[8];
-        for (DWORD i = 0; i < size; ++i) {
+        for (size_t i = 0; i < data.size(); ++i) {
             if (i % 16 == 0) {
                 snprintf(text, sizeof text, "%02X:", static_cast<unsigned>(i));
                 rows.emplace_back(text);
@@ -518,7 +579,7 @@ Json uefi_diagnostic() {
             snprintf(text, sizeof text, " %02X", data[i]);
             rows.back() += text;
         }
-        return {{"name", name}, {"size", size}, {"bytes", rows}};
+        return {{"name", utf8(name)}, {"size", data.size()}, {"bytes", rows}};
     }
     return {{"error", "No OEM variable; Windows error " + std::to_string(GetLastError())}};
 }
@@ -527,14 +588,12 @@ void ensure_uefi_flags(const std::function<void(const std::string&)>& log) {
         log("UEFI privilege unavailable");
         return;
     }
-    constexpr auto name = L"OemMagicVariable", guid = oemVariableGuid;
-    std::array<uint8_t, 4096> data{};
-    auto size = GetFirmwareEnvironmentVariableW(name, guid, data.data(), static_cast<DWORD>(data.size()));
-    if (!size) {
+    auto data = oem_variable(oemMagicVariable);
+    if (data.empty()) {
         log("UEFI OemMagicVariable unavailable; skipping");
         return;
     }
-    if (size != 180 || data[0x2F] > 3 || data[0x33] > 1 || data[0x5D] > 1 || data[0x61] > 1) {
+    if (data.size() != 180 || data[0x2F] > 3 || data[0x33] > 1 || data[0x5D] > 1 || data[0x61] > 1) {
         log("UEFI layout unrecognized; skipping");
         return;
     }
@@ -544,14 +603,13 @@ void ensure_uefi_flags(const std::function<void(const std::string&)>& log) {
     }
     data[0x2F] = 3;
     data[0x33] = data[0x5D] = data[0x61] = 1;
-    if (!SetFirmwareEnvironmentVariableW(name, guid, data.data(), size)) {
+    if (!SetFirmwareEnvironmentVariableW(oemMagicVariable, oemVariableGuid, data.data(),
+                                         static_cast<DWORD>(data.size()))) {
         log("UEFI flag write failed: " + std::to_string(GetLastError()));
         return;
     }
-    auto count = GetFirmwareEnvironmentVariableW(name, guid, data.data(), static_cast<DWORD>(data.size()));
-    log(count == 180 && data[0x2F] == 3 && data[0x33] == 1 && data[0x5D] == 1 && data[0x61] == 1
-            ? "UEFI flags updated and verified"
-            : "UEFI flags written; readback not verified");
+    log(oem_variable(oemMagicVariable) == data ? "UEFI flags updated and verified"
+                                               : "UEFI flags written; readback not verified");
 }
 Json battery_telemetry(EcTransport& ec) {
     auto word = [&](int a) { return ec.read(a) | (ec.read(a + 1) << 8); };

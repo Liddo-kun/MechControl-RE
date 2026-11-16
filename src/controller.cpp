@@ -534,6 +534,27 @@ std::vector<std::string> Controller::start() {
     lighting_ = std::make_unique<Lighting>(session_, store_, diagnostic_, peripheral_hardware_, lighting_send_,
                                            run_blocking_, [this](const auto& writes) { batch(writes); });
     if (peripheral_hardware_) {
+        if (session_.identity.cpu_vendor != "intel")
+            voltage_.unavailable = "the BIOS's voltage offset is known on Intel CPUs only";
+        else if (auto held = read_uniwill_variable(); (voltage_ = voltage_offset(held)).recovery) {
+            // The BIOS only raises the flag. The OEM app answers it by resetting its request, and nothing else does
+            // where that app is not installed.
+            int was = voltage_.millivolts;
+            try {
+                voltage_ = store_voltage_offset(held, 0);
+                voltage_note_ = "The BIOS asked for an overclock recovery (Ctrl+B at power-on, or its setup option)" +
+                                (was ? ", so the stored offset of -" + std::to_string(was) + " mV was reset to 0."
+                                     : std::string("; the stored offset was already 0."));
+                diagnostic_("[Voltage offset] " + voltage_note_);
+            } catch (const std::exception& ex) {
+                diagnostic_("[Voltage offset] The BIOS's recovery request was not answered");
+                voltage_.unavailable = ex.what();
+            }
+        }
+        diagnostic_(voltage_.unavailable.empty()
+                        ? "[Voltage offset] BIOS request " + std::to_string(-voltage_.millivolts) +
+                              " mV, range 0 to -" + std::to_string(voltage_.max) + " mV"
+                        : "[Voltage offset] Not offered: " + voltage_.unavailable);
         run_blocking_([&] { dimming_available_ = local_dimming_available(); });
         diagnostic_(std::string("Local dimming WMI ") + (dimming_available_ ? "available" : "unavailable"));
         if (session_.hardware.liquid_cooling())
@@ -1515,6 +1536,21 @@ ControlResult Controller::run(const ChargeLimitApply& c) {
 ControlResult Controller::run(const GpuKeepAwakeApply& c) {
     store_.set_gpu_keep_awake(c.enabled); // The UI runs it; see GpuKeepAwake.
     return {.text = c.enabled ? "GPU keep-awake on" : "GPU keep-awake off", .applied = true};
+}
+ControlResult Controller::run(const VoltageOffsetApply& c) {
+    if (!voltage_.unavailable.empty())
+        throw std::runtime_error("CPU core voltage offset unavailable: " + voltage_.unavailable);
+    try {
+        voltage_ = store_voltage_offset(read_uniwill_variable(), c.millivolts);
+    } catch (...) {
+        voltage_ = voltage_offset(read_uniwill_variable()); // What the BIOS holds now, whatever became of the write.
+        throw;
+    }
+    voltage_note_.clear();
+    diagnostic_("[Voltage offset] BIOS request set to " + std::to_string(-c.millivolts) + " mV");
+    return {.text = "CPU core voltage offset " + std::to_string(-c.millivolts) +
+                    " mV stored in the BIOS; it takes effect after two restarts",
+            .applied = true};
 }
 ControlResult Controller::run(const SwitchApply& c) {
     speed(c.enabled, c.milliseconds);

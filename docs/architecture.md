@@ -107,6 +107,12 @@ is greyed with its reason. Where those variables are recognized, the Battery pag
 shows them and says what the battery modes do to the charge voltage. System Info shows the
 EC's record of the last power-off.
 
+The CPU core voltage offset is neither an EC register nor a saved setting: the BIOS copies
+it at boot from the OEM UEFI variable, which is its only record (`VoltageOffset` in
+`peripherals.*`; `re/register_reference.md` 10 has the fields and what qualifies a BIOS).
+The controller reads the variable at startup, writes it only on the control's own Apply,
+and at startup answers a recovery request the BIOS left there by storing 0.
+
 `nvidia_*` owns NVAPI, ROM parsing and verified override records. Originals are
 shared at `%ProgramData%/MechControl/NvidiaOverrides/originals.txt`; they are not
 per-release settings and must not be replaced by an old backup during rollback.

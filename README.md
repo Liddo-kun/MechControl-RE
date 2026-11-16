@@ -16,10 +16,10 @@ MechControl is a native C++ Windows app. It needs no .NET runtime and keeps its 
 - **Battery:** charge modes and battery info
 - **Lighting:** keyboard, light bar, logo, idle timeout and mini-LED local dimming
 - **Bluetooth liquid cooler:** fan, pump and RGB
-- **Advanced (Power tab):** EC power-limit bypass where the model supports it (never saved; turns itself off on sleep, display off, AC loss and exit), and the EC's liquid cooler connection flag
+- **Advanced (Power tab):** EC power-limit bypass where the model supports it (never saved; turns itself off on sleep, display off, AC loss and exit), the EC's liquid cooler connection flag, and a CPU core voltage offset (undervolt) where the BIOS takes one from the OEM app
 - **Profiles:** 5 slots. The last one used loads at startup. You can switch profiles from the tray icon.
 - **Monitoring:** live temperatures, fan speeds and power. Fan RPM can also be published as Windows performance counters.
-- **Command line (optional):** `mcctl.exe` reads and changes GPU/CPU power, NVIDIA current limits, fan boost and the advanced settings on the running app, for scripts and agents.
+- **Command line (optional):** `mcctl.exe` reads and changes GPU/CPU power, NVIDIA current limits, fan boost, the EC bypass and the cooler flag on the running app, for scripts and agents.
 
 ## Requirements
 

@@ -137,6 +137,18 @@ void Application::checkPages(const std::filesystem::path& directory, const std::
           "the advanced link reveals the GPU override, current limits, bypass and cooler-flag controls");
     bottom(true);
     capture(L"power-advanced");
+    check(!IsWindowVisible(get(voltageOffsetId)) && !IsWindowVisible(get(voltageApplyId)),
+          "the voltage offset is hidden where the BIOS does not offer it");
+    // As the controller presents a BIOS that offers it; the fixture reads no firmware variables. The worker's next
+    // presentation takes it away again, so the checks do not wait and the capture may rarely miss it.
+    auto offered = state_.at("advanced");
+    offered["voltageOffset"] = {{"available", true}, {"millivolts", 48}, {"max", 100}, {"note", ""}};
+    presentation(Json{{"advanced", offered}}, false);
+    check(IsWindowVisible(get(voltageOffsetId)) && IsWindowVisible(get(voltageApplyId)) &&
+              number(voltageOffsetId) == 48 && SendMessageW(get(voltageOffsetId), TBM_GETRANGEMAX, 0, 0) == 100 &&
+              text(get(voltageOffsetId + 1000)) == L"-48 mV",
+          "an offered voltage offset shows the BIOS's request and range");
+    capture(L"power-voltage");
     bottom(false);
     SendMessageW(get(coolerFlagId), BM_SETCHECK, BST_CHECKED, 0);
     command(coolerFlagId, BN_CLICKED);

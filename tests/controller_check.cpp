@@ -1412,6 +1412,9 @@ void ec_bypass(const std::filesystem::path& root) {
               "status reports the live bypass state");
         auto off = b->controller->execute(EcBypassApply{false});
         check(off.code == 0 && s->bytes[0x780] == 0, "turning the bypass off clears 0x780");
+        // The fixture reads no firmware variables.
+        check(status["voltageOffset"]["available"] == false && b->controller->execute(VoltageOffsetApply{10}).code == 1,
+              "a voltage offset is refused where the BIOS variable was not read");
     }
     // Each precondition failure refuses the bypass before any 0x780 write.
     struct Case {

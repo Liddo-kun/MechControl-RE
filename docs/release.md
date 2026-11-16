@@ -73,6 +73,21 @@ down, because a GPU held awake for many minutes fails at the wake too. It acts o
 the NVIDIA GPU drives the laptop screen directly (hybrid mode off) and stops when the PC
 sleeps. It is off by default.
 
+## CPU core voltage offset
+
+**Power > Show advanced controls > CPU core voltage offset** lowers the CPU core voltage by
+up to 100 mV. It appears only where the BIOS takes this setting from the OEM Control Center
+(known on GM5TG0O, BIOS N.1.07A05). The BIOS keeps the value, not a profile, and applies it
+from the second restart after you change it. MechControl cannot read what the CPU applies;
+check it with HWiNFO or ThrottleStop.
+
+Too low a voltage makes the laptop crash or fail to start. If it does not start, hold
+**Ctrl+B** while pressing the power button: the BIOS starts without the offset, and
+MechControl resets the stored value to 0 at its next start. The BIOS setup option
+**GCU - OverClock Recovery** asks for the same reset. Set the offset to 0 before you remove
+MechControl, because the BIOS keeps applying it. The Control Center writes its own
+profile's offset over this one, so its services must not start with Windows either.
+
 ## Command line
 
 The `-cli` archive includes `mcctl.exe`. From an elevated shell it reads and changes
