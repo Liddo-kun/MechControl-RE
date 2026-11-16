@@ -36,7 +36,7 @@ constexpr wchar_t mainClass[] = L"MechControl.Native.Main";
 // A window that only holds controls: a page or the failsafe alert.
 constexpr wchar_t panelClass[] = L"MechControl.Native.Panel";
 constexpr UINT trayMessage = WM_APP + 2, fanEditMessage = WM_APP + 4;
-constexpr int appIconId = 1;  // resources/app.rc; the lowest icon ID is the one Explorer shows for the executable.
+constexpr int appIconId = 1; // resources/app.rc; the lowest icon ID is the one Explorer shows for the executable.
 // GUID_CONSOLE_DISPLAY_STATE and GUID_ACDC_POWER_SOURCE.
 constexpr GUID displayState{0x6FE69556, 0x704A, 0x47A0, {0x8F, 0x24, 0xC2, 0x8D, 0x93, 0x6F, 0xDA, 0x47}},
     powerSource{0x5D3E9A59, 0xE9D5, 0x4B00, {0xA6, 0xBD, 0xFF, 0x34, 0xFF, 0x51, 0x65, 0x48}};

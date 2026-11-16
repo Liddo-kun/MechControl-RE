@@ -380,8 +380,14 @@ void gmxzgxx_firmware(const std::filesystem::path& root, bool turbo) {
     auto s = std::make_shared<State>();
     s->amd = true;
     s->consumed = EcWrite{0x7C5, 0, 0x40};
-    for (auto [a, v] : {std::pair{0x740, 16}, {0x741, 0x24}, {0x7D2, 0}, {0x456, 0x80}, {0x7C5, 0xA0}, {0x7C6, 0x1B},
-                        {0x751, 0xA0}, {0x49F, turbo ? 0x0A : 0x08}})
+    for (auto [a, v] : {std::pair{0x740, 16},
+                        {0x741, 0x24},
+                        {0x7D2, 0},
+                        {0x456, 0x80},
+                        {0x7C5, 0xA0},
+                        {0x7C6, 0x1B},
+                        {0x751, 0xA0},
+                        {0x49F, turbo ? 0x0A : 0x08}})
         s->bytes[a] = static_cast<uint8_t>(v);
     EcSession session([&](const std::wstring&) { return std::make_unique<Fake>(s); }, [](const std::string&) {}, false,
                       [](unsigned) {}, profiles_directory(), Identity{"GMxZGxx", "fixture", "amd", uint8_t{16}});

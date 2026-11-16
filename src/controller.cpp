@@ -405,8 +405,7 @@ bool Controller::initialize(std::vector<std::string>& errors) {
     // Firmware with operating modes starts in Office, whose stock fan table stops at half speed and whose CPU
     // limits are the lowest. Select the highest mode, Turbo where 0x49F bit 1 reports it and Gaming elsewhere;
     // power limits and fan curves are then the user's (re/register_reference.md, 0x751).
-    if (p.operating_mode)
-        steps.push_back({{0x751, uint8_t(session_.transport().read(0x49F) & 2 ? 0x10 : 0), 0xB0}});
+    if (p.operating_mode) steps.push_back({{0x751, uint8_t(session_.transport().read(0x49F) & 2 ? 0x10 : 0), 0xB0}});
     std::string log = "--- EC Initialization ---";
     for (const auto& step : steps) {
         std::string label, detail;

@@ -249,8 +249,7 @@ void light_bar_on_ec(const std::filesystem::path& root) {
     owner.zone(2, Zone{true, 255, 128, 0, 50});
     owner.zone(2, Zone{false, 255, 128, 0, 100});
     owner.zone(2, Zone{true, 0, 0, 0, 100});
-    check(state->writes ==
-              Writes{{0x749, 100}, {0x74A, 50}, {0x74B, 0}, {0x748, 0x09}, {0x748, 0x0D}, {0x748, 0x0D}},
+    check(state->writes == Writes{{0x749, 100}, {0x74A, 50}, {0x74B, 0}, {0x748, 0x09}, {0x748, 0x0D}, {0x748, 0x0D}},
           "EC light bar brightness scales the duty, and off and black set the off bit without writing a color");
     state->bytes[0x748] = 0x81;
     state->writes.clear();
