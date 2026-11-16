@@ -5,7 +5,7 @@ An open-source replacement for the OEM Control Center on Uniwill-built gaming la
 MechControl is a native C++ Windows app. It needs no .NET runtime and keeps its memory use and background overhead low. The original C# version is on the [`legacy-csharp`](https://github.com/Liddo-kun/MechControl-RE/tree/legacy-csharp) branch; releases up to v1.6.0 are that version.
 
 > [!WARNING]
-> MechControl writes to the EC, the chip that runs your fans and power limits. Use it at your own risk. Only the MECHREVO IDY_7Y (board `X6AR55xY`) has been tested on hardware. Other models load a profile built from OEM data. At startup MechControl checks each feature's registers and turns off any feature that doesn't pass. The reasons are written to `mechcontrol.log`. Send this log if you want to improve compatibility for your model.
+> MechControl writes to the EC, the chip that runs your fans and power limits. Use it at your own risk. It has been tested on hardware on the MECHREVO IDY_7Y (Intel, board `X6AR55xY`), an AMD RTX 5090 system (`X6FR5xxY`), the TongFang GM5TG0O (XMG Core 15 M21 firmware, profile `GK7NXXR`) and the TongFang GM7ZG (XMG NEO 17 E21, profile `GMxZGxx`). Other models load a profile built from OEM data. At startup MechControl checks each feature's registers and turns off any feature that doesn't pass. The reasons are written to `mechcontrol.log`. Send this log if you want to improve compatibility for your model.
 
 ## Features
 
@@ -93,8 +93,6 @@ The default build directory is `C:/Temp/tandem/MechControl-native-build`; change
 
 ## Documentation
 
-- [`re/register_reference.md`](re/register_reference.md): EC registers, encodings and write sequences
-- [`re/`](re/README.md): reverse-engineering notes, captures, OEM profiles and tools
 - [`docs/architecture.md`](docs/architecture.md): how the app is put together
 - [`docs/release.md`](docs/release.md): the notes shipped with each release, including performance counters
 

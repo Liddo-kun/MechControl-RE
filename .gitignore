@@ -3,7 +3,8 @@
 /.vs/
 *.user
 
-# Local-only reverse-engineering material. Decompiled OEM code must never be published.
-/re/decompilation/
-/re/**/*.log
-/re/**/*.exe
+# Local only, never published: reverse-engineering notes, evidence and tools, and the
+# agent instructions.
+/re/
+/AGENTS.md
+/CLAUDE.md

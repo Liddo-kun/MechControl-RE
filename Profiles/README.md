@@ -6,8 +6,7 @@ They are configuration, not proof that each model was physically tested. A profi
 names registers but cannot widen what the app writes: the write allowlist is the same
 for every model, and limits the EC reports replace the profile's.
 
-The full OEM-extracted profiles that these were mapped from are in
-`re/Profiles/MECHREVO`. The app does not load those.
+They were mapped from the OEM's own model profiles, which are not part of this repository.
 
 The loader uses these files directly; there is no generated or normalized copy.
 Packaging must place this directory next to the executable.

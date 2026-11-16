@@ -109,7 +109,7 @@ EC's record of the last power-off.
 
 The CPU core voltage offset is neither an EC register nor a saved setting: the BIOS copies
 it at boot from the OEM UEFI variable, which is its only record (`VoltageOffset` in
-`peripherals.*`; `re/register_reference.md` 10 has the fields and what qualifies a BIOS).
+`peripherals.*`, which also describes the fields and what qualifies a BIOS).
 The controller reads the variable at startup, writes it only on the control's own Apply,
 and at startup answers a recovery request the BIOS left there by storing 0.
 
