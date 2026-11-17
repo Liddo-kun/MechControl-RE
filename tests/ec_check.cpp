@@ -234,20 +234,38 @@ void snapshots_and_startup() {
     require(s->bytes[0x786] == 0xDF && s->bytes[0x463] == 95,
             "AMD CPU group writes absolute temperature payload through redirect verification");
     s->bytes[0x463] = 0xD5;
+    s->bytes[0x490] = 7;
+    s->bytes[0x448] = 200;
+    s->bytes[0x449] = 35;
+    s->bytes[0x700] = 0x01; // Big-endian.
+    s->bytes[0x701] = 0x9C;
     s->calls.clear();
     auto sample = read_sensors(ec, p, Detail::full);
-    require(sample.cpu_rpm == 0x1234 && sample.gpu_rpm == 0x5678 && sample.cpu_limit == 85 && s->calls.size() == 18,
-            "X6FR profile RPM byte order, direct high-bit masked temperature and 18-byte full sample");
+    require(sample.cpu_rpm == 0x1234 && sample.gpu_rpm == 0x5678 && sample.cpu_limit == 85 && s->calls.size() == 21,
+            "X6FR profile RPM byte order, direct high-bit masked temperature and 21-byte full sample");
+    require(sample.on_ac == true && sample.input_volts == 20.0 && sample.adapter_amps == 3.5 &&
+                sample.input_watts == 412,
+            "full sample decodes the EC's input power registers");
+    {
+        InputPowerFilter filter;
+        double y = 0;
+        for (int i = 0; i < 10; ++i) y = filter.add(100, 0.1);
+        require(y == 100, "input power filter holds a steady load");
+        for (int i = 0; i < 10; ++i) y = filter.add(300, 0.1);
+        require(y > 250 && y < 300, "input power filter follows most of a load step within a second, without overshoot");
+        for (int i = 0; i < 20; ++i) y = filter.add(300, 0.1);
+        require(y > 280 && y <= 300, "input power filter settles on the new load");
+    }
     s->calls.clear();
     sample = read_sensors(ec, p, Detail::rpm);
     require(s->calls.size() == 4 && !sample.cpu_temp, "tray sample reads just four RPM bytes");
     s->calls.clear();
     sample = read_sensors(ec, p, Detail::monitor);
-    require(s->calls.size() == 11 && sample.curve_enabled && !sample.cpu_temp && !sample.adapter_raw,
+    require(s->calls.size() == 11 && sample.curve_enabled && !sample.cpu_temp && !sample.on_ac,
             "monitor bar sample skips temperatures and System Info sensors");
     s->calls.clear();
     sample = read_sensors(ec, p, Detail::temperatures, Sensors{.gpu_temp = 50});
-    require(s->calls.size() == 12 && sample.cpu_temp && sample.gpu_temp == 50 && !sample.adapter_raw,
+    require(s->calls.size() == 12 && sample.cpu_temp && sample.gpu_temp == 50 && !sample.on_ac,
             "Fans tab sample adds temperatures, reusing a shared reading");
     s = machine();
     ChannelFactory factory = [s](const std::wstring& path) {

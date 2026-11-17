@@ -39,8 +39,13 @@ std::vector<Result> Delivery::take() {
 ControlWorker::ControlWorker(std::shared_ptr<Delivery> delivery, Log& log, WorkerOptions options)
     : delivery_(std::move(delivery)), log_(log), options_(std::move(options)),
       wake_(CreateEventW(nullptr, FALSE, FALSE, nullptr)), stopping_(CreateEventW(nullptr, TRUE, FALSE, nullptr)),
-      timer_(options_.once ? nullptr : CreateWaitableTimerExW(nullptr, nullptr, 0, TIMER_ALL_ACCESS)) {
-    if (!wake_ || !stopping_ || (!options_.once && !timer_))
+      timer_(options_.once ? nullptr : CreateWaitableTimerExW(nullptr, nullptr, 0, TIMER_ALL_ACCESS)),
+      // High resolution so the 20 ms retries are not stretched to the 15.6 ms system tick; this does not raise the
+      // system timer resolution.
+      input_power_timer_(options_.once ? nullptr
+                                       : CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,
+                                                                TIMER_ALL_ACCESS)) {
+    if (!wake_ || !stopping_ || (!options_.once && (!timer_ || !input_power_timer_)))
         throw std::runtime_error("Cannot create worker wait handles.");
     if (!options_.once) {
         LARGE_INTEGER due{};
@@ -295,10 +300,37 @@ void ControlWorker::run(std::stop_token stop) {
         }
         log_.write("Control worker started; native counter status=" + std::to_string(counters->error()));
         publish_state();
-        HANDLE waits[]{stopping_.get(), timer_.get(), wake_.get()};
+        bool polling = false;
+        auto arm = [&](unsigned ms) {
+            LARGE_INTEGER due{};
+            due.QuadPart = -10000LL * ms;
+            SetWaitableTimer(input_power_timer_.get(), &due, 0, nullptr, nullptr, FALSE);
+        };
+        // System Info's input power poll exists only while the page is shown; otherwise its timer is cancelled.
+        auto update_polling = [&] {
+            bool wanted = controller && controller->input_power_wanted();
+            if (wanted == polling) return;
+            polling = wanted;
+            if (wanted)
+                arm(0);
+            else {
+                CancelWaitableTimer(input_power_timer_.get());
+                controller->input_power_stop();
+            }
+        };
+        HANDLE waits[]{stopping_.get(), timer_.get(), wake_.get(), input_power_timer_.get()};
         while (!stop.stop_requested()) {
-            auto ready = WaitForMultipleObjects(3, waits, FALSE, INFINITE);
+            update_polling();
+            auto ready = WaitForMultipleObjects(polling ? 4 : 3, waits, FALSE, INFINITE);
             if (ready == WAIT_OBJECT_0) break;
+            if (ready == WAIT_OBJECT_0 + 3) {
+                try {
+                    arm(controller->input_power_poll(GetTickCount64()));
+                } catch (const std::exception&) {
+                    arm(1000); // The ordinary sample logs EC read failures.
+                }
+                continue;
+            }
             if (ready == WAIT_OBJECT_0 + 1) {
                 // An auto-reset timer retains one signal, not one queued callback per missed period.
                 try {

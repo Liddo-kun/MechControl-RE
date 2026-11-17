@@ -63,6 +63,21 @@ std::string describe(const FanSnapshot& s, const std::string& title) {
            row("GPU duty    ", s.gpu.duty) + row("RamFan2 probe", s.probe) +
            "\n  0x7C5 = " + config::hex_text(s.enable) + "  0x7C6 = " + config::hex_text(s.mode);
 }
+double InputPowerFilter::add(double watts, double seconds) {
+    auto alpha = [&](double cutoff) { return 1 / (1 + 1 / (2 * 3.141592653589793 * cutoff * seconds)); };
+    if (!x_) {
+        dx_ = 0;
+        return *(x_ = watts);
+    }
+    dx_ += alpha(derivative_cutoff) * ((watts - *x_) / seconds - dx_);
+    return *x_ += alpha(min_cutoff + beta * std::abs(dx_)) * (watts - *x_);
+}
+// Two separate byte reads: the low byte is read again if the high byte moved in between.
+static int read_word(EcTransport& ec, int high, int low) {
+    auto h = ec.read(high), l = ec.read(low), h2 = ec.read(high);
+    if (h2 != h) l = ec.read(low);
+    return h2 << 8 | l;
+}
 Sensors read_sensors(EcTransport& ec, const config::MachineProfile& p, Detail detail,
                      const std::optional<Sensors>& shared) {
     auto read = [&](const char* name) { return ec.read(p.reg(name)); };
@@ -84,9 +99,10 @@ Sensors read_sensors(EcTransport& ec, const config::MachineProfile& p, Detail de
     if (p.registers.contains("cpuTemp") && !s.cpu_temp) s.cpu_temp = read("cpuTemp");
     if (p.registers.contains("gpuTemp") && !s.gpu_temp) s.gpu_temp = read("gpuTemp");
     if (detail == Detail::temperatures) return s;
+    s.on_ac = (ec.read(0x490) & 1) != 0;
     s.adapter_amps = ec.read(0x449) / 10.0;
-    auto lo = ec.read(0x60C), hi = ec.read(0x60D);
-    s.adapter_raw = lo | (hi << 8);
+    s.input_volts = ec.read(0x448) / 10.0;
+    s.input_watts = read_word(ec, 0x700, 0x701);
     s.db_live = ec.read(0x7D5);
     s.tgp_live = ec.read(0x788) + p.tgp_offset();
     return s;
@@ -411,8 +427,11 @@ config::Json EcSession::diagnostic_report() {
           {"cpuTempLimit", nullable(s.cpu_limit)},
           {"cpuPercent", nullable(s.cpu_percent)},
           {"gpuPercent", nullable(s.gpu_percent)},
-          {"adapterCurrentRaw", nullable(s.adapter_raw)},
+          {"adapterCurrentRaw", read_word(*ec_, 0x60D, 0x60C)},
           {"adapterAmps", nullable(s.adapter_amps)},
+          {"inputVolts", nullable(s.input_volts)},
+          {"inputWatts", nullable(s.input_watts)},
+          {"onAC", nullable(s.on_ac)},
           {"batterySoc", nullable(s.battery_soc)},
           {"batteryMode", nullable(s.battery_mode)},
           {"boost", nullable(s.boost)},

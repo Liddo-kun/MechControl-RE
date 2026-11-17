@@ -8,7 +8,9 @@ them: buttons, check boxes and trackbars through custom draw, the tabs, up-down 
 edit frames through small subclasses, and Windows' own dark theme classes for scroll bars,
 drop-down lists and tooltips. Menus and message boxes stay as Windows draws them.
 `ControlWorker` (`worker.*`) owns a serialized command queue,
-controller and monitor on one `std::jthread`. `Delivery` posts owned results to
+controller and monitor on one `std::jthread`. Besides its one-second timer it arms a second, one-shot
+timer only while System Info is shown, for the smoothed input power: it reads two EC bytes just after
+each of the EC's 100 ms updates. `Delivery` posts owned results to
 the UI; it is detached before destruction. Shutdown stops producers and joins
 the worker. Synchronous driver, WMI, NVIDIA and HID calls must return before
 shutdown finishes; there is no guaranteed cancellation timeout.

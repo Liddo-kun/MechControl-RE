@@ -1498,7 +1498,7 @@ private:
     void layoutInfo(Sections& s) {
         int left = s.x + ref(21), right = 0;
         COLORREF black = palette().text;
-        std::array<RECT, 8> cells{};
+        std::array<RECT, 9> cells{};
         auto open = [&](const wchar_t* title) {
             s.open(title, s.x, 0);
             right = 0;
@@ -1552,15 +1552,16 @@ private:
         };
         table(L"Temperatures", {{0, L"CPU Temperature" + reg("cpuTempRegister") + L":"},
                                 {1, L"GPU Temperature" + reg("gpuTempRegister") + L":"}});
-        std::vector<std::pair<int, std::wstring>> power{{2, L"Adapter Current [0x449]:"},
-                                                        {3, L"Adapter Current, raw ADC [0x60C-0x60D]:"},
-                                                        {4, L"TGP Live / NPCF ACBT [0x788]:"},
-                                                        {5, L"DB Max Live / NPCF AMAT [0x7D5]:"}};
+        std::vector<std::pair<int, std::wstring>> power{{2, L"Input Power, smoothed (One Euro):"},
+                                                        {3, L"Input Power, EC smoothed [0x700-0x701]:"},
+                                                        {4, L"Input Current [0x449] x Voltage [0x448]:"},
+                                                        {5, L"TGP Live / NPCF ACBT [0x788]:"},
+                                                        {6, L"DB Max Live / NPCF AMAT [0x7D5]:"}};
         // Source headings only when the NVIDIA driver is a second source.
         if (state_.value("enabled", std::set<std::string>{}).contains("gpuPower") &&
             state_.value("nvidiaOffered", true)) {
             power.emplace(power.begin(), -1, L"EC");
-            power.insert(power.end(), {{-1, L"NVIDIA Driver"}, {6, L"GPU Budget F7:"}, {7, L"CPU+GPU Budget TPP:"}});
+            power.insert(power.end(), {{-1, L"NVIDIA Driver"}, {7, L"GPU Budget F7:"}, {8, L"CPU+GPU Budget TPP:"}});
         }
         table(L"Power Delivery", power);
         if (auto cause = w(state_.value("powerOff", std::string{})); !cause.empty()) {
@@ -1621,11 +1622,14 @@ private:
             for (int zone = 0; zone < 3; ++zone) swatch(swatches_[zone], zoneBaseId + zone * 16);
         if (index == 5) swatch(coolerSwatch_, coolerRgbOnId);
         if (index == 6) {
-            SelectObject(dc, font_);
-            SetTextColor(dc, palette().text);
-            for (int i = 0; i < 8; ++i)
-                if (infoCells_[i].right > infoCells_[i].left)
+            for (int i = 0; i < 9; ++i)
+                if (infoCells_[i].right > infoCells_[i].left) {
+                    // The smoothed input power is the figure to read: bold and accented, with the EC's own readings
+                    // below it muted.
+                    SelectObject(dc, i == 2 ? bold_ : font_);
+                    SetTextColor(dc, i == 2 ? palette().accent : i == 3 || i == 4 ? palette().muted : palette().text);
                     TextOutW(dc, infoCells_[i].left, infoCells_[i].top, infoText_[i].c_str(), int(infoText_[i].size()));
+                }
         }
     }
     // Each limit next to the clock: its setting, reading, share of the setting and the clock cap of the driver
@@ -2898,7 +2902,7 @@ private:
     // System Info's readings, formatted as in the reference. A reading repaints its own cell; one that no longer
     // fits its cell relays out the page.
     void refreshInfo() {
-        std::array<std::wstring, 8> texts;
+        std::array<std::wstring, 9> texts;
         texts.fill(L"--");
         if (lastSensors_) {
             auto& s = *lastSensors_;
@@ -2907,18 +2911,23 @@ private:
             };
             texts[0] = positive(s.cpu_temp, L"°C");
             texts[1] = positive(s.gpu_temp, L"°C");
-            if (s.adapter_amps && *s.adapter_amps > 0)
-                texts[2] = decimal(*s.adapter_amps) + L" A (" + decimal(*s.adapter_amps * 19.5, 0) + L"W @ 19.5V)";
-            texts[3] = positive(s.adapter_raw, L"");
-            if (s.tgp_live) texts[4] = std::to_wstring(*s.tgp_live) + L" W";
-            texts[5] = positive(s.db_live, L" W", L"off");
+            if (s.on_ac) { // A System Info sample, which reads all of these together.
+                // On battery the EC fills 0x448, 0x449 and 0x700 from the battery.
+                std::wstring source = *s.on_ac ? L"" : L" (battery)";
+                if (s.smoothed_watts) texts[2] = decimal(*s.smoothed_watts, 0) + L" W" + source;
+                texts[3] = std::to_wstring(*s.input_watts) + L" W" + source;
+                texts[4] = decimal(*s.adapter_amps) + L" A x " + decimal(*s.input_volts) + L" V = " +
+                           decimal(*s.adapter_amps * *s.input_volts, 0) + L" W" + source;
+            }
+            if (s.tgp_live) texts[5] = std::to_wstring(*s.tgp_live) + L" W";
+            texts[6] = positive(s.db_live, L" W", L"off");
         }
         if (const Json& b = gpuBudget_; b.is_object()) {
             if (b.contains("reason"))
-                texts[6] = texts[7] = L"-- (" + w(b.at("reason").get<std::string>()) + L")";
+                texts[7] = texts[8] = L"-- (" + w(b.at("reason").get<std::string>()) + L")";
             else {
-                texts[6] = std::to_wstring(b.at("laptopWatts").get<int>()) + L" W";
-                texts[7] = std::to_wstring(b.at("platformWatts").get<int>()) + L" W";
+                texts[7] = std::to_wstring(b.at("laptopWatts").get<int>()) + L" W";
+                texts[8] = std::to_wstring(b.at("platformWatts").get<int>()) + L" W";
             }
         }
         if (texts == infoText_) return;
@@ -2927,7 +2936,7 @@ private:
         auto dc = GetDC(window);
         auto previous = SelectObject(dc, font_);
         bool fits = true;
-        for (int i = 0; i < 8; ++i)
+        for (int i = 0; i < 9; ++i)
             if (infoCells_[i].right > infoCells_[i].left &&
                 infoWidth(dc, i) != infoCells_[i].right - infoCells_[i].left)
                 fits = false;
@@ -2936,14 +2945,14 @@ private:
         if (!fits)
             layoutPage(pages_[6]);
         else
-            for (int i = 0; i < 8; ++i)
+            for (int i = 0; i < 9; ++i)
                 if (texts[i] != infoText_[i]) InvalidateRect(window, &infoCells_[i], FALSE);
     }
     // A reading's cell fits the reading and its widest usual value, so most changes only repaint the cell.
     int infoWidth(HDC dc, int i) const {
-        constexpr const wchar_t* usual[]{L"000°C", L"000°C", L"00.0 A (000W @ 19.5V)", L"0000", L"000 W", L"000 W",
-                                         L"000 W", L"000 W"};
-        SelectObject(dc, font_);
+        constexpr const wchar_t* usual[]{
+            L"000°C", L"000°C", L"000 W", L"000 W", L"00.0 A x 00.0 V = 000 W", L"000 W", L"000 W", L"000 W", L"000 W"};
+        SelectObject(dc, i == 2 ? bold_ : font_);
         SIZE a{}, b{};
         GetTextExtentPoint32W(dc, usual[i], int(wcslen(usual[i])), &a);
         GetTextExtentPoint32W(dc, infoText_[i].c_str(), int(infoText_[i].size()), &b);
@@ -3654,8 +3663,8 @@ private:
     RECT liveTable_{0, -1, 0, -1}, coolerSwatch_{};
     std::array<RECT, 3> swatches_{};
     std::wstring coolerStatus_ = L"Disconnected", coolerFirmware_;
-    std::array<RECT, 8> infoCells_{};
-    std::array<std::wstring, 8> infoText_;
+    std::array<RECT, 9> infoCells_{};
+    std::array<std::wstring, 9> infoText_;
     int batteryLines_ = 10;     // Lines of battery telemetry.
     bool chargeOffered_ = true; // The Battery page has its Charge Limit section.
     std::wstring modeNote_;     // What the battery modes do on this firmware; empty where that is not known.

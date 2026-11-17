@@ -17,9 +17,30 @@ std::string describe(const FanSnapshot&, const std::string& title); // Hex dump 
 struct Sensors {
     int cpu_rpm = 0, gpu_rpm = 0;
     std::optional<int> cpu_percent, gpu_percent, cpu_limit, battery_soc, battery_mode, battery_raw, cpu_temp, gpu_temp,
-        adapter_raw, db_live, tgp_live; // adapter_raw: 0x60C-0x60D, a raw adapter-current ADC reading, not watts.
-    std::optional<double> adapter_amps;
-    std::optional<bool> boost, curve_enabled;
+        db_live, tgp_live, input_watts;
+    // Input power as the EC computes it every 100 ms (register_reference.md 11.9.4): adapter_amps 0x449 / 10 (the EC
+    // divides the adapter-current ADC at 0x60C-0x60D, which only the diagnostic report reads, by a board-dependent
+    // counts per amp and keeps the low byte, so it wraps above 25.5 A), input_volts 0x448 / 10 (on AC a nominal
+    // adapter voltage the firmware picks, not measured), input_watts the EC's averaged 0x449 * 0x448 / 100
+    // (0x700-0x701). On battery the EC fills 0x448, 0x449 and 0x700 from the battery. smoothed_watts is
+    // 0x449 * 0x448 through InputPowerFilter, sampled at each EC update while System Info is shown.
+    std::optional<double> adapter_amps, input_volts, smoothed_watts;
+    std::optional<bool> boost, curve_enabled, on_ac;
+};
+// A One Euro filter (Casiez, Roussel and Vogel, CHI 2012) for input power: a low-pass filter whose cutoff rises with
+// the rate of change, so it is steady under a steady load and follows a load step within about a second. The
+// constants come from 50 Hz captures on IDY_7Y (re/evidence/input-power-probe), scored on error against the true
+// 1 s average plus the change between values shown a second apart; beta assumes swings of a few hundred watts.
+class InputPowerFilter {
+public:
+    double add(double watts, double seconds); // seconds since the previous value
+    std::optional<double> value() const { return x_; }
+    void reset() { x_.reset(); }
+
+private:
+    static constexpr double min_cutoff = 0.02, beta = 0.0003, derivative_cutoff = 0.5; // Hz, 1/W, Hz
+    std::optional<double> x_;
+    double dx_ = 0;
 };
 // Each EC byte costs about 1 ms of kernel time, so a sample reads only what is shown:
 // RPM for the counters in the tray, the monitor bar when visible, temperatures for the

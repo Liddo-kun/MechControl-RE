@@ -247,6 +247,12 @@ public:
     int ui_page() const { return ui_page_; }
     // The Power tab's live table.
     bool gpu_presentation() const { return visible_ && ui_page_ == 0 && features_.gpu_power(); }
+    // System Info's smoothed input power. Only while System Info is shown, the worker calls input_power_poll on a
+    // timer of its own: it reads 0x449 and 0x701, feeds the filter once per EC update (every 100 ms) and returns the
+    // milliseconds until the next call, which keeps the reads just after the EC's updates.
+    bool input_power_wanted() const { return visible_ && ui_page_ == 6; }
+    unsigned input_power_poll(ULONGLONG now);
+    void input_power_stop();
 
 private:
     uint8_t read(const char*);
@@ -386,5 +392,9 @@ private:
     uint8_t latch_mask_ = 255;
     std::string linked_error_;
     config::Json linked_status_; // The latest linked duty, temperatures and safety ramps, for the Fan Control tab.
+    InputPowerFilter input_power_;
+    std::optional<std::array<uint8_t, 2>> input_power_bytes_; // 0x449 and 0x701 at the last EC update.
+    std::optional<double> input_volts_;                         // 0x448 from the latest System Info sample.
+    ULONGLONG input_power_at_ = 0;
 };
 }

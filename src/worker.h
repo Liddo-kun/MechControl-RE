@@ -83,6 +83,7 @@ private:
     Handle wake_;
     Handle stopping_;
     Handle timer_;
+    Handle input_power_timer_; // One-shot, armed only while System Info is shown.
     std::jthread thread_;
 };
 }

@@ -273,12 +273,12 @@ void Application::checkPages(const std::filesystem::path& directory, const std::
     fixture->asleep = true;
     int budgets = fixture->budgets;
     page(6);
-    wait([&] { return infoText_[0] == L"40°C" && infoText_[6] == L"-- (GPU asleep, not read)"; });
+    wait([&] { return infoText_[0] == L"40°C" && infoText_[7] == L"-- (GPU asleep, not read)"; });
     check(fixture->budgets == budgets,
           "System Info reads the EC sensors but not the NVIDIA budget while the GPU sleeps");
     fixture->asleep = false;
     read();
-    wait([&] { return !busy_ && infoText_[6] == L"250 W" && infoText_[7] == L"350 W"; });
+    wait([&] { return !busy_ && infoText_[7] == L"250 W" && infoText_[8] == L"350 W"; });
     capture(L"system-info");
     for (UINT dpi : {96u, 144u, 192u}) {
         RECT r{80, 40, 80 + MulDiv(940, dpi, 96), 40 + MulDiv(760, dpi, 96)};

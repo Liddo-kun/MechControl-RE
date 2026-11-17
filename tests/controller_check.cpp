@@ -1527,16 +1527,33 @@ void monitor(const std::filesystem::path& root) {
     c.tick();
     int count = 0;
     for (auto [a, n] : s->reads) count += n;
-    check(count == 13 && s->reads[0x44F] == 1 && s->reads[0x43E] == 1 && !s->reads.contains(0x60C),
+    check(count == 13 && s->reads[0x44F] == 1 && s->reads[0x43E] == 1 && !s->reads.contains(0x449),
           "visible Power tab tick reads the monitor bar, not System Info sensors");
     c.execute(UiPage{6});
     s->reads.clear();
     c.tick();
     count = 0;
     for (auto [a, n] : s->reads) count += n;
-    check(count == 18 && s->reads[0x44F] == 1 && s->reads[0x43E] == 1,
-          "System Info tick reuses shared samples for eighteen EC bytes");
+    check(count == 21 && s->reads[0x44F] == 1 && s->reads[0x43E] == 1,
+          "System Info tick reuses shared samples for twenty-one EC bytes");
+    check(c.input_power_wanted(), "System Info wants the input power poll");
+    s->bytes[0x448] = 200; // 20.0 V
+    s->bytes[0x449] = 50;  // 5.0 A
+    s->bytes[0x701] = 1;
+    c.tick();
+    auto t0 = GetTickCount64();
+    s->reads.clear();
+    check(c.input_power_poll(t0) == 90 && s->reads.size() == 2 && s->reads[0x449] == 1 && s->reads[0x701] == 1,
+          "input power poll reads two bytes, then waits for the next EC update");
+    check(c.input_power_poll(t0 + 90) == 20, "an EC that has not updated yet is polled again shortly");
+    check(c.input_power_poll(t0 + 130) == 90, "130 ms without a change counts as an update at a steady load");
+    s->bytes[0x449] = 100;
+    check(c.input_power_poll(t0 + 150) == 90, "a changed byte is the next EC update");
+    auto smoothed = c.tick()->smoothed_watts;
+    check(smoothed && *smoothed > 100 && *smoothed < 200,
+          "System Info sample carries the smoothed input power, between the old and new loads");
     c.execute(UiPage{0});
+    check(!c.input_power_wanted(), "other tabs do not poll input power");
     s->fail_read = 0x464;
     s->bytes[0x44F] = 110;
     for (int i = 0; i < 5; ++i) c.tick();

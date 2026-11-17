@@ -1205,6 +1205,10 @@ std::optional<Sensors> Controller::telemetry(ULONGLONG now, const Sensors& share
                       : ui_page_ == 1 ? Detail::temperatures
                                       : Detail::monitor;
         auto s = read_sensors(session_.transport(), session_.profile, detail, shared);
+        if (detail == Detail::full) {
+            input_volts_ = s.input_volts;
+            s.smoothed_watts = input_power_.value();
+        }
         telemetry_failures_ = 0;
         monitor_stopped_ = false;
         return s;
@@ -1218,6 +1222,23 @@ std::optional<Sensors> Controller::telemetry(ULONGLONG now, const Sensors& share
         }
         return {};
     }
+}
+unsigned Controller::input_power_poll(ULONGLONG now) {
+    auto& ec = session_.transport();
+    std::array bytes{ec.read(0x449), ec.read(0x701)};
+    auto elapsed = now - input_power_at_;
+    // A changed byte is a new EC update. At a steady load both can repeat, so 130 ms without a change counts as one.
+    if (input_power_bytes_ && bytes == *input_power_bytes_ && elapsed < 130) return 20;
+    if (input_volts_)
+        input_power_.add(bytes[0] / 10.0 * *input_volts_,
+                         input_power_bytes_ ? std::max(1.0, std::round(elapsed / 100.0)) * 0.1 : 0.1);
+    input_power_bytes_ = bytes;
+    input_power_at_ = now;
+    return 90;
+}
+void Controller::input_power_stop() {
+    input_power_.reset();
+    input_power_bytes_.reset();
 }
 std::optional<Sensors> Controller::tick(ULONGLONG now) {
     watch_bypass();
