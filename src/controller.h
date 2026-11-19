@@ -2,7 +2,7 @@
 #include "ec_session.h"
 #include "thermal.h"
 #include "protocol.h"
-#include "nvidia.h"
+#include "vf_curve.h"
 #include "peripherals.h"
 #include "ble.h"
 #include <algorithm>
@@ -140,12 +140,20 @@ struct CoolerFlag {
 struct CliCommand {
     std::vector<std::string> arguments;
 };
+// The V/F Curve tab: reads the driver's equations and curve, and on the tab's first use opens the tuner (vf_tuner.h).
+struct VfRead {
+    bool open = false;
+};
+// Writes a V/F curve (vf::apply), or with none the stock equations and zero offsets (vf::restore), then reads as VfRead.
+struct VfApply {
+    std::optional<nv::vf::Curve> curve;
+};
 using ControlCommand =
     std::variant<CpuApply, GpuApply, FanApply, FanBoost, BatteryApply, SwitchApply, ProtectionApply, SlotLoad, SlotSave,
                  SlotRename, SlotClear, DefaultsApply, ThermalReset, ThermalTest, Visibility, Resume, AcEvent,
                  GpuUnlock, DlppcApply, CliCommand, LightingApply, LightingIdle, DimmingApply, PeripheralRead,
                  CoolerRequest, BatteryPage, UiRead, UiPage, UiPreflight, FanMaster, FanEdit, FanRead, PowerTransition,
-                 EcBypassApply, CoolerFlag, ChargeLimitApply, GpuKeepAwakeApply, VoltageOffsetApply>;
+                 EcBypassApply, CoolerFlag, ChargeLimitApply, GpuKeepAwakeApply, VoltageOffsetApply, VfRead, VfApply>;
 // How the worker treats each command. Every command needs an entry: command_traits() fails to compile without one.
 struct CommandTraits {
     bool notification = false; // Lifecycle event, run even during the wait for a blocking device operation.
@@ -201,9 +209,23 @@ inline CommandTraits traits(const BatteryPage&) { return {.notification = true, 
 inline CommandTraits traits(const Resume&) { return {.notification = true, .posts = false}; }
 inline CommandTraits traits(const PowerTransition&) { return {.notification = true, .posts = false}; }
 inline CommandTraits traits(const AcEvent&) { return {.notification = true}; }
+inline CommandTraits traits(const VfRead&) { return {}; }
+inline CommandTraits traits(const VfApply&) { return {}; }
 inline CommandTraits command_traits(const ControlCommand& command) {
     return std::visit([](const auto& c) { return traits(c); }, command);
 }
+namespace nv::vf {
+class Tuner;
+}
+// What the V/F Curve tab reads: the tuner when the read opened it, the GPU the driver's equations belong to, its live
+// equation records and curve points, and how many equations and offsets a VfApply wrote.
+struct VfReading {
+    std::shared_ptr<const nv::vf::Tuner> tuner;
+    nv::vf::Gpu gpu;
+    nv::Bytes records;
+    nv::vf::Points points;
+    int equations = 0, offsets = 0;
+};
 // Status of the current curve/master/link request, not boost/switch, physical cooling or saved state.
 enum class FanApplication { unapplied, applied, partial };
 struct ControlResult {
@@ -215,6 +237,7 @@ struct ControlResult {
     bool fan_review_required = false;
     bool linked = false;
     std::optional<config::Json> peripherals;
+    std::shared_ptr<const VfReading> vf;
 };
 config::Curve active_curve(const config::Curve&, int entries);
 config::Curve saved_curve(const config::Curve&, const config::FanTable&);
@@ -300,7 +323,7 @@ private:
         run(const CoolerRequest&), run(const BatteryPage&), run(const UiRead&), run(const UiPage&),
         run(const UiPreflight&), run(const FanMaster&), run(const FanEdit&), run(const FanRead&),
         run(const PowerTransition&), run(const EcBypassApply&), run(const CoolerFlag&), run(const ChargeLimitApply&),
-        run(const GpuKeepAwakeApply&), run(const VoltageOffsetApply&);
+        run(const GpuKeepAwakeApply&), run(const VoltageOffsetApply&), run(const VfRead&), run(const VfApply&);
     cli::Reply cli(const std::vector<std::string>&);
     config::Json status();
     config::Json cpu_status(), gpu_status(bool presentation = false), fans_status(), gpu_telemetry(), gpu_budget();
@@ -333,6 +356,8 @@ private:
     nv::TempTarget& read_temp_target();
     void apply_temp_target(int celsius);
     config::Json temp_target_status();
+    nv::Api& vf_api();
+    std::shared_ptr<VfReading> vf_read(nv::Api&);
     std::unique_ptr<nv::Power> nvidia_;
     // DLPPC and the temperature target need only NVAPI; used while nvidia_ is unavailable (an older GPU or
     // unsupported BIOS limits).
@@ -341,6 +366,8 @@ private:
          on_ac_ = false;
     // The temperature target works on any NVIDIA GPU whose driver has a client thermal policy.
     bool temp_target_available_ = false;
+    bool vf_available_ = false;                 // Any NVIDIA GPU; the driver decides on first use.
+    std::filesystem::path vf_directory_;        // Stock V/F records; empty: vf::store_directory().
     std::optional<nv::TempTarget> temp_target_; // As last read or written.
     std::optional<int> temp_target_request_;    // What this run applied; the delayed GPU check restores it.
     bool nvidia_offered_ = false; // Fixed at startup; nvidia_available_ also goes false when the driver refuses.
@@ -394,7 +421,7 @@ private:
     config::Json linked_status_; // The latest linked duty, temperatures and safety ramps, for the Fan Control tab.
     InputPowerFilter input_power_;
     std::optional<std::array<uint8_t, 2>> input_power_bytes_; // 0x449 and 0x701 at the last EC update.
-    std::optional<double> input_volts_;                         // 0x448 from the latest System Info sample.
+    std::optional<double> input_volts_;                       // 0x448 from the latest System Info sample.
     ULONGLONG input_power_at_ = 0;
 };
 }

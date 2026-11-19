@@ -115,6 +115,10 @@ bool Power::restore_currents() {
     expected_ = api_->set_currents(nv, ms, input);
     return true;
 }
+Api& Power::api() {
+    if (!api_) throw std::runtime_error("No NVIDIA connection for the V/F curve");
+    return *api_;
+}
 Currents Power::currents() {
     auto c = api_->currents();
     auto convert = [](Rail r, Field f) {

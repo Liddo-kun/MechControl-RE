@@ -90,7 +90,8 @@ Controller::Controller(EcSession& session, std::filesystem::path directory,
                        std::function<void(std::function<void()>)> run_blocking, bool nvidia_hardware,
                        std::unique_ptr<nv::Power> driver, bool peripheral_hardware,
                        std::function<void(Json)> cooler_delivery, Lighting::Send lighting_send)
-    : session_(session), features_(session.validation), limits_(control_limits(session.profile)),
+    : vf_directory_(nvidia_hardware ? std::filesystem::path() : directory / L"VfCurve"), session_(session),
+      features_(session.validation), limits_(control_limits(session.profile)),
       store_(std::move(directory), gpu_recovery_unavailable(session.profile, session.hardware.gpu()).empty(),
              diagnostic),
       diagnostic_(std::move(diagnostic)), wait_(std::move(wait)), run_blocking_(std::move(run_blocking)),
@@ -103,7 +104,7 @@ Controller::Controller(EcSession& session, std::filesystem::path directory,
     if (nvidia_hardware && features_.gpu_power()) {
         auto device = nv::Store::device();
         nvidia_available_ = dlppc_available_ = device && nv::supported_generation(*device);
-        temp_target_available_ = device.has_value(); // Any generation; the driver decides on first use.
+        temp_target_available_ = vf_available_ = device.has_value(); // Any generation; the driver decides.
         char id[8]{};
         if (device) sprintf_s(id, "%04X", *device);
         if (!nvidia_available_)
@@ -112,7 +113,7 @@ Controller::Controller(EcSession& session, std::filesystem::path directory,
     }
     nvidia_ = std::move(driver);
     if (nvidia_) {
-        nvidia_available_ = dlppc_available_ = temp_target_available_ = true;
+        nvidia_available_ = dlppc_available_ = temp_target_available_ = vf_available_ = true;
         gpu_unlocked_ = nvidia_->enabled;
         nvidia_min_watts_ = nvidia_->minimum_watts();
     }

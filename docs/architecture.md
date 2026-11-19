@@ -137,10 +137,18 @@ Status reads the target only while it is unknown, and never from a sleeping GPU.
 stock and one client offset per graphics point, with every check before the first write. The
 stock records are kept per GPU, VBIOS, driver and equation list at
 `%ProgramData%/MechControl/VfCurve`. A GPU restart puts the driver's equations back to stock and
-every offset to 0 (measured), so a curve must be applied again after one. The tuner behind the
-V/F curve tab (`vf_model.cpp`, `vf_tuner.*`, library `vf_tuner`) is Jon's VFCURVE tool in C++:
-it finds the clock equation, its lines, corrections and slow-curve switch on the running chip
-and turns a tune into such a curve.
+every offset to 0 (measured), so a curve must be applied again after one. The tuner
+(`vf_model.cpp`, `vf_tuner.*`, also in `ec`) is Jon's VFCURVE tool in C++: it finds the clock
+equation, its lines, corrections and slow-curve switch on the running chip and turns a tune into
+such a curve. The worker runs it through two commands: `VfRead` reads the driver's equations and
+curve (and with `open` builds the tuner), and `VfApply` writes a curve, or stock without one,
+then reads back. The V/F Curve tab is offered on any NVIDIA GPU and is created on its first
+selection (`vf_tab.*`, with `vf_chart.*` drawing the curve in GDI+ and `vf_numbers.*` the tables),
+so nothing of it runs before then. It reads the driver only when opened, on Read and after a write,
+and the timer that works out its slider bars stops while the window is hidden. Its tune lives only in the tab, with Import and Export of the
+VFCURVE `vfe-tune.json` file. After a write the driver serves a slower fallback curve for a few
+seconds, so the tab re-reads every 500 ms from a UI timer until the curve settles, then compares
+it with the tune.
 `gpu_keepawake.*` is the opt-in GPU keep-awake (`gpuKeepAwake` in `settings.json`; the controller
 only stores it). It runs on the UI thread from the window's display, suspend, display-change and
 timer messages, because it must not share the worker's waits. While the screen is off, the PC is

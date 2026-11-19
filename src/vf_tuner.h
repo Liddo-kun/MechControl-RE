@@ -162,7 +162,7 @@ constexpr double reference_celsius = 59; // the temperature sliders change nothi
 // A curve as the chart shows it: per point the clock, the value before rounding, what set it (a main formula, or
 // floor, ceiling or held) and each main formula's own line where it was evaluated.
 struct Calc {
-    static constexpr int floor = -1, ceiling = -2, held_flat = -3;
+    static constexpr int floor = -1, ceiling = -2, held_flat = -3, none = -4; // none: no main formula
     std::vector<double> clock, raw;
     std::vector<int> win;
     std::map<int, std::vector<std::optional<double>>> lines;
@@ -179,6 +179,15 @@ struct Fit {
     };
     std::vector<Diff> diffs;
     std::vector<double> computed;
+};
+
+// After an equation write the driver shows a slower fallback curve for 2-4 s. A read is settled from 5 s after the write
+// when it is not that curve and its stock clocks equal the read's before it; at 20 s any read is taken.
+struct Settle {
+    std::vector<double> fallback; // the fallback curve; empty where it equals the curve
+    double step = 7.5;
+    std::optional<std::vector<double>> last;
+    bool done(const Points&, double waited);
 };
 
 class Tuner {
@@ -208,6 +217,14 @@ public:
                               const std::map<int, double>& hotter = {}) const;
     Calc calc(const Equations&, double celsius, const std::map<int, double>& hotter = {}) const;
     Equations edited(const Fields&) const; // stock with these values
+    // The page's parts of fields(): what the sliders add by "equation.field"; the stock value (none for a limit at or
+    // beyond 3e38, a compare's crit while it uses an equation and a coefficient the formula lacks); whether the sliders
+    // move a field; and the value a field has with a tune (vfe-ui.html value()).
+    std::map<std::string, double> additions(const Tune&) const;
+    std::optional<double> stock_value(int equation, const std::string& field) const;
+    bool slider(int equation, const std::string& field) const;
+    std::optional<double> value(const Tune&, const std::map<std::string, double>& additions, int equation,
+                                const std::string& field) const;
     // The page's fields(): everything the tune changes from stock, plus the switch, checked and rounded to the
     // driver's 32-bit values as vfe-ui.py clean() does. Throws for a value that cannot be written.
     Fields fields(const Tune&) const;
@@ -216,8 +233,8 @@ public:
     // Fields of live control records that differ from stock; "other" marks a difference no field describes.
     Fields live_fields(const Bytes& live) const;
     Fit fit(const Equations&, const std::vector<double>& driver_stock) const;
-    // After an equation write the driver shows a slower fallback curve for 2-4 s: reads until it is gone and two reads
-    // agree (at most 20 s). Returns the last read.
+    Settle settling(const Equations&) const;
+    // Reads every 0.5 s until a read is settled (only once if nothing was written). Returns the last read.
     Points settle(const Equations&, bool wrote, const std::function<Points()>& read) const;
     Tune tune(const config::Json& state) const; // older saves are converted to today's cards
     config::Json state(const Tune&) const;

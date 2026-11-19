@@ -14,8 +14,8 @@ void Application::checkPages(const std::filesystem::path& directory, const std::
             }
         }
     };
-    auto wait = [&](const auto& condition) {
-        auto deadline = GetTickCount64() + 6000;
+    auto wait = [&](const auto& condition, ULONGLONG ms = 6000) {
+        auto deadline = GetTickCount64() + ms;
         while (!condition() && GetTickCount64() < deadline) {
             pump();
             Sleep(10);
@@ -28,10 +28,10 @@ void Application::checkPages(const std::filesystem::path& directory, const std::
         selectPage();
         pump();
     };
-    auto capture = [&](const std::wstring& name) {
+    auto capture = [&](const std::wstring& name, int cx = 940, int cy = 760) {
         auto foregroundThread = GetWindowThreadProcessId(GetForegroundWindow(), nullptr), thread = GetCurrentThreadId();
         bool attached = foregroundThread != thread && AttachThreadInput(thread, foregroundThread, TRUE);
-        SetWindowPos(window_, HWND_TOPMOST, 80, 40, scale(940), scale(760), SWP_SHOWWINDOW);
+        SetWindowPos(window_, HWND_TOPMOST, 80, 40, scale(cx), scale(cy), SWP_SHOWWINDOW);
         SetForegroundWindow(window_);
         BringWindowToTop(window_);
         if (attached) AttachThreadInput(thread, foregroundThread, FALSE);
@@ -280,10 +280,108 @@ void Application::checkPages(const std::filesystem::path& directory, const std::
     read();
     wait([&] { return !busy_ && infoText_[7] == L"250 W" && infoText_[8] == L"350 W"; });
     capture(L"system-info");
+    // The V/F Curve tab on the fake driver: made when first shown and opened on the worker; then a slider and a point
+    // offset, Apply with the readback once the driver settles, every number, and Restore.
+    check(vfOffered_ && TabCtrl_GetItemCount(tabs_) == vfPage + 1 && !vf_,
+          "an NVIDIA GPU offers the V/F Curve tab, which is made only when shown");
+    page(vfPage);
+    check(vf_ != nullptr, "showing the V/F Curve tab makes it");
+    auto vfText = [&] { return vf_->text(); };
+    wait([&] {
+        return vfText().starts_with(
+            L"Unapplied (currently stock)\nGPU now: stock equations.\nReadback matches this tab");
+    });
+    auto vfRoot = vf_->window(), vfPanel = FindWindowExW(vfRoot, nullptr, L"MechControl.Native.VfPanel", nullptr),
+         vfChart = FindWindowExW(vfRoot, nullptr, L"MechControl.Native.VfChart", nullptr);
+    auto chartShape = [&] {
+        RECT r{};
+        GetClientRect(vfChart, &r);
+        return r.bottom > 0 && std::abs(r.right - 2.5 * r.bottom) <= 3;
+    };
+    check(vfPanel && vfChart && chartShape(), "the V/F chart is 2.5 times as wide as high");
+    capture(L"vf-curve");
+    check(SendMessageW(FindWindowExW(vfPanel, nullptr, WC_COMBOBOXW, nullptr), CB_GETCOUNT, 0, 0) == 2,
+          "the difference from a reference curve is not offered before one is loaded");
+    // Answers the tab's confirmation with Yes from inside its message box.
+    auto yes = [] {
+        SetTimer(nullptr, 0, 100, [](HWND, UINT, UINT_PTR id, DWORD) {
+            if (auto box = FindWindowW(L"#32770", L"MechControl — V/F Curve")) {
+                KillTimer(nullptr, id);
+                PostMessageW(box, WM_COMMAND, IDYES, 0);
+            }
+        });
+    };
+    auto vfButton = [&](const wchar_t* title) { return FindWindowExW(vfRoot, nullptr, L"Button", title); };
+    auto track = FindWindowExW(vfPanel, nullptr, TRACKBAR_CLASSW, L"Native VF Curve");
+    SendMessageW(track, TBM_SETPOS, TRUE, 12);
+    SendMessageW(vfPanel, WM_HSCROLL, MAKEWPARAM(TB_THUMBPOSITION, 12), reinterpret_cast<LPARAM>(track));
+    RECT plot{};
+    GetClientRect(vfChart, &plot);
+    auto middle = MAKELPARAM(plot.right / 2, plot.bottom / 2);
+    SendMessageW(vfChart, WM_LBUTTONDOWN, MK_LBUTTON, middle);
+    SendMessageW(vfChart, WM_LBUTTONUP, 0, middle);
+    SendMessageW(vfChart, WM_KEYDOWN, VK_UP, 0);
+    SendMessageW(vfChart, WM_MOUSEMOVE, 0, MAKELPARAM(plot.right / 2 + scale(30), plot.bottom / 2));
+    check(vfText().starts_with(L"Unapplied (currently stock)"), "a moved slider and point offset are not applied yet");
+    capture(L"vf-curve-edited");
+    POINT center{plot.right / 2, plot.bottom / 2};
+    ClientToScreen(vfChart, &center);
+    SendMessageW(vfChart, WM_MOUSEWHEEL, MAKEWPARAM(0, WHEEL_DELTA), MAKELPARAM(center.x, center.y));
+    capture(L"vf-curve-zoomed");
+    SendMessageW(vfChart, WM_LBUTTONDBLCLK, MK_LBUTTON, middle);
+    yes();
+    SendMessageW(vfRoot, WM_COMMAND, MAKEWPARAM(0, BN_CLICKED), reinterpret_cast<LPARAM>(vfButton(L"Apply to GPU")));
+    wait([&] { return vfText().starts_with(L"Applied to the GPU\nApplied ("); }, 20000);
+    check(vfText().find(L"1 Afterburner Style OC offset).\nReadback matches this tab") != std::wstring::npos,
+          "after Apply and the driver's settling, the readback matches the calculation and the offset");
+    auto numbersLink = FindWindowExW(vfPanel, FindWindowExW(vfPanel, nullptr, WC_LINK, nullptr), WC_LINK, nullptr);
+    NMHDR click{numbersLink, 0, UINT(NM_CLICK)};
+    SendMessageW(vfPanel, WM_NOTIFY, 0, reinterpret_cast<LPARAM>(&click));
+    auto numbers = FindWindowExW(vfPanel, nullptr, L"MechControl.Native.VfNumbers", nullptr);
+    auto numbersTop = [&] {
+        RECT r{};
+        GetWindowRect(numbers, &r);
+        MapWindowPoints(nullptr, vfPanel, reinterpret_cast<POINT*>(&r), 2);
+        return r.top;
+    };
+    for (int i = 0; i < 400 && numbersTop() > scale(60); ++i) SendMessageW(vfPanel, WM_VSCROLL, SB_LINEDOWN, 0);
+    check(IsWindowVisible(numbers) && numbersTop() <= scale(60), "every equation number is shown on request");
+    capture(L"vf-curve-numbers");
+    SendMessageW(vfPanel, WM_VSCROLL, SB_TOP, 0);
+    for (auto [name, width, height] :
+         {std::tuple(L"vf-curve-small", 760, 480), {L"vf-curve-wide", 1600, 720}, {L"vf-curve-large", 1400, 1050}}) {
+        capture(name, width, height);
+        check(chartShape(), "the V/F chart keeps its shape at every window size");
+    }
+    yes();
+    SendMessageW(vfRoot, WM_COMMAND, MAKEWPARAM(0, BN_CLICKED), reinterpret_cast<LPARAM>(vfButton(L"Restore stock")));
+    wait([&] { return vfText().starts_with(L"Unapplied (currently stock)\nStock restored ("); }, 20000);
+    check(vfText().find(L"Readback matches this tab") != std::wstring::npos, "Restore puts the stock curve back");
+    // Closed to the tray just after a change, while the slider bars are still being worked out: once the bars' timer
+    // has seen the hidden window, nothing of the tab runs.
+    SendMessageW(track, TBM_SETPOS, TRUE, 4);
+    SendMessageW(vfPanel, WM_HSCROLL, MAKEWPARAM(TB_THUMBPOSITION, 4), reinterpret_cast<LPARAM>(track));
+    SendMessageW(window_, WM_CLOSE, 0, 0);
+    auto tabTimers = [&](ULONGLONG ms) {
+        int n = 0;
+        for (auto end = GetTickCount64() + ms; GetTickCount64() < end; Sleep(10))
+            for (MSG m{}; PeekMessageW(&m, nullptr, 0, 0, PM_REMOVE);) {
+                if (m.message == WM_TIMER && (m.hwnd == vfRoot || IsChild(vfRoot, m.hwnd))) ++n;
+                TranslateMessage(&m);
+                DispatchMessageW(&m);
+            }
+        return n;
+    };
+    check(tabTimers(1000) > 0 && fixture->vf_calls > 0,
+          "the hidden tab's bars timer fires and driver calls are counted");
+    int calls = fixture->vf_calls;
+    check(!IsWindowVisible(window_) && tabTimers(4000) == 0 && fixture->vf_calls == calls,
+          "closed to the tray, the opened V/F tab runs no timer and sends nothing to the driver");
+    ShowWindow(window_, SW_SHOW);
     for (UINT dpi : {96u, 144u, 192u}) {
         RECT r{80, 40, 80 + MulDiv(940, dpi, 96), 40 + MulDiv(760, dpi, 96)};
         SendMessageW(window_, WM_DPICHANGED, MAKELONG(dpi, dpi), reinterpret_cast<LPARAM>(&r));
-        for (int p = 0; p < 7; ++p) {
+        for (int p = 0; p <= vfPage; ++p) {
             page(p);
             wait([&] { return !busy_; });
             capture(L"page-" + std::to_wstring(p) + L"-" + std::to_wstring(dpi));
@@ -293,7 +391,7 @@ void Application::checkPages(const std::filesystem::path& directory, const std::
     for (UINT dpi : {96u, 144u}) {
         RECT r{80, 40, 80 + MulDiv(940, dpi, 96), 40 + MulDiv(760, dpi, 96)};
         SendMessageW(window_, WM_DPICHANGED, MAKELONG(dpi, dpi), reinterpret_cast<LPARAM>(&r));
-        for (int p = 0; p < 7; ++p) {
+        for (int p = 0; p <= vfPage; ++p) {
             page(p);
             wait([&] { return !busy_; });
             capture(L"dark-" + std::to_wstring(p) + L"-" + std::to_wstring(dpi));

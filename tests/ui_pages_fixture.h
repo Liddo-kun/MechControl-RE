@@ -1,6 +1,7 @@
 #pragma once
 #include <atomic>
 #include <fstream>
+#include "vf_fixture.h"
 
 // These owners exist only in ui-pages-check. The production pages, commands and
 // serialized controller are unchanged; EC/NVIDIA failures are explicitly injected.
@@ -8,6 +9,7 @@ struct UiPageState {
     std::map<int, uint8_t> bytes;
     std::atomic<bool> fail_gpu = false, asleep = false;
     std::atomic<int> budgets = 0;
+    std::atomic<int> vf_calls = 0; // V/F curve packets sent to the driver
     UiPageState() {
         for (auto [a, v] : std::initializer_list<std::pair<int, int>>{
                  {0x740, 26},  {0x741, 1},    {0x727, 128}, {0x7D2, 1},  {0x783, 100}, {0x784, 150},  {0x785, 100},
@@ -55,9 +57,21 @@ public:
 class UiPageGpu final : public mech::nv::Power {
     std::shared_ptr<UiPageState> state_;
     int requested_ = 95, target_ = 83;
+    vf_fixture::Driver driver_; // the V/F curve packets
+    mech::nv::Api api_{[this](uint32_t id, mech::nv::Bytes& b) {
+        ++state_->vf_calls;
+        driver_.call(id, b);
+    }};
 
 public:
-    explicit UiPageGpu(std::shared_ptr<UiPageState> s) : state_(std::move(s)) { enabled = true; }
+    explicit UiPageGpu(std::shared_ptr<UiPageState> s) : state_(std::move(s)) {
+        enabled = true;
+        driver_.follow = true;
+        api_.identity.device = 0x2c58;
+        api_.identity.bios = "98.03.5e.00.1e";
+        api_.identity.driver = "621.24";
+    }
+    mech::nv::Api& api() override { return api_; }
     int stock_watts() const override { return 175; }
     int minimum_watts() const override { return 5; }
     bool awake() const override { return !state_->asleep; }

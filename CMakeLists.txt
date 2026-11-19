@@ -26,12 +26,10 @@ target_include_directories(configuration PUBLIC src)
 target_link_libraries(configuration PUBLIC nlohmann_json::nlohmann_json PRIVATE wbemuuid ole32 oleaut32)
 add_library(ec STATIC src/ec.cpp src/ec_session.cpp src/thermal.cpp src/controller.cpp
   src/controller_status.cpp src/controller_gpu.cpp src/cli_commands.cpp src/nvidia_bios.cpp src/nvidia_api.cpp
-  src/nvidia_store.cpp src/nvidia_power.cpp src/vf_curve.cpp src/peripherals.cpp src/cooler.cpp)
+  src/nvidia_store.cpp src/nvidia_power.cpp src/vf_curve.cpp src/vf_model.cpp src/vf_tuner.cpp src/controller_vf.cpp
+  src/peripherals.cpp src/cooler.cpp)
 target_include_directories(ec PUBLIC src)
 target_link_libraries(ec PUBLIC configuration PRIVATE setupapi cfgmgr32 shell32 advapi32 hid windowsapp user32)
-# The V/F curve tuner, used only by the V/F curve tab; profiles apply curves through vf_curve in ec.
-add_library(vf_tuner STATIC src/vf_model.cpp src/vf_tuner.cpp)
-target_link_libraries(vf_tuner PUBLIC ec)
 
 get_filename_component(SDK_BIN "${CMAKE_RC_COMPILER}" DIRECTORY)
 get_filename_component(WINDOWS_KITS "[HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows Kits\\Installed Roots;KitsRoot10]" ABSOLUTE)
@@ -45,10 +43,11 @@ add_library(foundation STATIC src/log.cpp src/worker.cpp src/counters.cpp
   "${CMAKE_CURRENT_BINARY_DIR}/mechcontrol_counters.h")
 target_include_directories(foundation PUBLIC src PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 target_link_libraries(foundation PUBLIC advapi32 windowsapp ec)
-add_executable(MechControl WIN32 src/ui.cpp src/fan_chart.cpp src/theme.cpp src/gpu_keepawake.cpp resources/app.rc
+add_executable(MechControl WIN32 src/ui.cpp src/fan_chart.cpp src/theme.cpp src/gpu_keepawake.cpp src/vf_tab.cpp src/vf_chart.cpp
+  src/vf_numbers.cpp resources/app.rc
   "${CMAKE_CURRENT_BINARY_DIR}/counters.rc")
-# GDI+ draws the window's rounded shapes and fan curves, and Direct3D runs the GPU keep-awake. Delay-loading keeps
-# them out of the hidden tray app until the window is first painted or the keep-awake first runs.
+# GDI+ draws the window's rounded shapes, fan curves and V/F chart, and Direct3D runs the GPU keep-awake.
+# Delay-loading keeps them out of the hidden tray app until the window is first painted or the keep-awake first runs.
 target_link_libraries(MechControl PRIVATE foundation comctl32 shell32 gdi32 comdlg32 gdiplus d3d11 dxgi wevtapi
   cfgmgr32 delayimp uxtheme dwmapi)
 target_link_options(MechControl PRIVATE /DELAYLOAD:gdiplus.dll /DELAYLOAD:d3d11.dll /DELAYLOAD:dxgi.dll
@@ -74,7 +73,7 @@ if(BUILD_TESTING)
   target_link_libraries(nvidia-check PRIVATE ec)
   add_test(NAME nvidia COMMAND nvidia-check)
   add_executable(vf-curve-check tests/vf_curve_check.cpp)
-  target_link_libraries(vf-curve-check PRIVATE vf_tuner)
+  target_link_libraries(vf-curve-check PRIVATE ec)
   add_test(NAME vf-curve COMMAND vf-curve-check)
   add_executable(controller-check tests/controller_check.cpp)
   target_link_libraries(controller-check PRIVATE foundation)
@@ -84,7 +83,8 @@ if(BUILD_TESTING)
   target_link_libraries(ec-check PRIVATE foundation)
   add_dependencies(ec-check profiles)
   add_test(NAME ec COMMAND ec-check)
-  add_executable(ui-pages-check WIN32 src/ui.cpp src/fan_chart.cpp src/theme.cpp src/gpu_keepawake.cpp resources/app.rc "${CMAKE_CURRENT_BINARY_DIR}/counters.rc")
+  add_executable(ui-pages-check WIN32 src/ui.cpp src/fan_chart.cpp src/theme.cpp src/gpu_keepawake.cpp src/vf_tab.cpp
+    src/vf_chart.cpp src/vf_numbers.cpp resources/app.rc "${CMAKE_CURRENT_BINARY_DIR}/counters.rc")
   target_compile_definitions(ui-pages-check PRIVATE MECHCONTROL_PAGE_CHECK)
   target_link_libraries(ui-pages-check PRIVATE foundation comctl32 shell32 gdi32 comdlg32 gdiplus d3d11 dxgi wevtapi cfgmgr32 delayimp uxtheme dwmapi)
   target_link_options(ui-pages-check PRIVATE /DELAYLOAD:gdiplus.dll /DELAYLOAD:d3d11.dll /DELAYLOAD:dxgi.dll /DELAYLOAD:wevtapi.dll /MANIFEST:EMBED "/MANIFESTUAC:level='requireAdministrator' uiAccess='false'" /MANIFESTINPUT:${CMAKE_CURRENT_SOURCE_DIR}/resources/app.manifest)

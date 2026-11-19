@@ -3,6 +3,7 @@
 #include "config_text.h"
 #include "gpu_keepawake.h"
 #include "theme.h"
+#include "vf_tab.h"
 #ifdef MECHCONTROL_WITH_CLI
 #include "cli_server.h"
 #endif
@@ -37,6 +38,8 @@ constexpr wchar_t mainClass[] = L"MechControl.Native.Main";
 constexpr wchar_t panelClass[] = L"MechControl.Native.Panel";
 constexpr UINT trayMessage = WM_APP + 2, fanEditMessage = WM_APP + 4;
 constexpr int appIconId = 1; // resources/app.rc; the lowest icon ID is the one Explorer shows for the executable.
+// The tabs made at startup, Power to System Info, then the V/F Curve tab, which is offered on an NVIDIA GPU only.
+constexpr int pageCount = 7, vfPage = pageCount;
 // GUID_CONSOLE_DISPLAY_STATE and GUID_ACDC_POWER_SOURCE.
 constexpr GUID displayState{0x6FE69556, 0x704A, 0x47A0, {0x8F, 0x24, 0xC2, 0x8D, 0x93, 0x6F, 0xDA, 0x47}},
     powerSource{0x5D3E9A59, 0xE9D5, 0x4B00, {0xA6, 0xBD, 0xFF, 0x34, 0xFF, 0x51, 0x65, 0x48}};
@@ -544,7 +547,7 @@ private:
         return i == controls_.end() ? nullptr : i->second;
     }
     int index(HWND page) const {
-        for (int i = 0; i < 7; ++i)
+        for (int i = 0; i < pageCount; ++i)
             if (pages_[i].window == page) return i;
         return -1;
     }
@@ -658,7 +661,7 @@ private:
         styleTabs(tabs_);
         const wchar_t* names[]{L"Power",    L"Fan Control",   L"Thermal Failsafe", L"Battery",
                                L"Lighting", L"Liquid Cooler", L"System Info"};
-        for (int i = 0; i < 7; ++i) {
+        for (int i = 0; i < pageCount; ++i) {
             TCITEMW item{};
             item.mask = TCIF_TEXT;
             item.pszText = const_cast<wchar_t*>(names[i]);
@@ -866,6 +869,7 @@ private:
         for (int id : {cpuChartId, gpuChartId, debugCpuId, debugGpuId}) SendMessageW(get(id), chartDpiMessage, dpi_, 0);
         setThemeDpi(dpi_);
         layout(true);
+        if (vf_) vf_->style({font_, bold_, title_, dpi_});
     }
     // Windows' app mode chooses light or dark; the UI checks choose for themselves.
     void applyTheme(bool dark) {
@@ -880,6 +884,7 @@ private:
         }
         // Painted texts take their colors in the layout.
         if (font_) layout();
+        if (vf_) vf_->style({font_, bold_, title_, dpi_});
         RedrawWindow(window_, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN);
     }
     // Edit boxes and lists have the field color; other children sit on their section or the page.
@@ -1849,10 +1854,12 @@ private:
         GetClientRect(tabs_, &page);
         TabCtrl_AdjustRect(tabs_, FALSE, &page);
         MapWindowPoints(tabs_, window_, reinterpret_cast<POINT*>(&page), 2);
-        for (auto& p : pages_) {
-            place(p.window, page.left, page.top, page.right - page.left, page.bottom - page.top);
-            if (all || &p == &pages_[TabCtrl_GetCurSel(tabs_)]) layoutPage(p);
+        int selected = TabCtrl_GetCurSel(tabs_);
+        for (int i = 0; i < pageCount; ++i) {
+            place(pages_[i].window, page.left, page.top, page.right - page.left, page.bottom - page.top);
+            if (all || i == selected) layoutPage(pages_[i]);
         }
+        if (vf_) place(vf_->window(), page.left, page.top, page.right - page.left, page.bottom - page.top);
         place(progress_, 1, bar + 1, r.right - 2, ref(5));
         InvalidateRect(window_, &bar_, FALSE);
     }
@@ -2025,10 +2032,31 @@ private:
         else if (r.bottom > rc.bottom)
             scrollTo(p, p.scroll + r.bottom - rc.bottom);
     }
+    void openVf() {
+        VfHost host{
+            [this](ControlCommand command, bool busy) -> std::uint64_t {
+                if (!busy) {
+                    worker_->request(std::move(command), ++sequence_);
+                    return sequence_;
+                }
+                if (busy_) return 0;
+                request(std::move(command));
+                return busySequence_;
+            },
+            [this] { return lastSensors_ ? lastSensors_->gpu_temp : std::nullopt; },
+            [this](const std::wstring& reason) { openUnelevated(issueUrl({L"V/F curve tuner", L"", reason})); }};
+        vf_ = std::make_unique<VfTab>(instance_, window_, std::move(host));
+        SetWindowPos(vf_->window(), HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        EnableWindow(vf_->window(), !busy_);
+        vf_->style({font_, bold_, title_, dpi_});
+        layout();
+    }
     void selectPage() {
         int page = TabCtrl_GetCurSel(tabs_);
-        layoutPage(pages_[page]); // The window may have been resized while the page was hidden.
-        for (int i = 0; i < 7; ++i) ShowWindow(pages_[i].window, i == page ? SW_SHOW : SW_HIDE);
+        if (page == vfPage && !vf_) openVf();
+        if (page < pageCount) layoutPage(pages_[page]); // The window may have been resized while the page was hidden.
+        for (int i = 0; i < pageCount; ++i) ShowWindow(pages_[i].window, i == page ? SW_SHOW : SW_HIDE);
+        if (vf_) ShowWindow(vf_->window(), page == vfPage ? SW_SHOW : SW_HIDE);
         enable(readId, !busy_ && !(page == 1 && state_.value("linked", false)));
         if (ready_ && IsWindowVisible(window_)) bindPage(page);
         if (worker_) {
@@ -2125,6 +2153,7 @@ private:
     void busy(bool on) {
         busy_ = on;
         for (auto& p : pages_) EnableWindow(p.window, !on);
+        if (vf_) EnableWindow(vf_->window(), !on);
         for (int id :
              std::array<int, 8>{saveId, defaultsId, readId, slotId, slotId + 1, slotId + 2, slotId + 3, slotId + 4})
             EnableWindow(get(id), !on);
@@ -2148,6 +2177,10 @@ private:
     }
     void read() {
         int page = TabCtrl_GetCurSel(tabs_);
+        if (page == vfPage) {
+            vf_->read();
+            return;
+        }
         const int lo[]{200, 300, 400, 500, 600, 800, 700};
         eraseEdits(lo[page], lo[page] + 99);
         if (page == 1) {
@@ -2685,7 +2718,7 @@ private:
         SendMessageW(get(id), chartSetMessage, 0, curve ? reinterpret_cast<LPARAM>(&*curve) : 0);
     }
     void bindPage(int page) {
-        if (!ready_ || !IsWindowVisible(window_)) return;
+        if (!ready_ || !IsWindowVisible(window_) || page == vfPage) return;
         updating_ = true;
         auto features = state_.value("enabled", std::set<std::string>{});
         bool linked = state_.value("linked", false);
@@ -2814,6 +2847,12 @@ private:
         if (j.contains("gpuKeepAwake")) {
             checked(keepAwakeId, j["gpuKeepAwake"].get<bool>());
             if (keepAwake_) keepAwake_->enable(j["gpuKeepAwake"].get<bool>());
+        }
+        if (j.value("vfCurve", false) && !vfOffered_) {
+            vfOffered_ = true;
+            TCITEMW item{TCIF_TEXT};
+            item.pszText = const_cast<wchar_t*>(L"V/F Curve");
+            TabCtrl_InsertItem(tabs_, vfPage, &item);
         }
         if (initial && !ready_) {
             ready_ = true;
@@ -2950,8 +2989,8 @@ private:
     }
     // A reading's cell fits the reading and its widest usual value, so most changes only repaint the cell.
     int infoWidth(HDC dc, int i) const {
-        constexpr const wchar_t* usual[]{
-            L"000°C", L"000°C", L"000 W", L"000 W", L"00.0 A x 00.0 V = 000 W", L"000 W", L"000 W", L"000 W", L"000 W"};
+        constexpr const wchar_t* usual[]{L"000°C", L"000°C", L"000 W", L"000 W", L"00.0 A x 00.0 V = 000 W",
+                                         L"000 W", L"000 W", L"000 W", L"000 W"};
         SelectObject(dc, i == 2 ? bold_ : font_);
         SIZE a{}, b{};
         GetTextExtentPoint32W(dc, usual[i], int(wcslen(usual[i])), &a);
@@ -3243,6 +3282,7 @@ private:
             }
             bool own = result.sequence && result.sequence == busySequence_;
             if (own) busy(false);
+            if (vf_ && result.control) vf_->delivered(result.sequence, *result.control);
             if (result.control) {
                 auto& r = *result.control;
                 if (r.peripherals) {
@@ -3570,7 +3610,12 @@ private:
             }
             return 0;
         }
-        case WM_MOUSEWHEEL: scroll(pages_[TabCtrl_GetCurSel(tabs_)].window, message, wp); return 0;
+        case WM_MOUSEWHEEL:
+            if (TabCtrl_GetCurSel(tabs_) == vfPage)
+                SendMessageW(vf_->window(), message, wp, lp);
+            else
+                scroll(pages_[TabCtrl_GetCurSel(tabs_)].window, message, wp);
+            return 0;
         case WM_HSCROLL:
             if (!updating_ && lp) {
                 int id = GetDlgCtrlID(reinterpret_cast<HWND>(lp));
@@ -3675,7 +3720,7 @@ private:
     std::map<int, Support> support_;
     std::set<int> primary_;
     std::array<HPOWERNOTIFY, 2> powerNotifications_{};
-    std::array<Page, 7> pages_;
+    std::array<Page, pageCount> pages_;
     std::map<int, HWND> controls_;
     std::set<int> edited_;
     std::array<HICON, 5> slotIcons_{};
@@ -3691,7 +3736,7 @@ private:
     Json state_ = Json::object(), peripheralState_ = Json::object(), identity_, gpuTelemetry_, live_, gpuBudget_,
          devices_ = Json::array();
     std::map<int, std::pair<Json, ChartOptions>> boundCharts_;
-    std::array<bool, 7> boundPages_{};
+    std::array<bool, pageCount> boundPages_{};
     std::string warning_, configurationWarning_;
     std::wstring gpuError_;
     std::optional<CpuSettings> pendingCpu_;
@@ -3705,6 +3750,9 @@ private:
 #ifdef MECHCONTROL_WITH_CLI
     std::unique_ptr<CliServer> cli_;
 #endif
+    // The V/F Curve tab (vfPage): offered on an NVIDIA GPU, made the first time it is shown.
+    std::unique_ptr<VfTab> vf_;
+    bool vfOffered_ = false;
 };
 #ifdef MECHCONTROL_PAGE_CHECK
 #include "../tests/ui_pages_checks.h"

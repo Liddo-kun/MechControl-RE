@@ -160,12 +160,12 @@ Calc Tuner::calc(const Equations& E, double celsius, const std::map<int, double>
     auto& top = m.at(E, meta.root);
     for (int p = 0; p < n; ++p) {
         Env env(m, E, meta.uv[p], celsius, 0, hotter);
-        int head = -1;
+        int head = Calc::none;
         // The page's evaluator: the value of equation i and the main formula that set it.
         auto eq = [&](auto& self, int i) -> double {
             auto& e = m.at(E, i);
             double r;
-            int h = -1;
+            int h = Calc::none;
             if (e.type == 1) {
                 double crit = e.ref ? self(self, e.refidx) : e.crit;
                 r = self(self, env.test(e, crit) ? e.yes : e.no);
@@ -895,10 +895,10 @@ config::Json Tuner::state(const Tune& t) const {
     return j;
 }
 
-Fields Tuner::fields(const Tune& t) const {
-    // The amount the sliders add, by "equation.field". Added clock = off + tilt·u + bend·(1 - u²) + (temp + ttilt·u)·t
-    // + tbend·t², with u = (mV - Vc)/h (-1 at the card's left end, +1 at its right end) and t = (T - Tref)/10. In the
-    // formula the voltage is in µV: k0 constant, V, V², T, T² and V·T.
+std::map<std::string, double> Tuner::additions(const Tune& t) const {
+    // Added clock = off + tilt·u + bend·(1 - u²) + (temp + ttilt·u)·t + tbend·t², with u = (mV - Vc)/h (-1 at the
+    // card's left end, +1 at its right end) and t = (T - Tref)/10. In the formula the voltage is in µV: k0 constant, V,
+    // V², T, T² and V·T.
     std::map<std::string, double> add;
     for (auto& s : sections) {
         auto it = t.cards.find(s.id);
@@ -917,57 +917,60 @@ Fields Tuner::fields(const Tune& t) const {
                 if (slot >= 0 && d != 0 && !std::isnan(d)) add["" + text(hd) + ".k" + text(slot)] += d;
         }
     }
-    std::map<std::string, double> forced; // the removed corrections
+    return add;
+}
+std::optional<double> Tuner::stock_value(int i, const std::string& f) const {
+    auto& e = m.at(m.E, i);
+    auto limit = [](double v) { return std::abs(v) >= unbounded ? std::nullopt : std::optional(v); };
+    if (f == "lo") return limit(e.lo);
+    if (f == "hi") return limit(e.hi);
+    if (f == "crit") return e.ref ? std::nullopt : std::optional(e.crit);
+    if (f == "func") return e.func;
+    if (f == "max") return e.max;
+    if (coefficient(f) >= 0 && coefficient(f) < e.nk) return e.k[coefficient(f)];
+    return std::nullopt;
+}
+bool Tuner::slider(int i, const std::string& f) const {
+    auto s = slots.find(i);
+    if (s == slots.end() || !std::ranges::any_of(sections, [&](auto& c) { return contains(c.heads, i); })) return false;
+    for (int k : {s->second.c, s->second.v, s->second.v2, s->second.t, s->second.t2, s->second.vt})
+        if (k >= 0 && f == "k" + text(k)) return true;
+    return false;
+}
+std::optional<double> Tuner::value(const Tune& t, const std::map<std::string, double>& add, int i,
+                                   const std::string& f) const {
+    auto key = text(i) + "." + f;
+    if (f == "lo" || f == "hi")
+        for (auto& r : rules)
+            if (auto it = t.rules.find(r.id); it != t.rules.end() && it->second && contains(r.equs, i)) return 0.0;
+    auto b = stock_value(i, f);
+    if (slider(i, f)) {
+        auto a = add.find(key);
+        auto md = t.mdelta.find(key);
+        return f32(b.value_or(NAN) + (a != add.end() ? a->second : 0) +
+                   (md != t.mdelta.end() && !std::isnan(md->second) ? md->second : 0));
+    }
+    if (auto mn = t.manual.find(key); mn != t.manual.end()) return mn->second;
+    return b;
+}
+
+Fields Tuner::fields(const Tune& t) const {
+    auto add = additions(t);
+    std::set<std::string> keys; // add, mdelta, manual and the removed corrections, as the page collects them
+    for (auto& [k, v] : add) keys.insert(k);
     for (auto& r : rules)
         if (auto it = t.rules.find(r.id); it != t.rules.end() && it->second)
-            for (int i : r.equs) forced[text(i) + ".lo"] = forced[text(i) + ".hi"] = 0;
-    auto parse = [&](const std::string& key) {
-        auto dot = key.find('.');
-        if (dot == std::string::npos || dot == 0 || key.find_first_not_of("0123456789") != dot)
-            throw std::runtime_error("The tune names an unknown field: " + key);
-        return std::pair(std::stoi(key.substr(0, dot)), key.substr(dot + 1));
-    };
-    // The page's base value: none for a limit at or beyond 3e38, a compare's crit while it uses an equation, and a
-    // coefficient the formula does not have.
-    auto base = [&](int i, const std::string& f) -> std::optional<double> {
-        auto& e = m.at(m.E, i);
-        auto limit = [](double v) { return std::abs(v) >= unbounded ? std::nullopt : std::optional(v); };
-        if (f == "lo") return limit(e.lo);
-        if (f == "hi") return limit(e.hi);
-        if (f == "crit") return e.ref ? std::nullopt : std::optional(e.crit);
-        if (f == "func") return e.func;
-        if (f == "max") return e.max;
-        if (coefficient(f) >= 0 && coefficient(f) < e.nk) return e.k[coefficient(f)];
-        return std::nullopt;
-    };
-    auto slider = [&](int i, const std::string& f) {
-        auto s = slots.find(i);
-        if (s == slots.end() || !std::ranges::any_of(sections, [&](auto& c) { return contains(c.heads, i); }))
-            return false;
-        for (int k : {s->second.c, s->second.v, s->second.v2, s->second.t, s->second.t2, s->second.vt})
-            if (k >= 0 && f == "k" + text(k)) return true;
-        return false;
-    };
-    std::set<std::string> keys;
-    for (auto* map : {&add, &forced}) // add, mdelta, manual and forced, as the page collects them
-        for (auto& [k, v] : *map) keys.insert(k);
+            for (int i : r.equs) keys.insert({text(i) + ".lo", text(i) + ".hi"});
     for (auto& [k, v] : t.mdelta) keys.insert(k);
     for (auto& [k, v] : t.manual) keys.insert(k);
     std::map<int, std::map<std::string, std::optional<double>>> raw;
     for (auto& key : keys) {
-        auto [i, f] = parse(key);
-        auto b = base(i, f);
-        std::optional<double> v;
-        if (forced.contains(key))
-            v = forced[key];
-        else if (slider(i, f)) {
-            auto md = t.mdelta.find(key);
-            v = f32(b.value_or(NAN) + (add.contains(key) ? add[key] : 0) +
-                    (md != t.mdelta.end() && !std::isnan(md->second) ? md->second : 0));
-        } else if (auto mn = t.manual.find(key); mn != t.manual.end())
-            v = mn->second;
-        else
-            v = b;
+        auto dot = key.find('.');
+        if (dot == std::string::npos || dot == 0 || key.find_first_not_of("0123456789") != dot)
+            throw std::runtime_error("The tune names an unknown field: " + key);
+        int i = std::stoi(key.substr(0, dot));
+        auto f = key.substr(dot + 1);
+        auto b = stock_value(i, f), v = value(t, add, i, f);
         bool same = v.has_value() == b.has_value() && (!v || *v == *b);
         if (!same) raw[i][f] = v;
     }
@@ -1113,31 +1116,30 @@ Fit Tuner::fit(const Equations& E, const std::vector<double>& stock) const {
     }
     return f;
 }
-Points Tuner::settle(const Equations& E, bool wrote, const std::function<Points()>& read) const {
+bool Settle::done(const Points& read, double waited) {
+    auto s = driver_stock(read);
+    for (auto& x : s) x = snap(x, step);
+    int same = 0;
+    for (size_t p = 0; p < s.size() && p < fallback.size(); ++p) same += s[p] == fallback[p];
+    bool settled = waited >= 20 || (waited >= 5 && same <= 0.8 * double(fallback.size()) && last == s);
+    last = std::move(s);
+    return settled;
+}
+Settle Tuner::settling(const Equations& E) const {
     auto fallback = curve(E, 50.0, 1);
-    bool has_fallback = fallback != curve(E, 50.0);
+    if (fallback == curve(E, 50.0)) fallback.clear();
+    return {fallback, meta.step};
+}
+Points Tuner::settle(const Equations& E, bool wrote, const std::function<Points()>& read) const {
     auto start = std::chrono::steady_clock::now();
     auto c = read();
     if (!wrote) return c;
-    std::optional<std::vector<double>> last;
-    auto stock = [&](const Points& p) {
-        auto s = driver_stock(p);
-        for (auto& x : s) x = snap(x, meta.step);
-        return s;
-    };
+    auto s = settling(E);
     for (;;) {
-        double waited = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
-        if (waited >= 20) break;
-        c = read();
-        auto s = stock(c);
-        int same = 0;
-        for (size_t p = 0; p < s.size() && p < fallback.size(); ++p) same += s[p] == fallback[p];
-        bool is_fallback = has_fallback && same > 0.8 * points();
-        if (waited >= 5 && !is_fallback && last == s) break;
-        last = s;
         Sleep(500);
+        c = read();
+        if (s.done(c, std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count())) return c;
     }
-    return c;
 }
 
 std::map<std::string, std::vector<double>> Tuner::reference(const std::filesystem::path& path) const {

@@ -52,6 +52,7 @@ Json Controller::presentation(bool read, bool gpu_live, int page) {
         j["chargeLimitOffered"] = !session_.hardware.before_gpu_module();
         // The same for the NVIDIA unlock, DLPPC, current limits and driver readings on a GPU they cannot work on.
         j["nvidiaOffered"] = nvidia_offered_;
+        j["vfCurve"] = vf_available_; // The V/F Curve tab.
         for (std::string key : {"cpuTemp", "gpuTemp"})
             if (p.registers.contains(key)) j[key + "Register"] = p.reg(key);
         j["modes"] = Json::array();

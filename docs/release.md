@@ -88,6 +88,17 @@ MechControl resets the stored value to 0 at its next start. The BIOS setup optio
 MechControl, because the BIOS keeps applying it. The Control Center writes its own
 profile's offset over this one, so its services must not start with Windows either.
 
+## V/F curve
+
+The **V/F Curve** tab, shown with an NVIDIA GPU, edits the GPU's voltage-frequency curve
+through the driver's own clock equations and per-point offsets.
+**Apply to GPU** writes the curve and checks it against the driver's readback; **Restore
+stock** puts NVIDIA's equations back. For a few seconds after each write the GPU runs a
+slower fallback curve, so apply at idle, not in a game, and not while MSI Afterburner or
+another tool changes the curve. A GPU or driver restart returns the curve to stock. The
+tune is not saved with profiles yet; **Import** and **Export** read and write it as a
+`vfe-tune.json` file.
+
 ## Command line
 
 The `-cli` archive includes `mcctl.exe`. From an elevated shell it reads and changes

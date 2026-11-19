@@ -201,6 +201,7 @@ public:
     virtual bool at_most(int);
     virtual bool applied(int);
     virtual bool restore_currents(); // Reapplies current limits a driver reload reset; true when it wrote.
+    virtual Api& api();              // The connection, for the V/F curve's raw packets (vf_curve.*).
 protected:
     Power() = default; // Injected controller fixtures provide the same narrow backend operations.
 private:
