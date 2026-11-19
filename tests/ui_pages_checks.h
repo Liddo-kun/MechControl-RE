@@ -334,6 +334,12 @@ void Application::checkPages(const std::filesystem::path& directory, const std::
     wait([&] { return vfText().starts_with(L"Applied to the GPU\nApplied ("); }, 20000);
     check(vfText().find(L"1 Afterburner Style OC offset).\nReadback matches this tab") != std::wstring::npos,
           "after Apply and the driver's settling, the readback matches the calculation and the offset");
+    target_ = 4;
+    command(saveId, BN_CLICKED);
+    wait([&] { return !busy_ && std::filesystem::exists(directory / L"userprofile_4.json"); });
+    auto vfSaved = read_json(directory / L"userprofile_4.json")["gpu"]["vfCurve"];
+    check(vfSaved["tune"]["global"] == 30 && vfSaved["tune"]["pp"].size() == 1 && !vfSaved["curve"]["records"].empty(),
+          "the profile bar's Save stores the applied V/F curve with the tab's settings");
     auto numbersLink = FindWindowExW(vfPanel, FindWindowExW(vfPanel, nullptr, WC_LINK, nullptr), WC_LINK, nullptr);
     NMHDR click{numbersLink, 0, UINT(NM_CLICK)};
     SendMessageW(vfPanel, WM_NOTIFY, 0, reinterpret_cast<LPARAM>(&click));
@@ -357,6 +363,13 @@ void Application::checkPages(const std::filesystem::path& directory, const std::
     SendMessageW(vfRoot, WM_COMMAND, MAKEWPARAM(0, BN_CLICKED), reinterpret_cast<LPARAM>(vfButton(L"Restore stock")));
     wait([&] { return vfText().starts_with(L"Unapplied (currently stock)\nStock restored ("); }, 20000);
     check(vfText().find(L"Readback matches this tab") != std::wstring::npos, "Restore puts the stock curve back");
+    // Loading the profile writes its curve and shows its settings in place of the unapplied ones.
+    SendMessageW(track, TBM_SETPOS, TRUE, 8);
+    SendMessageW(vfPanel, WM_HSCROLL, MAKEWPARAM(TB_THUMBPOSITION, 8), reinterpret_cast<LPARAM>(track));
+    request(SlotLoad{4});
+    wait([&] { return !busy_ && vfText().starts_with(L"Applied to the GPU\nGPU now: "); }, 20000);
+    check(SendMessageW(track, TBM_GETPOS, 0, 0) == 12 && vfText().find(L"Readback matches this tab") != std::wstring::npos,
+          "loading a profile writes its V/F curve and the tab shows the profile's settings and readback");
     // Closed to the tray just after a change, while the slider bars are still being worked out: once the bars' timer
     // has seen the hidden window, nothing of the tab runs.
     SendMessageW(track, TBM_SETPOS, TRUE, 4);

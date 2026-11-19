@@ -204,6 +204,12 @@ void Controller::check_gpu() {
         } catch (const std::exception& ex) {
             diagnostic_(std::string("NVIDIA temperature target check failed: ") + ex.what());
         }
+    // It also puts the V/F curve back to stock; a curve still on the GPU writes nothing.
+    if (vf_curve_ && (nvidia_ || api_) && !gpu_driver_uncertain_ && gpu_awake()) try {
+            apply_vf(*vf_curve_, "V/F curve written again after a driver reload");
+        } catch (const std::exception& ex) {
+            diagnostic_(std::string("NVIDIA V/F curve check failed: ") + ex.what());
+        }
     if (!nvidia_ || gpu_driver_uncertain_ || !nvidia_->awake()) return; // All delayed reads are sleep-gated too.
     if (dlppc_disabled_) try {
             nvidia_work([&] {

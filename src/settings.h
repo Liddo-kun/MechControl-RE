@@ -11,6 +11,8 @@ struct GpuSettings {
     std::optional<bool> bios_override_enabled;
     std::optional<int> nvvdd_ma, msvdd_ma, board_input_ma;
     std::optional<int> temp_target; // NVIDIA GPU temperature target, degrees C. Empty leaves the driver's as it is.
+    // The V/F curve: {"curve": nv::vf::to_json, "tune": the V/F Curve tab's state}. Null leaves the GPU's as it is.
+    Json vf_curve;
     int boost() const { return dynamic_boost_enabled ? dynamic_boost_watts : 0; }
     int total() const { return tgp + boost(); }
 };

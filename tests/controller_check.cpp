@@ -1,4 +1,5 @@
 #include "controller.h"
+#include "vf_fixture.h"
 #include "worker.h"
 #ifdef MECHCONTROL_WITH_CLI
 #include "cli_server.h"
@@ -756,6 +757,119 @@ void gpu_temp_target(const std::filesystem::path& root) {
           "a slot saved without a temperature target leaves the driver's as it is");
     c.execute(DefaultsApply{""});
     check(driver->target.current == 87, "firmware defaults restore the driver's default temperature target");
+}
+// A GPU with the V/F curve packets of vf_fixture. Its restart puts the driver's equations and offsets back to stock, as
+// measured on the RTX 5090 Laptop GPU.
+struct VfGpu : GpuFixture {
+    vf_fixture::Driver driver;
+    std::map<uint32_t, int> calls;
+    nv::Api connection{[this](uint32_t id, nv::Bytes& b) {
+        ++calls[id];
+        driver.call(id, b);
+    }};
+    VfGpu() {
+        connection.identity.device = 0x2c58;
+        connection.identity.bios = "98.03.5e.00.1e";
+        connection.identity.driver = "621.24";
+    }
+    nv::Api& api() override { return connection; }
+    void configure(bool unlock, const GpuSettings& g, bool allow) override {
+        int before = restarts;
+        GpuFixture::configure(unlock, g, allow);
+        if (restarts != before) {
+            driver.live = driver.s.records;
+            driver.offsets = {};
+        }
+    }
+};
+// A slot's V/F curve: written through vf::apply alone and only where the GPU differs, stored by Save, written again
+// after a GPU restart, and skipped like the temperature target where it cannot apply.
+void gpu_vf_curve(const std::filesystem::path& root) {
+    auto path = root / "gpu-vf-curve";
+    auto owned = std::make_unique<VfGpu>();
+    auto gpu = owned.get();
+    auto& d = gpu->driver;
+    auto identity = nv::vf::gpu(gpu->connection.identity, d.s.info_trimmed());
+    nv::vf::save_stock(path / "VfCurve", identity, d.s.records_trimmed());
+    // The low line moved (k0 of equation 6) and one point offset.
+    auto curve = [&](float k0, int offset) {
+        nv::vf::Curve c{identity};
+        auto r = nv::vf::record(d.s.records, 6);
+        c.records[6] = nv::Bytes(r.begin(), r.end());
+        vf_fixture::put_f32(c.records[6], 76, k0);
+        c.offsets_khz.assign(96, 0);
+        c.offsets_khz[90] = offset;
+        return c;
+    };
+    auto stock = nv::vf::Curve{identity, {}, std::vector<int>(96, 0)};
+    auto on_gpu = [&](const nv::vf::Curve& c) {
+        for (int i = 0; i < d.s.equations; ++i)
+            if (!std::ranges::equal(nv::vf::record(d.live, i), c.records.contains(i)
+                                                                   ? std::span<const uint8_t>(c.records.at(i))
+                                                                   : nv::vf::record(d.s.records, i)))
+                return false;
+        return std::equal(c.offsets_khz.begin(), c.offsets_khz.end(), d.offsets.begin());
+    };
+    auto slot_json = [&](const nv::vf::Curve& c, int global) {
+        return Json{{"curve", nv::vf::to_json(c)}, {"tune", {{"global", global}}}};
+    };
+    auto slot = [&](int n, Json vf) {
+        auto p = profile();
+        p.gpu->vf_curve = std::move(vf);
+        write_json(path / ("userprofile_" + std::to_string(n) + ".json"), p, true);
+    };
+    auto c1 = curve(320, 15000), c2 = curve(340, 30000), other = c1;
+    other.gpu.driver = "620.00";
+    slot(1, slot_json(c1, 5));
+    slot(2, slot_json(c2, 10));
+    slot(3, nullptr);
+    slot(4, slot_json(other, 1));
+    Rig r(path, true, std::move(owned));
+    auto& c = *r.controller;
+    check(c.execute(SlotLoad{1}).code == 0 && on_gpu(c1) && d.sets == std::vector{6} && d.offset_sets == 1 &&
+              !gpu->calls.contains(0xb9da41d6),
+          "a slot writes its V/F curve through the apply path alone, without the tuner's variable reads");
+    d.sets.clear();
+    d.offset_sets = 0;
+    check(c.execute(SlotLoad{2}).code == 0 && on_gpu(c2) && d.sets == std::vector{6} && d.offset_sets == 1,
+          "switching slots writes only the equations and offsets that differ");
+    d.sets.clear();
+    d.offset_sets = 0;
+    check(c.execute(SlotLoad{2}).code == 0 && d.sets.empty() && d.offset_sets == 0,
+          "a slot whose curve is already on the GPU writes nothing to it");
+    check(c.execute(SlotLoad{3}).code == 0 && on_gpu(c2), "a slot without a V/F curve leaves the GPU's");
+    check(c.execute(SlotSave{3}).code == 0 && read_json(path / "userprofile_3.json")["gpu"]["vfCurve"] == slot_json(c2, 10),
+          "Save stores the curve on the GPU with its tune");
+    check(c.execute(VfRead{}).vf->tune == Json{{"global", 10}}, "the tab reads the tune of the applied slot's curve");
+    check(c.execute(GpuUnlock{false}).code == 0 && gpu->restarts == 1 && on_gpu(stock),
+          "a GPU restart puts the stock curve back");
+    c.tick(GetTickCount64() + 4000);
+    check(on_gpu(c2), "the delayed GPU check writes the slot's curve again after the restart");
+    auto logged = r.diagnostics.size();
+    r.state->writes.clear();
+    check(c.execute(SlotLoad{4}).code == 0 && !r.state->writes.empty() && on_gpu(c2) &&
+              std::any_of(r.diagnostics.begin() + logged, r.diagnostics.end(),
+                          [](auto& s) {
+                              return s.starts_with("Slot V/F curve not applied: This V/F curve was made for driver 620.00");
+                          }),
+          "a curve made for another driver is logged and skipped before any write, and the rest of the slot applies");
+    check(c.execute(VfApply{std::nullopt, {{"global", 0}}}).code == 0 && on_gpu(stock) &&
+              c.execute(SlotSave{5}).code == 0 &&
+              read_json(path / "userprofile_5.json")["gpu"]["vfCurve"] == slot_json(stock, 0),
+          "after Restore stock, Save stores stock as a curve without records");
+    check(c.execute(SlotLoad{1}).code == 0 && on_gpu(c1) && c.execute(SlotLoad{5}).code == 0 && on_gpu(stock),
+          "a slot saved at stock puts stock back");
+    // A run that wrote no curve sends no V/F packet, and its Save keeps the slot's own curve.
+    auto quiet_path = root / "gpu-vf-curve-untouched";
+    auto quiet_owned = std::make_unique<VfGpu>();
+    auto quiet = quiet_owned.get();
+    std::filesystem::create_directories(quiet_path);
+    write_json(quiet_path / "userprofile_1.json", read_json(path / "userprofile_2.json"), true);
+    Rig q(quiet_path, true, std::move(quiet_owned));
+    check(q.controller->execute(SlotSave{1}).code == 0 &&
+              read_json(quiet_path / "userprofile_1.json")["gpu"]["vfCurve"] == slot_json(c2, 10) &&
+              quiet->calls.empty(),
+          "without a curve written this run, nothing calls the V/F packets and Save keeps the slot's curve");
 }
 void integration(const std::filesystem::path& root) {
     Rig r(root / "integrated");
@@ -2220,6 +2334,7 @@ int main(int argc, char** argv) {
         gmxzgxx_firmware(root, false);
         gpu_integration(root);
         gpu_temp_target(root);
+        gpu_vf_curve(root);
         thermal(root);
         recovery(root);
         defaults_and_no_slot(root);

@@ -199,6 +199,9 @@ struct VfTab::Impl {
     Job job = Job::opening;
     std::uint64_t openSeq = 0, readSeq = 0, applySeq = 0, settleSeq = 0;
     bool restoring = false;
+    // A profile was loaded: the next read shows the tune of the curve on the GPU and waits for the driver to settle if
+    // the equations changed. Unapplied changes go, as on the other tabs.
+    bool loaded = false, loadedRead = false;
     std::optional<Settle> settle;
     Clock::time_point settleStart;
     std::wstring settleWhat;
@@ -847,14 +850,20 @@ struct VfTab::Impl {
                 openError.clear();
                 tuner = r.vf->tuner;
                 build();
+                appliedTune(r.vf->tune);
                 read(r.vf, L"");
             }
         } else if (seq == readSeq) {
             readSeq = 0;
             job = Job::none;
+            bool afterLoad = std::exchange(loadedRead, false);
             if (failed)
                 readError = L"Could not read the driver: " + message;
-            else
+            else if (afterLoad) {
+                appliedTune(r.vf->tune);
+                bool wrote = !reading || reading->records != r.vf->records;
+                readBack(r.vf, wrote, L"");
+            } else
                 read(r.vf, L"");
         } else if (seq == applySeq) {
             applySeq = 0;
@@ -870,17 +879,7 @@ struct VfTab::Impl {
                         : L"Applied (" + plural(r.vf->equations, L"equation") +
                               (r.vf->offsets ? L", " + plural(r.vf->offsets, L"Afterburner Style OC offset") : L"") +
                               L").";
-                if (r.vf->equations && live(r.vf)) {
-                    // After an equation write the driver shows a slower fallback curve for a few seconds; the readback
-                    // waits until it is gone (vf_tuner.h Settle), reading every 0.5 s.
-                    settle = tuner->settling(liveEquations());
-                    settleStart = Clock::now();
-                    settleWhat = what;
-                    settled(r.vf->points);
-                    job = Job::settling;
-                    SetTimer(root, settleTimer, 500, nullptr);
-                } else
-                    read(r.vf, what);
+                readBack(r.vf, r.vf->equations, what);
             }
         } else {
             settleSeq = 0;
@@ -897,10 +896,42 @@ struct VfTab::Impl {
                 read(r.vf, settleWhat);
             }
         }
+        if (loaded && job == Job::none) refresh();
         buttons();
         status();
         layout(true);
         InvalidateRect(panel, nullptr, FALSE);
+    }
+    // After an equation write the driver shows a slower fallback curve for a few seconds; the readback waits until it
+    // is gone (vf_tuner.h Settle), reading every 0.5 s.
+    void readBack(const std::shared_ptr<const VfReading>& r, bool wrote, const std::wstring& what) {
+        if (wrote && live(r)) {
+            settle = tuner->settling(liveEquations());
+            settleStart = Clock::now();
+            settleWhat = what;
+            settled(r->points);
+            job = Job::settling;
+            SetTimer(root, settleTimer, 500, nullptr);
+        } else
+            read(r, what);
+    }
+    // A profile was loaded (VfTab::loaded); reads the driver once the tab is free.
+    void refresh() {
+        if (!tuner || job != Job::none) return;
+        readSeq = host.submit(VfRead{}, false);
+        if (!readSeq) return;
+        loaded = false;
+        loadedRead = true;
+        job = Job::reading;
+    }
+    // The tune of the curve this run last wrote, from a profile or this tab.
+    void appliedTune(const config::Json& state) {
+        if (!state.is_object()) return;
+        try {
+            take(state);
+        } catch (const std::exception& e) {
+            error(L"The profile's V/F curve settings cannot be shown: " + w(e.what()));
+        }
     }
     bool settled(const Points& points) {
         try {
@@ -1035,16 +1066,21 @@ struct VfTab::Impl {
                 (moved ? L" and " + plural(moved, L"Afterburner Style OC offset") : L"") +
                 L"?\n\nThe GPU drops to a slower fallback curve for a few seconds after each write. Do this at idle, not in a game."))
             return;
-        submitWrite(VfApply{std::move(curve)}, false);
+        submitWrite(std::move(curve));
     }
     void restore() {
         if (!confirm(
                 L"Write NVIDIA's stock equations back and set the Afterburner Style OC offsets to 0 (slow curve on again, none of your changes)?\n\nThe settings on this tab stay as they are."))
             return;
-        submitWrite(VfApply{}, true);
+        submitWrite({});
     }
-    void submitWrite(ControlCommand command, bool stock) {
-        applySeq = host.submit(std::move(command), true);
+    // The tab's settings go with the write, so that a profile Save stores them beside the curve.
+    void submitWrite(std::optional<Curve> curve) {
+        Tune t = tune;
+        t.view = viewJson();
+        auto state = tuner->state(t);
+        bool stock = !curve;
+        applySeq = host.submit(VfApply{std::move(curve), std::move(state)}, true);
         if (!applySeq) return;
         restoring = stock;
         job = Job::writing;
@@ -1119,15 +1155,15 @@ struct VfTab::Impl {
         if (!path) return;
         try {
             auto j = config::read_json(*path);
-            auto& state = j.contains("state") && j["state"].is_object() ? j["state"] : j;
-            tune = tuner->tune(state);
-            loadView(tune.view);
+            take(j.contains("state") && j["state"].is_object() ? j["state"] : j);
         } catch (const std::exception& e) {
             error(L"Could not import " + path->filename().wstring() + L": " + w(e.what()));
-            return;
         }
+    }
+    void take(const config::Json& state) {
+        tune = tuner->tune(state);
+        loadView(tune.view);
         chart->clear_selection();
-        sync();
         changed();
     }
     // The same file as the page's Save (vfe-tune.json), which `vfe-ui.py apply` can write without this tab.
@@ -2087,6 +2123,12 @@ void VfTab::read() {
     i.status();
     i.layout(true);
     InvalidateRect(i.panel, nullptr, FALSE);
+}
+void VfTab::loaded() {
+    impl_->loaded = true;
+    impl_->refresh();
+    impl_->buttons();
+    impl_->status();
 }
 void VfTab::delivered(std::uint64_t sequence, const ControlResult& result) { impl_->delivered(sequence, result); }
 std::wstring VfTab::text() const {

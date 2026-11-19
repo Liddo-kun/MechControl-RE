@@ -3307,6 +3307,7 @@ private:
                         else
                             configurationWarning_.clear();
                     }
+                    if (vf_ && operation_ && std::holds_alternative<SlotLoad>(*operation_)) vf_->loaded();
                     if (!r.code && operation_ && std::holds_alternative<ProtectionApply>(*operation_))
                         eraseEdits(protectionId, showWindowId);
                     // A refused offset stays in the slider as an edit; a stored one is the BIOS's value again.

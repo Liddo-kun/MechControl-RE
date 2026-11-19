@@ -145,10 +145,18 @@ curve (and with `open` builds the tuner), and `VfApply` writes a curve, or stock
 then reads back. The V/F Curve tab is offered on any NVIDIA GPU and is created on its first
 selection (`vf_tab.*`, with `vf_chart.*` drawing the curve in GDI+ and `vf_numbers.*` the tables),
 so nothing of it runs before then. It reads the driver only when opened, on Read and after a write,
-and the timer that works out its slider bars stops while the window is hidden. Its tune lives only in the tab, with Import and Export of the
-VFCURVE `vfe-tune.json` file. After a write the driver serves a slower fallback curve for a few
-seconds, so the tab re-reads every 500 ms from a UI timer until the curve settles, then compares
-it with the tune.
+and the timer that works out its slider bars stops while the window is hidden. Import and Export
+use the VFCURVE `vfe-tune.json` file. After a write the driver serves a slower fallback curve for
+a few seconds, so the tab re-reads every 500 ms from a UI timer until the curve settles, then
+compares it with the tune.
+A slot keeps a curve as `gpu.vfCurve`: the compiled curve (`vf::to_json`) and the tab's tune it
+came from (null leaves the GPU's curve alone, like `tempTargetC`). The controller remembers the
+curve it last wrote, from `VfApply` (stock as a curve without records) or a slot, with its tune.
+Save stores that, or keeps the slot's own when this run wrote none. Slot load, and the delayed
+GPU check after a GPU restart or driver reload, write it through `vf::apply` alone, which writes
+nothing when the curve is already there; the tuner is never built for them. A curve that cannot
+apply is logged and skipped like the temperature target. `VfRead` returns the remembered tune,
+which the tab shows when it opens and after a slot load.
 `gpu_keepawake.*` is the opt-in GPU keep-awake (`gpuKeepAwake` in `settings.json`; the controller
 only stores it). It runs on the UI thread from the window's display, suspend, display-change and
 timer messages, because it must not share the worker's waits. While the screen is off, the PC is

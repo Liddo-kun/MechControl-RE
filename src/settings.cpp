@@ -26,6 +26,7 @@ void from_json(const Json& j, GpuSettings& v) {
     F("msvddMilliamps", msvdd_ma);
     F("boardInputMilliamps", board_input_ma);
     F("tempTargetC", temp_target);
+    F("vfCurve", vf_curve);
 }
 void to_json(Json& j, const GpuSettings& v) {
     j = {
@@ -35,6 +36,7 @@ void to_json(Json& j, const GpuSettings& v) {
     OPT("msvddMilliamps", msvdd_ma);
     OPT("boardInputMilliamps", board_input_ma);
     OPT("tempTargetC", temp_target);
+    PUT("vfCurve", vf_curve);
 }
 void from_json(const Json& j, ProtectionSettings& v) {
     object(j);

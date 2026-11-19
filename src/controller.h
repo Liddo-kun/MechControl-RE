@@ -145,8 +145,10 @@ struct VfRead {
     bool open = false;
 };
 // Writes a V/F curve (vf::apply), or with none the stock equations and zero offsets (vf::restore), then reads as VfRead.
+// The tune is the tab's state it was made from, which a profile Save stores beside the curve.
 struct VfApply {
     std::optional<nv::vf::Curve> curve;
+    config::Json tune;
 };
 using ControlCommand =
     std::variant<CpuApply, GpuApply, FanApply, FanBoost, BatteryApply, SwitchApply, ProtectionApply, SlotLoad, SlotSave,
@@ -218,13 +220,15 @@ namespace nv::vf {
 class Tuner;
 }
 // What the V/F Curve tab reads: the tuner when the read opened it, the GPU the driver's equations belong to, its live
-// equation records and curve points, and how many equations and offsets a VfApply wrote.
+// equation records and curve points, how many equations and offsets a VfApply wrote, and the tune of the curve this run
+// last wrote (from the tab or a profile; null when none).
 struct VfReading {
     std::shared_ptr<const nv::vf::Tuner> tuner;
     nv::vf::Gpu gpu;
     nv::Bytes records;
     nv::vf::Points points;
     int equations = 0, offsets = 0;
+    config::Json tune;
 };
 // Status of the current curve/master/link request, not boost/switch, physical cooling or saved state.
 enum class FanApplication { unapplied, applied, partial };
@@ -357,7 +361,9 @@ private:
     void apply_temp_target(int celsius);
     config::Json temp_target_status();
     nv::Api& vf_api();
+    std::filesystem::path vf_directory() const;
     std::shared_ptr<VfReading> vf_read(nv::Api&);
+    void apply_vf(const nv::vf::Curve&, const char* what);
     std::unique_ptr<nv::Power> nvidia_;
     // DLPPC and the temperature target need only NVAPI; used while nvidia_ is unavailable (an older GPU or
     // unsupported BIOS limits).
@@ -368,6 +374,10 @@ private:
     bool temp_target_available_ = false;
     bool vf_available_ = false;                 // Any NVIDIA GPU; the driver decides on first use.
     std::filesystem::path vf_directory_;        // Stock V/F records; empty: vf::store_directory().
+    // The V/F curve this run last wrote, from the tab or a slot (stock is a curve without records), and its tune. A
+    // slot Save stores them; the delayed GPU check writes the curve again after a GPU restart, which clears it.
+    std::optional<nv::vf::Curve> vf_curve_;
+    config::Json vf_tune_;
     std::optional<nv::TempTarget> temp_target_; // As last read or written.
     std::optional<int> temp_target_request_;    // What this run applied; the delayed GPU check restores it.
     bool nvidia_offered_ = false; // Fixed at startup; nvidia_available_ also goes false when the driver refuses.

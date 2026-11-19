@@ -689,6 +689,12 @@ void Controller::apply_profile(const UserProfile& profile, const nv::ProfilePlan
             } catch (const std::exception& e) {
                 diagnostic_(std::string("Slot GPU temperature target not applied: ") + e.what());
             }
+        if (!g.vf_curve.is_null()) try {
+                apply_vf(nv::vf::curve_from_json(g.vf_curve.at("curve")), "Slot V/F curve applied");
+                vf_tune_ = g.vf_curve.value("tune", Json());
+            } catch (const std::exception& e) {
+                diagnostic_(std::string("Slot V/F curve not applied: ") + e.what());
+            }
     }
     if (fan_saved) {
         boost(profile.fan->boost);
@@ -1076,6 +1082,8 @@ UserProfile Controller::capture(int slot) {
     }
     // The target as last read or written; never read, it is saved as null and loading leaves the driver's.
     if (profile.gpu && temp_target_) profile.gpu->temp_target = temp_target_->current;
+    // The V/F curve this run last wrote; with none, the slot keeps its own (below).
+    if (profile.gpu && vf_curve_) profile.gpu->vf_curve = {{"curve", nv::vf::to_json(*vf_curve_)}, {"tune", vf_tune_}};
     profile.protection = thermal_->settings();
     profile.fan.reset();
     if (features_.fan_control()) {
@@ -1106,6 +1114,7 @@ UserProfile Controller::capture(int slot) {
     if (auto previous = store_.load(slot)) {
         profile.lighting = previous->lighting;
         profile.cooler = previous->cooler;
+        if (profile.gpu && !vf_curve_ && previous->gpu) profile.gpu->vf_curve = previous->gpu->vf_curve;
     } else {
         auto lighting = store_.load_lighting();
         if (!lighting.logo || !lighting.keyboard || !lighting.light_bar)

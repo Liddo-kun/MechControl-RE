@@ -28,6 +28,7 @@ public:
     HWND window() const;
     void style(const VfFonts&); // after a DPI or theme change
     void read();                // the profile bar's Read
+    void loaded();              // a profile was loaded: shows its tune and the GPU's curve
     void delivered(std::uint64_t sequence, const ControlResult&);
     std::wstring text() const; // the status beside the buttons and the readback, for the UI checks
 

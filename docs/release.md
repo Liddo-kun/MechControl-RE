@@ -95,9 +95,17 @@ through the driver's own clock equations and per-point offsets.
 **Apply to GPU** writes the curve and checks it against the driver's readback; **Restore
 stock** puts NVIDIA's equations back. For a few seconds after each write the GPU runs a
 slower fallback curve, so apply at idle, not in a game, and not while MSI Afterburner or
-another tool changes the curve. A GPU or driver restart returns the curve to stock. The
-tune is not saved with profiles yet; **Import** and **Export** read and write it as a
+another tool changes the curve. **Import** and **Export** read and write the tune as a
 `vfe-tune.json` file.
+
+The profile bar's **Save** stores the curve last applied (or restored to stock) with the
+tab's settings; without one applied since MechControl started, the profile keeps the curve
+it had. Loading the profile writes its curve without opening the tab, and the tab then shows
+its settings. A GPU or driver restart returns the curve to stock; MechControl writes the
+profile's curve again a few seconds after one it starts itself, after waking from sleep and
+after a power-source change. A curve made for another GPU, VBIOS or driver is skipped with a
+note in `mechcontrol.log` (make it again in the tab), and so is one whose offsets would have
+to be written while MSI Afterburner runs. Profiles saved without a curve leave the GPU's as it is.
 
 ## Command line
 
