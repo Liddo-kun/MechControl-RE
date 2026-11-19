@@ -104,6 +104,8 @@ public:
     // What a diagnostic report records: every reading above, each on its own, plus the driver's policy tables as it
     // returns them. Reads only. A reading the driver or this code refuses becomes {"error": text}.
     config::Json diagnostic();
+    // One raw packet call on this GPU, for the V/F curve (vf_curve.*). Throws when the driver refuses it.
+    void call(uint32_t id, Bytes& b) { call_(id, b); }
 
 private:
     struct Native;

@@ -26,9 +26,12 @@ target_include_directories(configuration PUBLIC src)
 target_link_libraries(configuration PUBLIC nlohmann_json::nlohmann_json PRIVATE wbemuuid ole32 oleaut32)
 add_library(ec STATIC src/ec.cpp src/ec_session.cpp src/thermal.cpp src/controller.cpp
   src/controller_status.cpp src/controller_gpu.cpp src/cli_commands.cpp src/nvidia_bios.cpp src/nvidia_api.cpp
-  src/nvidia_store.cpp src/nvidia_power.cpp src/peripherals.cpp src/cooler.cpp)
+  src/nvidia_store.cpp src/nvidia_power.cpp src/vf_curve.cpp src/peripherals.cpp src/cooler.cpp)
 target_include_directories(ec PUBLIC src)
 target_link_libraries(ec PUBLIC configuration PRIVATE setupapi cfgmgr32 shell32 advapi32 hid windowsapp user32)
+# The V/F curve tuner, used only by the V/F curve tab; profiles apply curves through vf_curve in ec.
+add_library(vf_tuner STATIC src/vf_model.cpp src/vf_tuner.cpp)
+target_link_libraries(vf_tuner PUBLIC ec)
 
 get_filename_component(SDK_BIN "${CMAKE_RC_COMPILER}" DIRECTORY)
 get_filename_component(WINDOWS_KITS "[HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows Kits\\Installed Roots;KitsRoot10]" ABSOLUTE)
@@ -70,6 +73,9 @@ if(BUILD_TESTING)
   add_executable(nvidia-check tests/nvidia_check.cpp)
   target_link_libraries(nvidia-check PRIVATE ec)
   add_test(NAME nvidia COMMAND nvidia-check)
+  add_executable(vf-curve-check tests/vf_curve_check.cpp)
+  target_link_libraries(vf-curve-check PRIVATE vf_tuner)
+  add_test(NAME vf-curve COMMAND vf-curve-check)
   add_executable(controller-check tests/controller_check.cpp)
   target_link_libraries(controller-check PRIVATE foundation)
   add_dependencies(controller-check profiles)

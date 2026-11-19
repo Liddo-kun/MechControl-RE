@@ -133,6 +133,14 @@ range before any write; a slot's is logged and skipped like a peripheral failure
 and the target need only NVAPI, so without `nv::Power` (an older GPU or unsupported BIOS
 limits) the controller uses a plain `nv::Api`; `nv::Power` replaces it when it opens.
 Status reads the target only while it is unknown, and never from a sleeping GPU.
+`vf_curve.*` (in `ec`) applies a V/F curve: the VFE equation control records that differ from
+stock and one client offset per graphics point, with every check before the first write. The
+stock records are kept per GPU, VBIOS, driver and equation list at
+`%ProgramData%/MechControl/VfCurve`. A GPU restart puts the driver's equations back to stock and
+every offset to 0 (measured), so a curve must be applied again after one. The tuner behind the
+V/F curve tab (`vf_model.cpp`, `vf_tuner.*`, library `vf_tuner`) is Jon's VFCURVE tool in C++:
+it finds the clock equation, its lines, corrections and slow-curve switch on the running chip
+and turns a tune into such a curve.
 `gpu_keepawake.*` is the opt-in GPU keep-awake (`gpuKeepAwake` in `settings.json`; the controller
 only stores it). It runs on the UI thread from the window's display, suspend, display-change and
 timer messages, because it must not share the worker's waits. While the screen is off, the PC is

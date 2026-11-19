@@ -62,10 +62,13 @@ struct Api::Native {
         check(s, "packet call");
     }
     void call(uint32_t id, Bytes& b, bool platform = false) {
-        scratch.assign(b.size() + 8192, 0xcd);
-        std::copy(b.begin(), b.end(), scratch.begin() + 4096);
-        call_guarded(id, scratch, platform);
-        std::copy(scratch.begin() + 4096, scratch.end() - 4096, b.begin());
+        // The V/F curve packets are up to 1.4 MB; they get a buffer of their own so that the kept one stays small.
+        Bytes large;
+        auto& guarded = b.size() > 0x10000 ? large : scratch;
+        guarded.assign(b.size() + 8192, 0xcd);
+        std::copy(b.begin(), b.end(), guarded.begin() + 4096);
+        call_guarded(id, guarded, platform);
+        std::copy(guarded.begin() + 4096, guarded.end() - 4096, b.begin());
     }
     uint32_t enforced(void* device) {
         uint32_t value = 0;
