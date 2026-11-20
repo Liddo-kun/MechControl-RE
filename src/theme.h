@@ -19,6 +19,8 @@ bool systemDark();
 bool setPalette(bool dark);
 // A brush of the color, kept until the palette changes.
 HBRUSH brush(COLORREF color);
+// A color x of the way from a to b.
+COLORREF mix(COLORREF a, COLORREF b, double x);
 // GDI+ starts on the first draw, so the hidden tray app never loads it.
 bool gdiplus();
 // An antialiased rounded rectangle; a border of another color is drawn on r's edge pixels.

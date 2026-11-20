@@ -12,7 +12,6 @@ struct VfHost {
     // Sends a command to the worker and returns its sequence. A busy command disables the window like other device
     // operations and returns 0 while another one runs.
     std::function<std::uint64_t(ControlCommand, bool busy)> submit;
-    std::function<std::optional<int>()> gpu_temp;           // the EC's GPU temperature
     std::function<void(const std::wstring& reason)> report; // opens a GitHub issue about this GPU
 };
 struct VfFonts {

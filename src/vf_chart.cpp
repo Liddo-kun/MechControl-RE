@@ -1,9 +1,9 @@
 #include "vf_chart.h"
+#include "config_text.h"
 #include "theme.h"
 #include <objidl.h>
 #include <windowsx.h>
 #include <algorithm>
-#include <charconv>
 #include <cmath>
 #include <stdexcept>
 // gdiplus.h expects the min/max macros that NOMINMAX removes.
@@ -18,17 +18,6 @@ namespace {
 namespace gp = Gdiplus;
 constexpr wchar_t chartClass[] = L"MechControl.Native.VfChart";
 gp::Color color(COLORREF c, BYTE alpha = 255) { return {alpha, GetRValue(c), GetGValue(c), GetBValue(c)}; }
-COLORREF mix(COLORREF a, COLORREF b, double x) {
-    auto c = [x](int p, int q) { return int(p + (q - p) * x + 0.5); };
-    return RGB(c(GetRValue(a), GetRValue(b)), c(GetGValue(a), GetGValue(b)), c(GetBValue(a), GetBValue(b)));
-}
-// A number as the page shows it: the shortest text that reads back as the same value.
-std::wstring number(double v) {
-    char b[32];
-    auto end = std::to_chars(b, b + sizeof b, v).ptr;
-    return std::wstring(b, end);
-}
-std::wstring sign(double v) { return (v > 0 ? L"+" : L"") + number(v); }
 // Tick values from a to b, about n of them, on steps of 1, 2, 2.5 or 5 times a power of ten.
 std::vector<double> ticks(double a, double b, int n) {
     double raw = (b - a) / n, mag = std::pow(10, std::floor(std::log10(raw))), step = 10 * mag;
@@ -42,6 +31,19 @@ std::vector<double> ticks(double a, double b, int n) {
         out.push_back(std::round(v * 1e6) / 1e6);
     return out;
 }
+}
+
+std::wstring number(double v) { return config::wide(config::decimal_text(v, 3, true)); }
+std::wstring sign(double v) { return (v > 0 ? L"+" : L"") + number(v); }
+std::wstring runs(const std::vector<double>& mv, const std::vector<int>& points) {
+    std::wstring s;
+    for (size_t k = 0; k < points.size(); ++k) {
+        size_t j = k;
+        while (j + 1 < points.size() && points[j + 1] == points[j] + 1) ++j;
+        s += (s.empty() ? L"" : L", ") + number(mv[points[k]]) + (j > k ? L"–" + number(mv[points[j]]) : L"");
+        k = j;
+    }
+    return s + L" mV";
 }
 
 VfChart::VfChart(HINSTANCE instance, HWND parent) {
@@ -148,20 +150,13 @@ void VfChart::hover(POINT at) {
 // "750–762.5, 800 mV: +15 MHz" for the selected points and their offsets.
 std::wstring VfChart::selection_text() const {
     std::vector<int> ps(selected_.begin(), selected_.end());
-    std::wstring s;
-    for (size_t k = 0; k < ps.size(); ++k) {
-        size_t j = k;
-        while (j + 1 < ps.size() && ps[j + 1] == ps[j] + 1) ++j;
-        s += (s.empty() ? L"" : L", ") + number(plot_.mv[ps[k]]) + (j > k ? L"–" + number(plot_.mv[ps[j]]) : L"");
-        k = j;
-    }
     double lo = INFINITY, hi = -INFINITY;
     for (int p : ps) {
         double o = p < int(plot_.offsets.size()) ? plot_.offsets[p] : 0;
         lo = std::min(lo, o);
         hi = std::max(hi, o);
     }
-    return s + L" mV: " + (lo == hi ? sign(lo) : sign(lo) + L" to " + sign(hi)) + L" MHz";
+    return runs(plot_.mv, ps) + L": " + (lo == hi ? sign(lo) : sign(lo) + L" to " + sign(hi)) + L" MHz";
 }
 void VfChart::paint(HDC target) {
     RECT client{};
@@ -266,19 +261,6 @@ void VfChart::paint(HDC target) {
         RECT rr{LONG(b.X), LONG(b.Y), LONG(std::ceil(b.X + b.Width)), LONG(std::ceil(b.Y + b.Height))};
         roundRect(dc, rr, int(px(4)), fill, line);
     };
-    if (!plot_.notes.empty()) {
-        float y = T + px(4), w = 0, h = 0;
-        for (auto& s : plot_.notes) {
-            auto m = measure(s, bold);
-            w = std::max(w, m.Width);
-            h += m.Height;
-        }
-        box({L + px(6), y, w + px(10), h + px(4)}, c.card, c.border);
-        for (auto& s : plot_.notes) {
-            g.DrawString(s.c_str(), -1, &bold, gp::PointF(L + px(11), y + px(2)), &ink);
-            y += measure(s, bold).Height;
-        }
-    }
     // In the strip above the plot, from the right: Reset view while the view is zoomed or moved, then the selection
     // with its up, down and clear buttons.
     for (auto& b : buttons_) b = {};
