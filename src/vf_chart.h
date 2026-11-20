@@ -29,7 +29,6 @@ struct VfPlot {
     double step = 7.5;           // the clock step
     std::vector<VfLine> lines;
     std::vector<VfSeries> series;
-    std::wstring axis;     // the clock axis title
     bool relative = false; // the values are differences
 };
 // A voltage, clock or temperature as the tab shows it (up to three decimals), with a sign, and points as voltage runs
@@ -65,6 +64,8 @@ private:
     View view() const;
     int nearest(double mv) const;
     int hit(POINT) const; // 1 Reset view, 2 up, 3 down, 4 clear selection
+    // Over the plot: not on Reset view or the selection bar, which float over it.
+    bool onPlot(POINT) const;
     void pick(POINT, bool shift, bool control);
     void hover(POINT);
     std::wstring selection_text() const;
@@ -82,7 +83,7 @@ private:
         bool moved = false;
     };
     std::optional<Drag> drag_;
-    RECT buttons_[5]{}; // as hit() numbers them; empty where not shown
+    RECT buttons_[5]{}; // as hit() numbers them, and 0 the selection bar under 2-4; empty where not shown
     struct Kept;
     std::unique_ptr<Kept> kept_;
 };

@@ -274,9 +274,9 @@ struct VfTab::Impl {
         for (int p = 0; p < t.points(); ++p) pointMv.push_back(t.mv(p));
         for (auto& s : t.sections)
             for (int h : s.heads) lineCards.push_back({h, w(s.name)});
-        view.stock[sixty] = view.fresh[sixty] = view.fresh[sixty + 1] = view.band[sixty] = true;
+        view.stock[sixty] = view.fresh[sixty] = view.band[sixty] = true;
         modeBox = make(panel, WC_COMBOBOXW, L"", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL);
-        linesCheck = make(panel, L"BUTTON", L"Draw the lines behind the new curve", WS_TABSTOP | BS_AUTOCHECKBOX);
+        linesCheck = make(root, L"BUTTON", L"Draw Equation Guidelines", WS_TABSTOP | BS_AUTOCHECKBOX);
         referenceButton = make(panel, L"BUTTON", L"Reference CSV…", WS_TABSTOP | BS_PUSHBUTTON);
         tip(referenceButton,
             L"A curve measured with another tool (a CSV with the columns domain, index and actual_<band>), shown as crosses. Once one is loaded, the plot can show the difference from it.");
@@ -456,8 +456,13 @@ struct VfTab::Impl {
         auto card = lastFrames[k];
         card.rect.bottom += by;
         if (!by || frames[k] != card) return false;
-        for (size_t j = k + 1; j < frames.size(); ++j)
+        for (size_t j = k + 1; j < frames.size(); ++j) {
+            // A card beside it (GPU Readback) grows with it.
+            auto beside = lastFrames[j];
+            beside.rect.bottom += by;
+            if (lastFrames[j].rect.top == card.rect.top && frames[j] == beside) continue;
             if (lastFrames[j].rect.top < below || frames[j] != moved(lastFrames[j])) return false;
+        }
         // The texts below the card, which follow those in and above it.
         auto under = [](const std::vector<PageText>& list, int y) {
             return std::ranges::find_if(list, [&](const PageText& x) { return x.rect.top >= y; });
@@ -547,9 +552,7 @@ struct VfTab::Impl {
             }
     }
     // The clock equation's stock floor or ceiling; none where it has no limit.
-    std::optional<double> stockLimit(const Limit& l) const {
-        return limit(tuner->m.E[tuner->meta.root].*l.stock);
-    }
+    std::optional<double> stockLimit(const Limit& l) const { return limit(tuner->m.E[tuner->meta.root].*l.stock); }
 
     // ---- the chart ----
     void plot() {
@@ -579,8 +582,7 @@ struct VfTab::Impl {
         };
         auto name = [](const wchar_t* what, int c) { return what + std::to_wstring(columns[c].celsius) + L" °C"; };
         for (int c = 0; c < 8; ++c)
-            if (view.band[c] && have(c))
-                p.series.push_back({name(L"reference ", c), hue(c), '+', series(sheet[c], c)});
+            if (view.band[c] && have(c)) p.series.push_back({name(L"reference ", c), hue(c), '+', series(sheet[c], c)});
         for (int c = 0; c < 8; ++c)
             if (view.fresh[c]) p.series.push_back({name(L"new ", c), hue(c), 'f', series(newCurve(c), c)});
         for (int c = 0; c < 8; ++c)
@@ -600,9 +602,6 @@ struct VfTab::Impl {
                         p.lines.push_back(std::move(line));
                     }
             }
-        p.axis = view.mode == 1   ? L"MHz above stock at the same temperature"
-                 : view.mode == 2 ? L"MHz above the reference curve at the same temperature"
-                                  : L"MHz";
         p.relative = view.mode != 0;
         chart->set(std::move(p));
     }
@@ -720,9 +719,9 @@ struct VfTab::Impl {
                     row.spans.push_back({3, {text(L"stays this value", true)}});
                 } else {
                     for (int j = 0; j < 10; ++j)
-                        row.spans.push_back(
-                            {2 + j, j < e.nk ? std::vector{cell(r.equ, [j](const Equation& x) { return x.k[j]; })}
-                                             : std::vector<VfItem>{}});
+                        row.spans.push_back({2 + j, j < e.nk ? std::vector{cell(
+                                                                   r.equ, [j](const Equation& x) { return x.k[j]; })}
+                                                             : std::vector<VfItem>{}});
                     row.spans.push_back({12, {cell(r.equ, lo)}});
                     row.spans.push_back({13, {cell(r.equ, hi)}});
                 }
@@ -732,8 +731,7 @@ struct VfTab::Impl {
                 row.spans.push_back({1, what(r, L"test")});
                 row.spans.push_back({2,
                                      {text(L"if " + w(r.var) + L" " + setting(now.func, {L"=", L"≥", L">"}) + L" "),
-                                      cell(r.equ, crit),
-                                      text(L" then " + target(r.yes) + L", else " + target(r.no))}});
+                                      cell(r.equ, crit), text(L" then " + target(r.yes) + L", else " + target(r.no))}});
             } else {
                 row.spans.push_back({1, what(r, L"choice")});
                 row.spans.push_back({2,
@@ -798,6 +796,7 @@ struct VfTab::Impl {
                 openError.clear();
                 tuner = r.vf->tuner;
                 build();
+                layoutRoot(); // for the guidelines check box
                 appliedTune(r.vf->tune);
                 read(r.vf, L"");
             }
@@ -884,8 +883,7 @@ struct VfTab::Impl {
             b.ok = fit.equal == n;
             b.verdict = b.ok ? L"Readback matches this tab: all " + std::to_wstring(n) + L" points equal"
                              : L"Readback differs from this tab at " + std::to_wstring(n - fit.equal) + of + L".";
-            b.more = L"Compared at " + number(fit.celsius) +
-                     L" °C, the temperature at which the calculation fits the driver's curve best.";
+            b.more = L"Compared at " + number(fit.celsius) + L" °C";
             if (fit.offsets)
                 b.offsets = L"With the Afterburner Style OC offsets, the final clock differs from this tab at " +
                             std::to_wstring(fit.offsets) + of + L".";
@@ -1025,7 +1023,8 @@ struct VfTab::Impl {
             auto bands = tuner->reference(*path);
             for (int c = 0; c < 8; ++c) {
                 auto it = *columns[c].band ? bands.find(columns[c].band) : bands.end();
-                bool any = it != bands.end() && std::ranges::any_of(it->second, [](double v) { return !std::isnan(v); });
+                bool any =
+                    it != bands.end() && std::ranges::any_of(it->second, [](double v) { return !std::isnan(v); });
                 sheet[c] = any ? it->second : std::vector<double>{};
             }
             sheetName = path->filename().wstring();
@@ -1079,8 +1078,18 @@ struct VfTab::Impl {
             MoveWindow(b, x, y, width, h, TRUE);
             x += width + ref(8);
         }
+        // The guidelines check box ends the row once the tuner is open; the status fills the space before it.
+        int status = rc.right - ref(16);
+        if (linesCheck) {
+            auto s = windowText(linesCheck);
+            SIZE size{};
+            GetTextExtentPoint32W(dc, s.c_str(), int(s.size()), &size);
+            int width = int(size.cx) + ref(40), box = ref(28);
+            status -= width + ref(16);
+            MoveWindow(linesCheck, status + ref(16), y + (h - box) / 2, width, box, TRUE);
+        }
         ReleaseDC(root, dc);
-        statusRect = {x + ref(8), y, rc.right - ref(16), y + h};
+        statusRect = {x + ref(8), y, status, y + h};
         // The chart keeps its shape: 2.5 times as wide as high, and at most half of the height below the buttons.
         int top = y + h + ref(10), width = rc.right - 2 * ref(16), height = std::max(0, int(rc.bottom) - top);
         int chartHeight = std::min(int(width / 2.5), height / 2), chartWidth = std::min(width, int(chartHeight * 2.5));
@@ -1192,25 +1201,31 @@ struct VfTab::Impl {
             auto summary = parts.empty() ? L"None" : join(parts, L" + ") + (sw && parts.size() == 1 ? L" only" : L"");
             if (!sw && !parts.empty()) summary[0] = towupper(summary[0]);
             if (!removed.empty()) summary += L" (" + join(removed, L", ") + L")";
-            s.open(L"Current Changes");
-            say(summary, left, end, pal.text);
+            // Side by side with GPU Readback, both as high as the higher one.
+            int top = s.y, mid = readback ? (x + right) / 2 : right + gap / 2, l = left, e = mid - gap / 2 - ref(15);
+            s.open(L"Current Changes", x, mid - gap / 2);
+            say(summary, l, e, pal.text);
             if (!ids.empty()) {
                 std::vector<std::wstring> sws;
                 for (auto& [i, fixed] : t.switches) sws.push_back(std::to_wstring(i));
                 say(L"Equations " + join(ids, L", ") +
                         (sw ? L", and " + join(sws, L", ") + L" to disable the slow curve" : L"") + L".",
-                    left, end, pal.muted);
+                    l, e, pal.muted);
             }
             s.close();
-        }
-        if (readback) {
-            s.open(L"GPU Readback");
-            say(readback->what, left, end, pal.text, fonts.bold);
-            say(readback->verdict, left, end, readback->ok ? pal.ok : pal.error);
-            say(readback->offsets, left, end, pal.error);
-            if (!readback->more.empty()) s.y += ref(4);
-            say(readback->more, left, end, pal.muted);
-            s.close();
+            if (readback) {
+                int bottom = s.y;
+                s.y = top;
+                l = mid + gap / 2 + ref(15);
+                s.open(L"GPU Readback", mid + gap / 2, right);
+                say(readback->what, l, end, pal.text, fonts.bold);
+                say(readback->verdict, l, end, readback->ok ? pal.ok : pal.error);
+                say(readback->offsets, l, end, pal.error);
+                say(readback->more, l, end, pal.muted);
+                s.close();
+                s.y = std::max(s.y, bottom);
+                for (auto f : {s.frames.size() - 2, s.frames.size() - 1}) s.frames[f].rect.bottom = s.y - ref(12);
+            }
         }
         // Plot: what the chart shows.
         {
@@ -1228,7 +1243,6 @@ struct VfTab::Impl {
                 at += width + ref(16);
             };
             flow(modeBox, widest + ref(60), box, ref(200));
-            flow(linesCheck, extent(fonts.font, windowText(linesCheck)) + ref(40), box);
             flow(referenceButton, extent(fonts.font, windowText(referenceButton)) + ref(30), row);
             auto name = sheetName.empty() ? L"No reference curve" : sheetName;
             int nameWidth = extent(fonts.font, name);

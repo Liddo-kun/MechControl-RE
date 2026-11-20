@@ -174,9 +174,8 @@ void VfChart::dpi(UINT value) {
 RECT VfChart::plot() const {
     RECT r{};
     GetClientRect(window_, &r);
-    // Above: a strip for Reset view and the selection, so they never cover the curve. Below: the voltages, then the
-    // axis title on its own line.
-    return {r.left + LONG(px(58)), r.top + LONG(px(34)), r.right - LONG(px(12)), r.bottom - LONG(px(46))};
+    // Left: the clocks, headed by their unit. Below: the voltages, which end with theirs.
+    return {r.left + LONG(px(42)), r.top + LONG(px(12)), r.right - LONG(px(12)), r.bottom - LONG(px(22))};
 }
 // Fitted to what is shown: every point voltage, and the clocks shown with 5 % room.
 VfChart::View VfChart::view() const {
@@ -205,10 +204,14 @@ int VfChart::hit(POINT at) const {
         if (PtInRect(&buttons_[i], at)) return i;
     return 0;
 }
+bool VfChart::onPlot(POINT at) const {
+    auto r = plot();
+    return PtInRect(&r, at) && !hit(at) && !PtInRect(&buttons_[0], at);
+}
 // A click selects its point; Shift: the range from the last one; Ctrl: adds or removes one.
 void VfChart::pick(POINT at, bool shift, bool control) {
     auto r = plot();
-    if (!PtInRect(&r, at) || plot_.mv.empty()) return;
+    if (!onPlot(at) || plot_.mv.empty()) return;
     int p = nearest(shown_.x0 + double(at.x - r.left) / (r.right - r.left) * (shown_.x1 - shown_.x0));
     if (shift && anchor_ >= 0) {
         if (!control) selected_.clear();
@@ -227,7 +230,7 @@ void VfChart::pick(POINT at, bool shift, bool control) {
 void VfChart::hover(POINT at) {
     auto r = plot();
     int p = -1;
-    if (PtInRect(&r, at) && !plot_.mv.empty() && !hit(at))
+    if (onPlot(at) && !plot_.mv.empty())
         p = nearest(shown_.x0 + double(at.x - r.left) / (r.right - r.left) * (shown_.x1 - shown_.x0));
     if (p == hover_ && (p < 0 || (mouse_.x == at.x && mouse_.y == at.y))) return;
     hover_ = p;
@@ -290,29 +293,27 @@ void VfChart::draw(HDC dc, const RECT& client) {
         return known->second;
     };
     gp::Pen grid(color(mix(c.card, c.border, 0.55))), zero(color(c.muted));
+    // "mV" ends the voltage row; a voltage that would run into it is left out.
+    auto unit = label(L"mV");
+    float unitLeft = R - unit.Width;
+    g.DrawString(L"mV", -1, &font, gp::PointF(unitLeft, B + px(3)), &muted);
     for (double t : ticks(v.x0, v.x1, 12)) {
         g.DrawLine(&grid, X(t), T, X(t), B);
         auto s = number(t);
         auto box = label(s);
-        g.DrawString(s.c_str(), -1, &font, gp::PointF(X(t) - box.Width / 2, B + px(3)), &muted);
+        if (X(t) + box.Width / 2 < unitLeft - px(6))
+            g.DrawString(s.c_str(), -1, &font, gp::PointF(X(t) - box.Width / 2, B + px(3)), &muted);
     }
+    // "MHz" heads the clocks; a clock that would run into it is left out.
+    auto unitTop = label(L"MHz");
+    float headBottom = float(client.top) + px(3) + unitTop.Height;
+    g.DrawString(L"MHz", -1, &font, gp::PointF(L - px(5) - unitTop.Width, float(client.top) + px(3)), &muted);
     for (double t : ticks(v.y0, v.y1, 10)) {
         g.DrawLine(t == 0 ? &zero : &grid, L, Y(t), R, Y(t));
         auto s = number(t);
         auto box = label(s);
-        g.DrawString(s.c_str(), -1, &font, gp::PointF(L - px(5) - box.Width, Y(t) - box.Height / 2), &muted);
-    }
-    {
-        std::wstring s = L"real point voltage (mV)";
-        auto box = label(s);
-        g.DrawString(s.c_str(), -1, &font,
-                     gp::PointF((L + R - box.Width) / 2, float(client.bottom) - box.Height - px(5)), &muted);
-        box = label(plot_.axis);
-        auto state = g.Save();
-        g.TranslateTransform(px(4), (T + B + box.Width) / 2);
-        g.RotateTransform(-90);
-        g.DrawString(plot_.axis.c_str(), -1, &font, gp::PointF(0, 0), &muted);
-        g.Restore(state);
+        if (Y(t) - box.Height / 2 > headBottom)
+            g.DrawString(s.c_str(), -1, &font, gp::PointF(L - px(5) - box.Width, Y(t) - box.Height / 2), &muted);
     }
     int n = int(plot_.mv.size());
     auto mv = [&](int p) { return plot_.mv[p]; };
@@ -370,10 +371,10 @@ void VfChart::draw(HDC dc, const RECT& client) {
         RECT rr{LONG(b.X), LONG(b.Y), LONG(std::ceil(b.X + b.Width)), LONG(std::ceil(b.Y + b.Height))};
         roundRect(dc, rr, int(px(4)), fill, line);
     };
-    // In the strip above the plot, from the right: Reset view while the view is zoomed or moved, then the selection
-    // with its up, down and clear buttons.
+    // Over the bottom right of the plot, where a rising curve leaves room, from the right: Reset view while the view is
+    // zoomed or moved, then the selection with its up, down and clear buttons.
     for (auto& b : buttons_) b = {};
-    float strip = float(client.top) + px(5);
+    float strip = B - px(30);
     auto button = [&](int i, const std::wstring& s, float right, const gp::Font& f) {
         auto m = measure(s, f);
         float w = m.Width + px(12), h = px(20);
@@ -383,7 +384,7 @@ void VfChart::draw(HDC dc, const RECT& client) {
         buttons_[i] = {LONG(b.X), LONG(b.Y), LONG(b.X + b.Width), LONG(b.Y + b.Height)};
         return b.X;
     };
-    float x = view_ ? button(1, L"Reset view", R, font) - px(10) : R;
+    float x = view_ ? button(1, L"Reset view", R - px(6), font) - px(10) : R - px(6);
     if (!selected_.empty()) {
         COLORREF amber = c.dark ? RGB(92, 74, 20) : RGB(255, 244, 200), amberEdge = RGB(217, 184, 74);
         float buttons = px(9);
@@ -392,6 +393,7 @@ void VfChart::draw(HDC dc, const RECT& client) {
         auto m = measure(s, font);
         gp::RectF bar(x - buttons - m.Width - px(12), strip, buttons + m.Width + px(12), px(24));
         box(bar, amber, amberEdge);
+        buttons_[0] = {LONG(bar.X), LONG(bar.Y), LONG(bar.X + bar.Width), LONG(bar.Y + bar.Height)};
         g.DrawString(s.c_str(), -1, &font, gp::PointF(bar.X + px(6), bar.Y + (bar.Height - m.Height) / 2), &ink);
         float bx = button(4, L"✕", x - px(3), symbol) - px(3);
         bx = button(3, L"▼", bx, symbol) - px(3);
@@ -489,8 +491,7 @@ LRESULT VfChart::message(UINT message, WPARAM wp, LPARAM lp) {
             POINT p{};
             GetCursorPos(&p);
             ScreenToClient(window_, &p);
-            auto r = plot();
-            SetCursor(LoadCursorW(nullptr, hit(p) ? IDC_HAND : PtInRect(&r, p) ? IDC_CROSS : IDC_ARROW));
+            SetCursor(LoadCursorW(nullptr, hit(p) ? IDC_HAND : onPlot(p) ? IDC_CROSS : IDC_ARROW));
             return TRUE;
         }
         break;
@@ -498,6 +499,7 @@ LRESULT VfChart::message(UINT message, WPARAM wp, LPARAM lp) {
     case WM_LBUTTONDBLCLK: {
         SetFocus(window_);
         int b = hit(at);
+        if (!b && PtInRect(&buttons_[0], at)) return 0; // the selection's text
         if (message == WM_LBUTTONDBLCLK && !b) {
             reset_view();
             return 0;
