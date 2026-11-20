@@ -388,6 +388,10 @@ HBRUSH brush(COLORREF color) {
     if (!b) b = CreateSolidBrush(color);
     return b;
 }
+COLORREF mix(COLORREF a, COLORREF b, double x) {
+    auto c = [x](int p, int q) { return int(p + (q - p) * x + 0.5); };
+    return RGB(c(GetRValue(a), GetRValue(b)), c(GetGValue(a), GetGValue(b)), c(GetBValue(a), GetBValue(b)));
+}
 bool gdiplus() {
     static const bool started = [] {
         ULONG_PTR token = 0;

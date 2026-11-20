@@ -340,19 +340,28 @@ void Application::checkPages(const std::filesystem::path& directory, const std::
     auto vfSaved = read_json(directory / L"userprofile_4.json")["gpu"]["vfCurve"];
     check(vfSaved["tune"]["global"] == 30 && vfSaved["tune"]["pp"].size() == 1 && !vfSaved["curve"]["records"].empty(),
           "the profile bar's Save stores the applied V/F curve with the tab's settings");
+    // Both tables: every number by line, then the structure. The links follow the issue link.
     auto numbersLink = FindWindowExW(vfPanel, FindWindowExW(vfPanel, nullptr, WC_LINK, nullptr), WC_LINK, nullptr);
-    NMHDR click{numbersLink, 0, UINT(NM_CLICK)};
-    SendMessageW(vfPanel, WM_NOTIFY, 0, reinterpret_cast<LPARAM>(&click));
+    auto structureLink = FindWindowExW(vfPanel, numbersLink, WC_LINK, nullptr);
     auto numbers = FindWindowExW(vfPanel, nullptr, L"MechControl.Native.VfNumbers", nullptr);
-    auto numbersTop = [&] {
-        RECT r{};
-        GetWindowRect(numbers, &r);
-        MapWindowPoints(nullptr, vfPanel, reinterpret_cast<POINT*>(&r), 2);
-        return r.top;
-    };
-    for (int i = 0; i < 400 && numbersTop() > scale(60); ++i) SendMessageW(vfPanel, WM_VSCROLL, SB_LINEDOWN, 0);
-    check(IsWindowVisible(numbers) && numbersTop() <= scale(60), "every equation number is shown on request");
-    capture(L"vf-curve-numbers");
+    auto structure = FindWindowExW(vfPanel, numbers, L"MechControl.Native.VfNumbers", nullptr);
+    for (auto [show, table, name] : {std::tuple(numbersLink, numbers, L"vf-curve-numbers"),
+                                     {structureLink, structure, L"vf-curve-structure"}}) {
+        NMHDR click{show, 0, UINT(NM_CLICK)};
+        SendMessageW(vfPanel, WM_NOTIFY, 0, reinterpret_cast<LPARAM>(&click));
+        auto top = [&] {
+            RECT r{};
+            GetWindowRect(table, &r);
+            MapWindowPoints(nullptr, vfPanel, reinterpret_cast<POINT*>(&r), 2);
+            return r.top;
+        };
+        for (int i = 0; i < 400 && top() > scale(60); ++i) SendMessageW(vfPanel, WM_VSCROLL, SB_LINEDOWN, 0);
+        RECT panel{};
+        GetClientRect(vfPanel, &panel);
+        check(structureLink && IsWindowVisible(table) && top() < panel.bottom - scale(60),
+              "both equation tables are shown on request");
+        capture(name);
+    }
     SendMessageW(vfPanel, WM_VSCROLL, SB_TOP, 0);
     for (auto [name, width, height] :
          {std::tuple(L"vf-curve-small", 760, 480), {L"vf-curve-wide", 1600, 720}, {L"vf-curve-large", 1400, 1050}}) {

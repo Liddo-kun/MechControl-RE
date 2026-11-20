@@ -28,10 +28,14 @@ struct VfPlot {
     double step = 7.5;           // the clock step
     std::vector<VfLine> lines;
     std::vector<VfSeries> series;
-    std::wstring axis;               // the clock axis title
-    bool relative = false;           // the values are differences
-    std::vector<std::wstring> notes; // shown at the top left
+    std::wstring axis;     // the clock axis title
+    bool relative = false; // the values are differences
 };
+// A voltage, clock or temperature as the tab shows it (up to three decimals), with a sign, and points as voltage runs
+// ("750–762.5, 800 mV").
+std::wstring number(double);
+std::wstring sign(double);
+std::wstring runs(const std::vector<double>& mv, const std::vector<int>& points);
 class VfChart {
 public:
     VfChart(HINSTANCE, HWND parent);
