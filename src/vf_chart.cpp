@@ -5,6 +5,8 @@
 #include <windowsx.h>
 #include <algorithm>
 #include <cmath>
+#include <map>
+#include <memory>
 #include <stdexcept>
 // gdiplus.h expects the min/max macros that NOMINMAX removes.
 namespace Gdiplus {
@@ -17,6 +19,7 @@ namespace mech {
 namespace {
 namespace gp = Gdiplus;
 constexpr wchar_t chartClass[] = L"MechControl.Native.VfChart";
+constexpr UINT_PTR canvasTimer = 1;
 gp::Color color(COLORREF c, BYTE alpha = 255) { return {alpha, GetRValue(c), GetGValue(c), GetBValue(c)}; }
 // Tick values from a to b, about n of them, on steps of 1, 2, 2.5 or 5 times a power of ten.
 std::vector<double> ticks(double a, double b, int n) {
@@ -46,7 +49,91 @@ std::wstring runs(const std::vector<double>& mv, const std::vector<int>& points)
     return s + L" mV";
 }
 
-VfChart::VfChart(HINSTANCE instance, HWND parent) {
+// What paint() keeps: the fonts and, while the chart is being redrawn (a slider drag repaints it at every step), the
+// bitmap it draws on, the marks and the sizes of the axis labels. A fresh bitmap of the chart's size alone costs a
+// fifth of a repaint. All but the fonts are let go half a second after the last repaint, so a tab that was hidden is
+// soon at rest.
+struct VfChart::Kept {
+    // A series' mark as GDI+ draws it, copied to each point: drawing the few hundred marks of a chart one by one
+    // takes GDI+ a third of the repaint. One per quarter-pixel position, so a copy is at most 1/8 px off its point.
+    struct Mark {
+        int half = 0;                 // the bitmap is 2 * half + 1 pixels each way, the point in its middle one
+        std::vector<uint32_t> pixels; // premultiplied
+    };
+    UINT dpi = 0;
+    std::unique_ptr<gp::Font> font, bold, symbol;
+    std::map<std::wstring, gp::RectF> labels;
+    std::map<std::tuple<COLORREF, char, int>, Mark> marks; // by color, kind and position within the pixel
+    HDC dc = nullptr;
+    HBITMAP bitmap = nullptr;
+    HGDIOBJ old = nullptr;
+    uint32_t* bits = nullptr;
+    SIZE size{};
+    ~Kept() { release(); }
+    const Mark& mark(COLORREF c, char kind, int place, float scale) {
+        if (marks.size() > 400) marks.clear();
+        auto [known, fresh] = marks.try_emplace({c, kind, place});
+        auto& m = known->second;
+        if (!fresh) return m;
+        m.half = int(std::ceil(5.5f * scale)) + 1;
+        int side = 2 * m.half + 1;
+        m.pixels.resize(size_t(side) * side);
+        gp::Bitmap image(side, side, side * 4, PixelFormat32bppPARGB, reinterpret_cast<BYTE*>(m.pixels.data()));
+        gp::Graphics g(&image);
+        g.SetSmoothingMode(gp::SmoothingModeAntiAlias);
+        float x = m.half + (place % 4 + 0.5f) / 4, y = m.half + (place / 4 + 0.5f) / 4;
+        gp::SolidBrush fill(color(c));
+        gp::Pen pen(color(c), 1.3f * scale);
+        if (kind == 'f')
+            g.FillEllipse(&fill, x - 2.3f * scale, y - 2.3f * scale, 4.6f * scale, 4.6f * scale);
+        else if (kind == 'o')
+            g.DrawEllipse(&pen, x - 3.8f * scale, y - 3.8f * scale, 7.6f * scale, 7.6f * scale);
+        else {
+            g.DrawLine(&pen, x - 3.5f * scale, y, x + 3.5f * scale, y);
+            g.DrawLine(&pen, x, y - 3.5f * scale, x, y + 3.5f * scale);
+        }
+        return m;
+    }
+    // Copies a mark over the bitmap within `clip`, its point at (x, y).
+    void stamp(const Mark& m, float x, float y, const RECT& clip) {
+        int left = int(std::floor(x)) - m.half, top = int(std::floor(y)) - m.half, side = 2 * m.half + 1;
+        for (int j = std::max(0, int(clip.top) - top); j < side && top + j < clip.bottom; ++j) {
+            auto from = m.pixels.data() + size_t(j) * side;
+            auto to = bits + size_t(top + j) * size.cx + left;
+            for (int i = std::max(0, int(clip.left) - left); i < side && left + i < clip.right; ++i) {
+                uint32_t s = from[i], keep = 255 - (s >> 24);
+                if (keep == 255) continue;
+                // Each color of the bitmap, scaled by keep / 255, with the mark's added.
+                uint32_t rb = (to[i] & 0xff00ff) * keep + 0x800080, g = (to[i] & 0x00ff00) * keep + 0x008000;
+                rb = ((rb + ((rb >> 8) & 0xff00ff)) >> 8) & 0xff00ff;
+                g = ((g + ((g >> 8) & 0x00ff00)) >> 8) & 0x00ff00;
+                to[i] = (rb | g) + (s & 0xffffff);
+            }
+        }
+    }
+    void release() {
+        if (!dc) return;
+        SelectObject(dc, old);
+        DeleteObject(bitmap);
+        DeleteDC(dc);
+        dc = nullptr;
+    }
+    HDC canvas(HDC target, SIZE wanted) {
+        if (dc && (size.cx != wanted.cx || size.cy != wanted.cy)) release();
+        if (!dc) {
+            BITMAPINFO info{};
+            info.bmiHeader = {sizeof(BITMAPINFOHEADER), wanted.cx, -wanted.cy, 1, 32, BI_RGB};
+            dc = CreateCompatibleDC(target);
+            bitmap = CreateDIBSection(target, &info, DIB_RGB_COLORS, reinterpret_cast<void**>(&bits), nullptr, 0);
+            old = SelectObject(dc, bitmap);
+            SetBkMode(dc, TRANSPARENT);
+            size = wanted;
+        }
+        return dc;
+    }
+};
+
+VfChart::VfChart(HINSTANCE instance, HWND parent) : kept_(std::make_unique<Kept>()) {
     WNDCLASSW c{};
     if (!GetClassInfoW(instance, chartClass, &c)) {
         c.style = CS_DBLCLKS;
@@ -162,18 +249,28 @@ void VfChart::paint(HDC target) {
     RECT client{};
     GetClientRect(window_, &client);
     if (IsRectEmpty(&client)) return;
-    Buffer buffer(target, client);
-    auto dc = buffer.dc;
+    auto dc = kept_->canvas(target, {client.right, client.bottom});
+    SetTimer(window_, canvasTimer, 500, nullptr);
+    FillRect(dc, &client, brush(palette().window));
+    roundRect(dc, client, int(px(8)), palette().card, palette().border);
+    if (gdiplus()) draw(dc, client);
+    BitBlt(target, 0, 0, client.right, client.bottom, dc, 0, 0, SRCCOPY);
+}
+void VfChart::draw(HDC dc, const RECT& client) {
     auto& c = palette();
-    FillRect(dc, &client, brush(c.window));
-    roundRect(dc, client, int(px(8)), c.card, c.border);
-    if (!gdiplus()) return;
+    auto& k = *kept_;
+    if (k.dpi != dpi_) {
+        k.dpi = dpi_;
+        k.font = std::make_unique<gp::Font>(L"Segoe UI", px(11), gp::FontStyleRegular, gp::UnitPixel);
+        k.bold = std::make_unique<gp::Font>(L"Segoe UI", px(11), gp::FontStyleBold, gp::UnitPixel);
+        k.symbol = std::make_unique<gp::Font>(L"Segoe UI Symbol", px(10), gp::FontStyleRegular, gp::UnitPixel);
+        k.labels.clear();
+        k.marks.clear();
+    }
+    auto &font = *k.font, &bold = *k.bold, &symbol = *k.symbol;
     gp::Graphics g(dc);
     g.SetSmoothingMode(gp::SmoothingModeAntiAlias);
     g.SetTextRenderingHint(gp::TextRenderingHintClearTypeGridFit);
-    gp::Font font(L"Segoe UI", px(11), gp::FontStyleRegular, gp::UnitPixel),
-        bold(L"Segoe UI", px(11), gp::FontStyleBold, gp::UnitPixel),
-        symbol(L"Segoe UI Symbol", px(10), gp::FontStyleRegular, gp::UnitPixel);
     gp::SolidBrush ink(color(c.text)), muted(color(c.muted));
     auto r = plot();
     auto v = shown_ = view();
@@ -185,25 +282,32 @@ void VfChart::paint(HDC target) {
         g.MeasureString(s.c_str(), -1, &f, gp::PointF(0, 0), &box);
         return box;
     };
+    // An axis label's size; the same labels come back at every repaint.
+    auto label = [&](const std::wstring& s) {
+        if (k.labels.size() > 500) k.labels.clear();
+        auto [known, fresh] = k.labels.try_emplace(s);
+        if (fresh) known->second = measure(s, font);
+        return known->second;
+    };
     gp::Pen grid(color(mix(c.card, c.border, 0.55))), zero(color(c.muted));
     for (double t : ticks(v.x0, v.x1, 12)) {
         g.DrawLine(&grid, X(t), T, X(t), B);
         auto s = number(t);
-        auto box = measure(s, font);
+        auto box = label(s);
         g.DrawString(s.c_str(), -1, &font, gp::PointF(X(t) - box.Width / 2, B + px(3)), &muted);
     }
     for (double t : ticks(v.y0, v.y1, 10)) {
         g.DrawLine(t == 0 ? &zero : &grid, L, Y(t), R, Y(t));
         auto s = number(t);
-        auto box = measure(s, font);
+        auto box = label(s);
         g.DrawString(s.c_str(), -1, &font, gp::PointF(L - px(5) - box.Width, Y(t) - box.Height / 2), &muted);
     }
     {
         std::wstring s = L"real point voltage (mV)";
-        auto box = measure(s, font);
+        auto box = label(s);
         g.DrawString(s.c_str(), -1, &font,
                      gp::PointF((L + R - box.Width) / 2, float(client.bottom) - box.Height - px(5)), &muted);
-        box = measure(plot_.axis, font);
+        box = label(plot_.axis);
         auto state = g.Save();
         g.TranslateTransform(px(4), (T + B + box.Width) / 2);
         g.RotateTransform(-90);
@@ -225,36 +329,41 @@ void VfChart::paint(HDC target) {
         g.DrawLine(&line, X(mv(hover_)), T, X(mv(hover_)), B);
     }
     auto clampY = [&](double y) { return std::clamp(Y(y), -1e5f, 1e5f); };
+    // What lies wholly outside the plot is not handed to GDI+: most of a steep line does, and clipping it there costs
+    // as much as drawing it.
+    float room = px(6);
+    auto outside = [&](const gp::PointF& a, const gp::PointF& b) {
+        return (a.X < L - room && b.X < L - room) || (a.X > R + room && b.X > R + room) ||
+               (a.Y < T - room && b.Y < T - room) || (a.Y > B + room && b.Y > B + room);
+    };
+    std::vector<gp::PointF> run;
     for (auto& l : plot_.lines) {
         gp::Pen pen(color(l.color, l.hot ? 242 : 77), l.hot ? px(1.8f) : px(1));
-        std::vector<gp::PointF> run;
         auto flush = [&] {
             if (run.size() > 1) g.DrawLines(&pen, run.data(), int(run.size()));
             run.clear();
         };
-        for (int p = 0; p < n && p < int(l.y.size()); ++p)
-            if (l.y[p])
-                run.push_back({X(mv(p)), clampY(*l.y[p])});
-            else
+        std::optional<gp::PointF> last;
+        for (int p = 0; p < n && p < int(l.y.size()); ++p) {
+            auto point = l.y[p] ? std::optional(gp::PointF(X(mv(p)), clampY(*l.y[p]))) : std::nullopt;
+            if (!point || !last || outside(*last, *point))
                 flush();
+            else if (run.empty())
+                run.push_back(*last);
+            if (point && last && !outside(*last, *point)) run.push_back(*point);
+            last = point;
+        }
         flush();
     }
-    for (auto& s : plot_.series) {
-        gp::SolidBrush fill(color(s.color));
-        gp::Pen pen(color(s.color), px(1.3f));
+    g.Flush(gp::FlushIntentionSync); // the marks go straight to the bitmap
+    for (auto& s : plot_.series)
         for (int p = 0; p < n && p < int(s.y.size()); ++p) {
             if (!s.y[p]) continue;
-            float x = X(mv(p)), y = clampY(*s.y[p]);
-            if (s.mark == 'f')
-                g.FillEllipse(&fill, x - px(2.3f), y - px(2.3f), px(4.6f), px(4.6f));
-            else if (s.mark == 'o')
-                g.DrawEllipse(&pen, x - px(3.8f), y - px(3.8f), px(7.6f), px(7.6f));
-            else {
-                g.DrawLine(&pen, x - px(3.5f), y, x + px(3.5f), y);
-                g.DrawLine(&pen, x, y - px(3.5f), x, y + px(3.5f));
-            }
+            gp::PointF at(X(mv(p)), clampY(*s.y[p]));
+            if (outside(at, at)) continue;
+            int place = int((at.X - std::floor(at.X)) * 4) + 4 * int((at.Y - std::floor(at.Y)) * 4);
+            k.stamp(k.mark(s.color, s.mark, place, px(1)), at.X, at.Y, r);
         }
-    }
     g.ResetClip();
     // A box with text at a corner of the plot or by the mouse.
     auto box = [&](const gp::RectF& b, COLORREF fill, COLORREF line) {
@@ -360,6 +469,14 @@ LRESULT VfChart::message(UINT message, WPARAM wp, LPARAM lp) {
         return 0;
     }
     case WM_SIZE: InvalidateRect(window_, nullptr, FALSE); return 0;
+    case WM_TIMER:
+        if (wp == canvasTimer) {
+            KillTimer(window_, canvasTimer);
+            kept_->release();
+            kept_->marks.clear();
+            kept_->labels.clear();
+        }
+        return 0;
     case WM_GETDLGCODE: {
         auto m = reinterpret_cast<MSG*>(lp);
         return DLGC_WANTARROWS |

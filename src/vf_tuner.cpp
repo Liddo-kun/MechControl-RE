@@ -97,21 +97,23 @@ std::vector<double> Tuner::curve(const Equations& E, double celsius) const {
     return vf::curve(m, E, meta.root, meta.uv, celsius, meta.step);
 }
 Calc Tuner::calc(const Equations& E, double celsius) const {
-    std::set<int> shown; // the cards' lines
-    for (auto& s : sections) shown.insert(s.heads.begin(), s.heads.end());
     Calc out;
     int n = points();
-    for (int h : shown) out.lines[h].assign(n, std::nullopt);
+    std::vector<std::vector<std::optional<double>>*> lines; // as watched
+    for (int h : lines_) lines.push_back(&out.lines[h]);
+    for (auto line : lines) line->resize(n);
+    out.raw.reserve(n);
+    out.win.reserve(n);
+    out.clock.reserve(n);
     auto& top = m.at(E, meta.root);
-    std::vector<std::optional<double>> values(E.size());
+    Env env(m, E, meta.uv[0], celsius, &watch_);
+    std::vector<int> path;
     for (int p = 0; p < n; ++p) {
-        Env env(m, E, meta.uv[p], celsius);
-        std::ranges::fill(values, std::nullopt);
-        env.values = &values;
-        std::vector<int> path;
+        env.voltage(meta.uv[p]);
+        path.clear();
         double raw = env.equ(meta.root, &path);
         // The main formula that sets it: the first card's line on the result's path.
-        auto head = std::ranges::find_if(path, [&](int i) { return shown.contains(i); });
+        auto head = std::ranges::find_if(path, [&](int i) { return watch_[i] >= 0; });
         int win = std::abs(top.lo) < unbounded && raw == top.lo   ? Calc::floor
                   : std::abs(top.hi) < unbounded && raw == top.hi ? Calc::ceiling
                   : head != path.end()                            ? *head
@@ -120,14 +122,13 @@ Calc Tuner::calc(const Equations& E, double celsius) const {
             raw = out.raw[p - 1];
             win = Calc::held_flat;
         }
-        for (int h : shown) out.lines[h][p] = values[h];
+        for (size_t k = 0; k < lines.size(); ++k) (*lines[k])[p] = env.watched[k];
         out.raw.push_back(raw);
         out.win.push_back(win);
         out.clock.push_back(to_step(raw, meta.step));
     }
     return out;
 }
-
 // ---- discovery: which equations can matter on this chip ----
 namespace {
 std::vector<std::pair<std::string, std::string>> section_names(size_t n) {
@@ -283,15 +284,21 @@ void Tuner::discover() {
         if (v.empty()) v.assign(cells, false);
         v[c] = true;
     };
-    for (size_t ti = 0; ti < nt; ++ti)
+    std::vector<char> seen(fast.size());
+    std::vector<int> path;
+    for (size_t ti = 0; ti < nt; ++ti) {
+        Env env(m, fast, meta.uv[0], ts_[ti]);
         for (int p = 0; p < n; ++p) {
-            std::set<int> seen;
-            std::vector<int> path;
-            Env(m, fast, meta.uv[p], ts_[ti]).equ(meta.root, &path, &seen);
+            std::ranges::fill(seen, char(0));
+            path.clear();
+            env.voltage(meta.uv[p]);
+            env.equ(meta.root, &path, &seen);
             size_t c = size_t(p) * nt + ti;
-            for (int i : seen) mark(fast[i].leaf() ? vis : nodes, i, c);
+            for (int i = 0; i < int(seen.size()); ++i)
+                if (seen[i]) mark(fast[i].leaf() ? vis : nodes, i, c);
             for (int i : path) mark(win, i, c);
         }
+    }
     auto each = [&](const Cells& cs, auto f) {
         for (size_t c = 0; c < cs.size(); ++c)
             if (cs[c]) f(int(c / nt), ts_[c % nt], c);
@@ -455,6 +462,12 @@ void Tuner::discover() {
             for (auto& r : s.chains.back().second) listed.insert(r.equ);
         }
     }
+    // The cards' lines, which calc() watches.
+    for (auto& s : sections) lines_.insert(lines_.end(), s.heads.begin(), s.heads.end());
+    std::ranges::sort(lines_);
+    lines_.erase(std::unique(lines_.begin(), lines_.end()), lines_.end());
+    watch_.assign(m.E.size(), -1);
+    for (size_t k = 0; k < lines_.size(); ++k) watch_[lines_[k]] = int(k);
     find_rules();
     // The structure above the heads: the compares on voltage or temperature and the choices that were visited.
     for (auto& [i, cs] : nodes) {

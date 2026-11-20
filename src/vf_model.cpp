@@ -95,7 +95,7 @@ Model::Model(const Bytes& info, const Bytes& records, const Bytes& variable_info
         state[i] = 2;
         return sym[i];
     };
-    for (size_t i = 0; i < count; ++i) work(work, i);
+    for (size_t i = 0; i < count; ++i) varies.push_back(work(work, i).contains(voltage));
 }
 Equation Model::read(int i, std::span<const uint8_t> c) const {
     auto e = E[i];
@@ -170,8 +170,19 @@ std::set<int> Model::tree(int root) const {
     return seen;
 }
 
-Env::Env(const Model& model, const Equations& list, double uv, double celsius)
-    : m(model), E(list), uv_(uv), celsius_(celsius), value_(model.V.size()), known_(model.V.size()) {}
+Env::Env(const Model& model, const Equations& list, double uv, double celsius, const std::vector<int>* watch)
+    : m(model), E(list), watch_(watch), uv_(uv), celsius_(celsius), value_(model.V.size()), known_(model.V.size()),
+      kind_(list.size()), kept_(list.size()) {
+    if (!watch_) return;
+    if (watch_->size() != E.size()) throw std::logic_error("V/F watch list of another equation list");
+    for (int place : *watch_) watched.resize(std::max(watched.size(), size_t(place + 1)));
+}
+void Env::voltage(double uv) {
+    uv_ = uv;
+    for (size_t i = 0; i < known_.size(); ++i)
+        if (m.varies[i]) known_[i] = 0;
+    std::ranges::fill(watched, std::nullopt);
+}
 double Env::var(int i) {
     if (i < 0 || size_t(i) >= m.V.size())
         throw std::runtime_error("A V/F equation refers to variable " + std::to_string(i) + ", which does not exist");
@@ -207,43 +218,83 @@ double Env::formula(const Equation& e) {
     if (e.nk == 10) r += k[6] * x[2] + k[7] * x[2] * x[2] + k[8] * x[0] * x[2] + k[9] * x[1] * x[2];
     return r;
 }
-double Env::equ(int i, std::vector<int>* path, std::set<int>* seen) {
+// Whether equation i (a valid index) can be kept: nothing under it reads a variable that depends on the voltage, and
+// nothing under it is watched (a watched equation is evaluated at every point that reaches it). Anything unusual (a
+// loop, a reference that does not exist) counts as depending on the voltage, so the evaluation meets it as it is.
+bool Env::kept(int i) {
+    if (kind_[i]) return kind_[i] == 3;
+    kind_[i] = 1;
+    auto& e = E[i];
+    auto steady = [&](int v) { return v >= 0 && size_t(v) < m.varies.size() && !m.varies[v]; };
+    auto under = [&](int k) { return k >= 0 && size_t(k) < E.size() && kept(k); };
+    bool keep = !(watch_ && (*watch_)[i] >= 0);
+    if (e.type == 1) keep = keep && steady(e.var) && under(e.yes) && under(e.no) && (!e.ref || under(e.refidx));
+    if (e.type == 2) keep = keep && under(e.a) && under(e.b);
+    for (int j = 0; keep && e.leaf() && j < e.nvars; ++j) keep = steady(e.vars[j]);
+    keep = keep && (e.next < 0 || under(e.next));
+    kind_[i] = keep ? 3 : 2;
+    return keep;
+}
+double Env::equ(int i, std::vector<int>* path, std::vector<char>* seen) {
     auto& e = m.at(E, i);
     if (++depth_ > 10000) throw std::runtime_error("The V/F equations refer to each other in a loop");
-    if (seen) seen->insert(i);
+    double r;
+    if (seen) {
+        (*seen)[i] = 1;
+        r = value(e, i, path, seen);
+    } else if (kept(i)) {
+        auto& k = kept_[i];
+        if (!k.known) {
+            // Its path is worked out apart, as a choice above it may drop a part of `path` again.
+            size_t from = scratch_.size();
+            double v = value(e, i, &scratch_, nullptr);
+            k = {v, leaves_.size(), leaves_.size() + scratch_.size() - from, true};
+            leaves_.insert(leaves_.end(), scratch_.begin() + from, scratch_.end());
+            scratch_.resize(from);
+        }
+        if (path) path->insert(path->end(), leaves_.begin() + k.from, leaves_.begin() + k.to);
+        r = k.value;
+    } else
+        r = value(e, i, path, seen);
+    --depth_;
+    return r;
+}
+double Env::value(const Equation& e, int i, std::vector<int>* path, std::vector<char>* seen) {
     double r;
     if (e.type == 1)
         r = equ(test(e, e.ref ? equ(e.refidx) : e.crit) ? e.yes : e.no, path, seen);
     else if (e.type == 2) {
+        // Both sides add their formulas to the path; the side not chosen is taken out again.
         size_t from = path ? path->size() : 0;
-        std::vector<int> second;
-        double a = equ(e.a, path, seen), b = equ(e.b, path ? &second : nullptr, seen);
-        if (e.max ? a >= b : a <= b)
-            r = a;
-        else {
-            r = b;
-            if (path) {
-                path->resize(from);
-                path->insert(path->end(), second.begin(), second.end());
-            }
-        }
+        double a = equ(e.a, path, seen);
+        size_t middle = path ? path->size() : 0;
+        double b = equ(e.b, path, seen);
+        bool first = e.max ? a >= b : a <= b;
+        r = first ? a : b;
+        if (path && first) path->resize(middle);
+        if (path && !first) path->erase(path->begin() + from, path->begin() + middle);
     } else {
         r = formula(e);
         if (path) path->push_back(i);
     }
     r = std::max(e.lo, std::min(r, e.hi));
     if (e.next >= 0) r += equ(e.next, path, seen);
-    if (values) (*values)[i] = r;
-    --depth_;
+    if (watch_)
+        if (int place = (*watch_)[i]; place >= 0) watched[place] = r;
     return r;
 }
-
 double to_step(double x, double step) { return (std::ceil((std::floor(x + 1e-9) + 1) / step - 1e-9) - 1) * step; }
 std::vector<double> curve(const Model& m, const Equations& E, int root, const std::vector<double>& uv, double celsius,
                           double step) {
     std::vector<double> c;
+    if (uv.empty()) return c;
+    c.reserve(uv.size());
+    Env env(m, E, uv[0], celsius);
     double top = -INFINITY;
-    for (double u : uv) c.push_back(top = std::max(Env(m, E, u, celsius).equ(root), top));
+    for (double u : uv) {
+        env.voltage(u);
+        c.push_back(top = std::max(env.equ(root), top));
+    }
     for (auto& x : c) x = to_step(x, step);
     return c;
 }

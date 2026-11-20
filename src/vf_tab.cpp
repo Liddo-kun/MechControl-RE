@@ -120,6 +120,7 @@ struct VfTab::Impl {
         std::vector<char> zone;  // per segment: moving the slider there changes the curve
         bool stale = true;
         RECT label{}, strip{};
+        int barLeft = 0, barRight = 0, barWidth = -1; // the bar's ends in a track this wide
     };
     // Floor or Ceiling: the clock equation's limit, typed in.
     struct Limit {
@@ -201,8 +202,14 @@ struct VfTab::Impl {
     std::array<RECT, 3> showLabels{};
     bool numbersOpen = false, structureOpen = false;
 
-    std::vector<Frame> frames;
-    std::vector<Text> texts;
+    std::vector<Frame> frames, lastFrames; // lastFrames, lastTexts: of the layout before
+    std::vector<Text> texts, lastTexts;
+    // Sizes of the fixed texts (labels, names, units), by font and wrapping width (0: one line), and of the links.
+    std::map<std::tuple<HFONT, int, std::wstring>, SIZE> measured;
+    std::map<HWND, std::pair<int, SIZE>> linkSizes;
+    std::vector<double> pointMv;                         // each point's voltage
+    std::vector<std::pair<int, std::wstring>> lineCards; // each card line's card name
+    SCROLLINFO scrollShown{};
     std::vector<std::pair<RECT, std::wstring>> tips; // painted parts with a tooltip
     std::map<HWND, std::wstring> controlTips;
     std::wstring tipText;
@@ -294,6 +301,9 @@ struct VfTab::Impl {
         auto& t = *tuner;
         tune = {};
         view = {};
+        for (int p = 0; p < t.points(); ++p) pointMv.push_back(t.mv(p));
+        for (auto& s : t.sections)
+            for (int h : s.heads) lineCards.push_back({h, w(s.name)});
         view.stock[sixty] = view.fresh[sixty] = view.fresh[sixty + 1] = view.band[sixty] = true;
         modeBox = make(panel, WC_COMBOBOXW, L"", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL);
         linesCheck = make(panel, L"BUTTON", L"Draw the lines behind the new curve", WS_TABSTOP | BS_AUTOCHECKBOX);
@@ -411,46 +421,115 @@ struct VfTab::Impl {
         c.resize(std::min<size_t>(c.size(), 3));
         return c;
     }
-    std::wstring runs(const std::vector<int>& ps) const {
-        std::vector<double> mv;
-        for (int i = 0; i < tuner->points(); ++i) mv.push_back(tuner->mv(i));
-        return mech::runs(mv, ps);
-    }
+    std::wstring runs(const std::vector<int>& ps) const { return mech::runs(pointMv, ps); }
 
     // ---- after every change ----
     void changed() {
         recalc();
         sync();
+        follow(true);
+    }
+    // A slider moved. Everything it changes is painted before the next mouse move is taken: Windows paints only
+    // when no input waits, and in a fast drag the next move always does.
+    void stepped(Slider& s) {
+        recalc();
+        sync(s);
+        follow(false);
+        UpdateWindow(chart->window());
+        UpdateWindow(panel);
+        UpdateWindow(root);
+    }
+    void follow(bool place) {
         if (numbersOpen || structureOpen) tables();
-        shown();
+        shown(place);
         status();
         buttons();
     }
     // What is shown changed: the cards' statuses, the chart and the zones follow. Of the cards, only what changed
-    // repaints; a slider step usually changes a few texts.
-    void shown() {
-        auto oldFrames = frames;
-        auto oldTexts = texts;
-        layout(true);
-        if (frames != oldFrames || texts.size() != oldTexts.size())
+    // repaints; a slider step usually changes a few texts. Without `place` the controls stay where they are unless a
+    // card changed its size.
+    void shown(bool place = true) {
+        layout(place);
+        bool same = frames == lastFrames && texts.size() == lastTexts.size();
+        if (!same && !place) {
+            same = slide();
+            layout(true);
+        }
+        if (!same)
             InvalidateRect(panel, nullptr, FALSE);
         else
             for (size_t i = 0; i < texts.size(); ++i)
-                if (texts[i] != oldTexts[i]) {
-                    InvalidateRect(panel, &oldTexts[i].r, FALSE);
+                if (texts[i] != lastTexts[i]) {
+                    InvalidateRect(panel, &lastTexts[i].r, FALSE);
                     InvalidateRect(panel, &texts[i].r, FALSE);
                 }
         plot();
         scheduleZones();
     }
-    void sync() {
-        for (auto& s : sliders) {
-            double v = s.value(tune);
-            auto pos = LPARAM(std::lround(v / s.step));
-            if (SendMessageW(s.track, TBM_GETPOS, 0, 0) != pos) SendMessageW(s.track, TBM_SETPOS, TRUE, pos);
-            auto t = w(config::decimal_text(std::round(v * 100) / 100, 2, true));
-            if (GetFocus() != s.edit && windowText(s.edit) != t) SetWindowTextW(s.edit, t.c_str());
+    // A slider that passes 0 gives Current Changes a line more or less, and every card below moves by that line.
+    // Where the new layout is the last one with one card that much higher, what is below is moved as a scroll moves
+    // it, controls and pixels; that card and what is above it repaint, and below it the texts that changed. The
+    // layout that follows places whatever is not where it belongs (a control below the window is not scrolled).
+    bool slide() {
+        if (frames.size() != lastFrames.size()) return false;
+        size_t k = 0;
+        while (k < frames.size() && frames[k] == lastFrames[k]) ++k;
+        if (k == frames.size()) return false;
+        int below = lastFrames[k].r.bottom, by = frames[k].r.bottom - below;
+        auto moved = [&](auto was) {
+            OffsetRect(&was.r, 0, by);
+            return was;
+        };
+        auto card = lastFrames[k];
+        card.r.bottom += by;
+        if (!by || frames[k] != card) return false;
+        for (size_t j = k + 1; j < frames.size(); ++j)
+            if (lastFrames[j].r.top < below || frames[j] != moved(lastFrames[j])) return false;
+        // The texts below the card, which follow those in and above it.
+        auto under = [](const std::vector<Text>& list, int y) {
+            return std::ranges::find_if(list, [&](const Text& x) { return x.r.top >= y; });
+        };
+        auto was = under(lastTexts, below);
+        auto now = under(texts, below + by);
+        if (lastTexts.end() - was != texts.end() - now) return false;
+        RECT client{};
+        GetClientRect(panel, &client);
+        RECT from{0, below, client.right, client.bottom + 100000},
+            into{0, std::min(below, below + by), client.right, client.bottom},
+            above{0, 0, client.right, std::max(below, below + by)};
+        scrollPanel(by, &from, &into);
+        InvalidateRect(panel, &above, FALSE);
+        for (; now != texts.end(); ++now, ++was)
+            if (auto old = moved(*was); *now != old) {
+                InvalidateRect(panel, &old.r, FALSE);
+                InvalidateRect(panel, &now->r, FALSE);
+            }
+        return true;
+    }
+    // Moves the cards' pixels and controls up or down.
+    void scrollPanel(int by, const RECT* from = nullptr, const RECT* into = nullptr) {
+        RECT exposed{};
+        ScrollWindowEx(panel, 0, by, from, into, nullptr, &exposed, SW_SCROLLCHILDREN | SW_INVALIDATE);
+        // The scroll leaves the border of a number box it brings into view partly unpainted.
+        for (auto child = GetWindow(panel, GW_CHILD); child; child = GetWindow(child, GW_HWNDNEXT)) {
+            RECT r{};
+            GetWindowRect(child, &r);
+            MapWindowPoints(nullptr, panel, reinterpret_cast<POINT*>(&r), 2);
+            wchar_t type[8]{};
+            GetClassNameW(child, type, 8);
+            if (!_wcsicmp(type, L"Edit") && IsWindowVisible(child) && IntersectRect(&r, &r, &exposed))
+                RedrawWindow(child, nullptr, nullptr, RDW_FRAME | RDW_INVALIDATE);
         }
+    }
+    void sync(Slider& s) {
+        double v = s.value(tune);
+        auto pos = LPARAM(std::lround(v / s.step));
+        if (SendMessageW(s.track, TBM_GETPOS, 0, 0) != pos) SendMessageW(s.track, TBM_SETPOS, TRUE, pos);
+        auto t = w(config::decimal_text(std::round(v * 100) / 100, 2, true));
+        if (GetFocus() != s.edit && windowText(s.edit) != t) SetWindowTextW(s.edit, t.c_str());
+    }
+    void sync() {
+        for (auto& s : sliders) sync(s);
         for (auto& l : limits) {
             auto t = fmt(tune.*l.value ? tune.*l.value : stockLimit(l));
             if (GetFocus() != l.edit && windowText(l.edit) != t) SetWindowTextW(l.edit, t.c_str());
@@ -481,7 +560,7 @@ struct VfTab::Impl {
     void touch(Slider& s, double v) {
         s.value(tune) = s.doubleStep ? std::round(v / (2 * tuner->meta.step)) * 2 * tuner->meta.step : v;
         if (!s.card.empty()) hot = s.card;
-        changed();
+        stepped(s);
     }
     void bump(const std::set<int>& points, int steps) {
         for (int p : points) {
@@ -599,8 +678,10 @@ struct VfTab::Impl {
             auto E = tuner->equations(t);
             for (int c : zones.columns) {
                 double top = s.p0 ? tuned(c).raw[s.p0 - 1] : -INFINITY;
+                Env env(tuner->m, E, tuner->meta.uv[s.p0], columns[c].calc);
                 for (int p = s.p0; p <= s.p1; ++p) {
-                    top = std::max(top, Env(tuner->m, E, tuner->meta.uv[p], columns[c].calc).equ(tuner->meta.root));
+                    env.voltage(tuner->meta.uv[p]);
+                    top = std::max(top, env.equ(tuner->meta.root));
                     out.push_back(to_step(top, tuner->meta.step));
                 }
             }
@@ -610,7 +691,7 @@ struct VfTab::Impl {
         return out;
     }
     void zoneTick() {
-        // Paused while the tab is hidden; painting it again resumes.
+        // Paused while the tab is hidden; painting it again resumes. A tick ends early when the mouse or a key waits.
         if (!IsWindowVisible(panel)) {
             KillTimer(panel, zoneTimer);
             zones.running = false;
@@ -635,7 +716,7 @@ struct VfTab::Impl {
                 zones.j = 0;
                 zones.signatures.clear();
             }
-        } while (Clock::now() - start < std::chrono::milliseconds(8));
+        } while (Clock::now() - start < std::chrono::milliseconds(8) && !HIWORD(GetQueueStatus(QS_INPUT)));
     }
 
     // ---- the tables of every number ----
@@ -1064,19 +1145,29 @@ struct VfTab::Impl {
             GetTextMetricsW(dc, &m);
             return int(m.tmHeight);
         };
-        auto extent = [&](HFONT f, const std::wstring& s) {
-            SelectObject(dc, f);
-            SIZE size{};
-            GetTextExtentPoint32W(dc, s.c_str(), int(s.size()), &size);
-            return int(size.cx);
+        // A fixed text's size, on one line or wrapped to a width; measured once.
+        auto measure = [&](HFONT f, const std::wstring& s, int wrap = 0) {
+            auto [known, fresh] = measured.try_emplace({f, wrap, s});
+            if (fresh) {
+                SelectObject(dc, f);
+                RECT r{0, 0, wrap, 0};
+                if (wrap) {
+                    DrawTextW(dc, s.c_str(), -1, &r, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
+                    known->second = {r.right, r.bottom};
+                } else
+                    GetTextExtentPoint32W(dc, s.c_str(), int(s.size()), &known->second);
+            }
+            return known->second;
         };
+        auto extent = [&](HFONT f, const std::wstring& s) { return int(measure(f, s).cx); };
         int line = height(fonts.font), titleHeight = height(fonts.title), box = line + ref(4), row = ref(32),
             gap = ref(12);
         std::vector<Frame> fr;
         std::vector<Text> tx;
         std::vector<std::pair<RECT, std::wstring>> tp;
         int x = ref(16), right = rc.right - ref(16), y = ref(8) - scroll;
-        auto put = [&](HWND child, int cx, int cy, int cw, int ch, bool show = true) {
+        // `list`: the height of a drop-down list's list, which its window takes but does not keep.
+        auto put = [&](HWND child, int cx, int cy, int cw, int ch, bool show = true, int list = 0) {
             if (!apply || !child) return;
             if (!show) {
                 ShowWindow(child, SW_HIDE);
@@ -1086,8 +1177,8 @@ struct VfTab::Impl {
             GetWindowRect(child, &now);
             MapWindowPoints(nullptr, panel, reinterpret_cast<POINT*>(&now), 2);
             // A moved control repaints: copying its old pixels can copy those of a control moved there before it.
-            if (now.left != cx || now.top != cy || now.right - now.left != cw || now.bottom - now.top != ch)
-                SetWindowPos(child, nullptr, cx, cy, std::max(0, cw), std::max(0, ch),
+            if (now.left != cx || now.top != cy || now.right - now.left != cw || (!list && now.bottom - now.top != ch))
+                SetWindowPos(child, nullptr, cx, cy, std::max(0, cw), std::max(0, ch + list),
                              SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOCOPYBITS);
             if (!IsWindowVisible(child)) ShowWindow(child, SW_SHOW);
         };
@@ -1121,14 +1212,22 @@ struct VfTab::Impl {
         };
         auto check = [&](HWND c, int from, int& at) {
             at += ref(6);
-            put(c, from, at, extent(fonts.font, windowText(c)) + ref(40), box);
+            if (apply) put(c, from, at, extent(fonts.font, windowText(c)) + ref(40), box);
             at += box;
         };
+        // A link's size within a width; asked once per text and width.
+        auto ideal = [&](HWND l, int width) {
+            auto& known = linkSizes[l];
+            if (known.first != width || !known.second.cy) {
+                known.first = width;
+                SendMessageW(l, LM_GETIDEALSIZE, width, LPARAM(&known.second));
+            }
+            return known.second;
+        };
         auto link = [&](HWND l, int from, int to, int& at) {
-            SIZE size{};
-            SendMessageW(l, LM_GETIDEALSIZE, std::max(0, to - from), LPARAM(&size));
-            put(l, from, at, to - from, size.cy);
-            at += size.cy;
+            int height = ideal(l, std::max(0, to - from)).cy;
+            put(l, from, at, to - from, height);
+            at += height;
         };
         // Banners: what keeps the tab from working as it should.
         std::vector<std::wstring> banners;
@@ -1226,7 +1325,7 @@ struct VfTab::Impl {
                     at = left;
                     top += row + ref(6);
                 }
-                put(c, at, top + (row - height) / 2, width, height + list);
+                put(c, at, top + (row - height) / 2, width, height, true, list);
                 at += width + ref(16);
             };
             flow(modeBox, widest + ref(60), box, ref(200));
@@ -1268,11 +1367,8 @@ struct VfTab::Impl {
                     continue;
                 }
                 RECT label{left, y, left + labels - ref(8), y};
-                SelectObject(dc, fonts.font);
-                DrawTextW(dc, rows[r].c_str(), -1, &label, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
-                int h = std::max(int(label.bottom - label.top), box) + ref(6);
+                int h = std::max(int(measure(fonts.font, rows[r], label.right - label.left).cy), box) + ref(6);
                 label.bottom = label.top + h;
-                label.right = left + labels - ref(8);
                 tx.push_back({label, rows[r], pal.text, fonts.font, DT_WORDBREAK | DT_NOPREFIX});
                 showLabels[r] = label;
                 tp.push_back({label, L"Click to turn the whole row on or off."});
@@ -1330,13 +1426,18 @@ struct VfTab::Impl {
                                   DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX});
                     at += row;
                     if (!s->card.empty()) {
-                        // Under the track, from the thumb's leftmost to its rightmost center.
-                        RECT channel{}, thumb{};
-                        SendMessageW(s->track, TBM_GETCHANNELRECT, 0, LPARAM(&channel));
-                        SendMessageW(s->track, TBM_GETTHUMBRECT, 0, LPARAM(&thumb));
-                        int half = (thumb.right - thumb.left) / 2;
-                        s->strip = {trackLeft + channel.left + half, at, trackLeft + channel.right - half,
-                                    at + scale(5)};
+                        // Under the track, from the thumb's leftmost to its rightmost center; asked of the track
+                        // once it has the width.
+                        if (apply && s->barWidth != trackRight - trackLeft) {
+                            RECT channel{}, thumb{};
+                            SendMessageW(s->track, TBM_GETCHANNELRECT, 0, LPARAM(&channel));
+                            SendMessageW(s->track, TBM_GETTHUMBRECT, 0, LPARAM(&thumb));
+                            int half = (thumb.right - thumb.left) / 2;
+                            s->barLeft = channel.left + half;
+                            s->barRight = channel.right - half;
+                            s->barWidth = trackRight - trackLeft;
+                        }
+                        s->strip = {trackLeft + s->barLeft, at, trackLeft + s->barRight, at + scale(5)};
                         tp.push_back(
                             {s->strip,
                              L"Grey: moving the slider here changes nothing at the plotted temperatures (another line is lower, or the curve is at the floor, at the ceiling or held flat)."});
@@ -1407,9 +1508,6 @@ struct VfTab::Impl {
                     open(w(s->name), from, to, at);
                     fr.back().card = s->id;
                     // Where its lines set the new curve now, at the first plotted temperature.
-                    std::map<int, std::wstring> names;
-                    for (auto& o : t.sections)
-                        for (int h : o.heads) names[h] = w(o.name);
                     std::vector<int> mine;
                     std::vector<std::pair<std::wstring, std::vector<int>>> others;
                     for (int p = 0; p < t.points(); ++p) {
@@ -1418,10 +1516,11 @@ struct VfTab::Impl {
                             mine.push_back(p);
                             continue;
                         }
+                        auto card = std::ranges::find(lineCards, win[p], [](auto& line) { return line.first; });
                         auto k = win[p] == Calc::held_flat ? L"held flat"
                                  : win[p] == Calc::floor   ? L"floor"
                                  : win[p] == Calc::ceiling ? L"ceiling"
-                                 : names.contains(win[p])  ? names[win[p]]
+                                 : card != lineCards.end() ? card->second
                                                            : L"another equation";
                         auto it = std::ranges::find_if(others, [&](auto& o) { return o.first == k; });
                         if (it == others.end()) it = others.insert(others.end(), {k, {}});
@@ -1468,8 +1567,7 @@ struct VfTab::Impl {
             size_t frame = fr.size();
             int top = y;
             open(title, x, right, y);
-            SIZE size{};
-            SendMessageW(linkControl, LM_GETIDEALSIZE, ref(200), LPARAM(&size));
+            SIZE size = ideal(linkControl, ref(200));
             put(linkControl, right - ref(15) - size.cx, top + ref(10) + (titleHeight - size.cy) / 2, size.cx, size.cy);
             if (isOpen) {
                 say(table == numbers.get()
@@ -1494,8 +1592,9 @@ struct VfTab::Impl {
     void finish(std::vector<Frame>& fr, std::vector<Text>& tx, std::vector<std::pair<RECT, std::wstring>>& tp, int y,
                 HDC dc) {
         ReleaseDC(panel, dc);
-        frames = std::move(fr);
-        texts = std::move(tx);
+        lastFrames = std::exchange(frames, std::move(fr));
+        lastTexts = std::exchange(texts, std::move(tx));
+        bool sameTips = std::ranges::equal(tips, tp, [](auto& a, auto& b) { return EqualRect(&a.first, &b.first); });
         tips = std::move(tp);
         RECT rc{};
         GetClientRect(panel, &rc);
@@ -1508,8 +1607,11 @@ struct VfTab::Impl {
             return;
         }
         SCROLLINFO si{sizeof si, SIF_RANGE | SIF_PAGE | SIF_POS, 0, std::max(0, content - 1), UINT(rc.bottom), scroll};
-        SetScrollInfo(panel, SB_VERT, &si, TRUE);
-        // Painted parts with a tooltip get one tool each, numbered from 1.
+        if (si.nMax != scrollShown.nMax || si.nPage != scrollShown.nPage || si.nPos != scrollShown.nPos)
+            SetScrollInfo(panel, SB_VERT, &si, TRUE);
+        scrollShown = si;
+        // Painted parts with a tooltip get one tool each, numbered from 1; their texts are asked for when shown.
+        if (sameTips && tools == tips.size()) return;
         for (size_t i = 0; i < tools; ++i) {
             TOOLINFOW t{sizeof t, 0, panel, i + 1};
             SendMessageW(tooltip, TTM_DELTOOLW, 0, LPARAM(&t));
@@ -1526,25 +1628,16 @@ struct VfTab::Impl {
         GetScrollInfo(panel, SB_VERT, &si);
         target = std::clamp(target, 0, std::max(0, si.nMax + 1 - int(si.nPage)));
         if (target == scroll) return;
-        RECT exposed{};
-        ScrollWindowEx(panel, 0, scroll - target, nullptr, nullptr, nullptr, &exposed,
-                       SW_SCROLLCHILDREN | SW_INVALIDATE);
-        // The scroll leaves the border of a number box it brings into view partly unpainted.
-        for (auto child = GetWindow(panel, GW_CHILD); child; child = GetWindow(child, GW_HWNDNEXT)) {
-            RECT r{};
-            GetWindowRect(child, &r);
-            MapWindowPoints(nullptr, panel, reinterpret_cast<POINT*>(&r), 2);
-            wchar_t type[8]{};
-            GetClassNameW(child, type, 8);
-            if (!_wcsicmp(type, L"Edit") && IsWindowVisible(child) && IntersectRect(&r, &r, &exposed))
-                RedrawWindow(child, nullptr, nullptr, RDW_FRAME | RDW_INVALIDATE);
-        }
+        scrollPanel(scroll - target);
         scroll = target;
         layout(false);
     }
     void style(const VfFonts& f) {
         fonts = f;
         texts.clear(); // measured with the old fonts, whose handles may be reused
+        measured.clear();
+        linkSizes.clear();
+        for (auto& s : sliders) s.barWidth = -1;
         auto font = [](HWND child, LPARAM value) -> BOOL {
             SendMessageW(child, WM_SETFONT, WPARAM(value), TRUE);
             return TRUE;
@@ -1702,6 +1795,7 @@ struct VfTab::Impl {
                 bool& open = n->hwndFrom == numbersLink ? numbersOpen : structureOpen;
                 open = !open;
                 SetWindowTextW(n->hwndFrom, open ? L"<a>Hide</a>" : L"<a>Show</a>");
+                linkSizes.erase(n->hwndFrom);
                 if (open) tables();
                 layout(true);
                 InvalidateRect(panel, nullptr, FALSE);
@@ -1756,9 +1850,26 @@ struct VfTab::Impl {
         switch (message) {
         case WM_ERASEBKGND: return 1;
         case WM_PAINT: {
+            // A slider step leaves a few small parts to repaint, often far apart (a text at the top, a label
+            // further down): each is painted by itself, not the whole area that holds them.
+            std::vector<RECT> parts;
+            auto region = CreateRectRgn(0, 0, 0, 0);
+            if (GetUpdateRgn(panel, region, FALSE) == COMPLEXREGION) {
+                std::vector<char> data(GetRegionData(region, 0, nullptr));
+                auto list = reinterpret_cast<RGNDATA*>(data.data());
+                if (!data.empty() && GetRegionData(region, DWORD(data.size()), list) && list->rdh.nCount <= 64)
+                    parts.assign(reinterpret_cast<RECT*>(list->Buffer),
+                                 reinterpret_cast<RECT*>(list->Buffer) + list->rdh.nCount);
+            }
+            DeleteObject(region);
             PAINTSTRUCT ps{};
             auto dc = BeginPaint(panel, &ps);
-            paintPanel(dc, ps.rcPaint);
+            LONGLONG area = 0;
+            for (auto& r : parts) area += LONGLONG(r.right - r.left) * (r.bottom - r.top);
+            if (area * 2 > LONGLONG(ps.rcPaint.right - ps.rcPaint.left) * (ps.rcPaint.bottom - ps.rcPaint.top))
+                parts.clear();
+            if (parts.empty()) parts.push_back(ps.rcPaint);
+            for (auto& r : parts) paintPanel(dc, r);
             EndPaint(panel, &ps);
             if (zones.pending && !zones.running) {
                 zones.running = true;

@@ -402,9 +402,21 @@ bool gdiplus() {
 }
 void roundRect(HDC dc, const RECT& r, int radius, COLORREF inside, COLORREF border) {
     if (!gdiplus()) return;
-    gp::Graphics g(dc);
-    g.SetSmoothingMode(gp::SmoothingModeAntiAlias);
-    fill(g, r, float(radius), inside, border);
+    // Away from its edge the rectangle is one color, which GDI fills far faster; GDI+ draws the rim around that.
+    RECT middle = r;
+    InflateRect(&middle, -radius - 2, -radius - 2);
+    bool large = middle.right > middle.left && middle.bottom > middle.top;
+    if (large) {
+        FillRect(dc, &middle, brush(inside));
+        SaveDC(dc);
+        ExcludeClipRect(dc, middle.left, middle.top, middle.right, middle.bottom);
+    }
+    {
+        gp::Graphics g(dc);
+        g.SetSmoothingMode(gp::SmoothingModeAntiAlias);
+        fill(g, r, float(radius), inside, border);
+    }
+    if (large) RestoreDC(dc, -1);
 }
 Buffer::Buffer(HDC target, const RECT& area) : dc(CreateCompatibleDC(target)), target_(target), area_(area) {
     BITMAPINFO info{};

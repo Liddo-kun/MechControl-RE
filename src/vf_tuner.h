@@ -38,6 +38,7 @@ struct Model {
     Equations E;
     std::vector<Variable> V;
     std::vector<std::set<int>> sym; // what each variable depends on: thermal channels and `voltage`
+    std::vector<char> varies;       // per variable: it depends on the voltage
     Bytes stock;                    // the control records E was read from
     Model(const Bytes& info, const Bytes& records, const Bytes& variable_info, const Bytes& variable_records);
     const Equation& at(const Equations&, int) const; // throws for an index outside the list
@@ -49,26 +50,39 @@ struct Model {
     Equation read(int i, std::span<const uint8_t> record) const;
     Bytes record(int i, const Equation& e) const;
 };
-// One evaluation: a point voltage, one temperature on every thermal channel, the type-15 flag 0. Variable values are
-// kept for the evaluation.
+// The equations at one temperature (on every thermal channel; the type-15 flag is 0) and one point voltage, which
+// can move on to the next point. A curve is 127 evaluations of about a thousand equations, nine in ten of which do not
+// depend on the voltage: those are worked out once and kept, with the variables, while the temperature stays.
 class Env {
 public:
-    Env(const Model&, const Equations&, double uv, double celsius);
+    // `watch`, where given, has per equation its place in `watched` or -1.
+    Env(const Model&, const Equations&, double uv, double celsius, const std::vector<int>* watch = nullptr);
+    void voltage(double uv);
     double var(int);
     bool test(const Equation&, double crit);
     // The value of equation i. `path` gets the formulas the result comes from (a choice keeps its chosen side's, `next`
-    // adds its own), `seen` every equation visited; neither looks into a compare's reference.
-    double equ(int i, std::vector<int>* path = nullptr, std::set<int>* seen = nullptr);
-    std::vector<std::optional<double>>* values = nullptr; // where set: each evaluated equation's value
+    // adds its own), `seen` marks every equation visited; neither looks into a compare's reference.
+    double equ(int i, std::vector<int>* path = nullptr, std::vector<char>* seen = nullptr);
+    std::vector<std::optional<double>> watched; // the watched equations' values at this voltage, where evaluated
     const Model& m;
     const Equations& E;
 
 private:
+    struct Kept {
+        double value;
+        size_t from, to; // its path, in leaves_
+        bool known;
+    };
     double formula(const Equation&); // a type 3 or 6 equation before its limits
+    double value(const Equation&, int i, std::vector<int>* path, std::vector<char>* seen);
+    bool kept(int i); // equation i does not depend on the voltage and holds no watched equation
+    const std::vector<int>* watch_;
     double uv_, celsius_;
     int depth_ = 0;
     std::vector<double> value_;
-    std::vector<char> known_;
+    std::vector<char> known_, kind_; // kind_: 0 not looked at, 1 being looked at, 2 depends on the voltage, 3 kept
+    std::vector<Kept> kept_;
+    std::vector<int> leaves_, scratch_;
 };
 // The driver's rounding: the clock is cut to whole MHz; the result is the highest step whose whole-MHz value is not
 // above that (2752.0 gives 2752.5 at 7.5 MHz steps; 2751.9 gives 2745).
@@ -213,6 +227,8 @@ public:
 
 private:
     std::set<int> tree_;     // the clock equation's equations
+    std::vector<int> lines_; // the cards' lines, in ascending order
+    std::vector<int> watch_; // per equation: its place in lines_, or -1
     std::vector<double> ts_; // sample temperatures of the discovery
     std::string span(const std::vector<bool>& cells) const;
     std::string varname(int v) const;

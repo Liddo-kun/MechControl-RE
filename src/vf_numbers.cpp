@@ -31,7 +31,56 @@ VfNumbers::VfNumbers(HINSTANCE instance, HWND parent) {
 VfNumbers::~VfNumbers() {
     if (mono_) DeleteObject(mono_);
 }
+// A number's width: its text and a little room for the highlight.
+int VfNumbers::wide(HDC dc, const VfItem& item) const { return extent(dc, mono_, item.text).cx + 2 * scale(3); }
+// A slider step changes numbers and nothing else. Where the new tables are the laid out ones but for numbers that
+// keep their place (alone in a number column, or as long as before), those are replaced and only they repaint.
+bool VfNumbers::update(std::vector<VfTable>& tables) {
+    if (laid_ < 0 || tables.size() != tables_.size()) return false;
+    std::vector<size_t> changed;
+    size_t k = 0;
+    for (size_t t = 0; t < tables.size(); ++t) {
+        auto &a = tables_[t], &b = tables[t];
+        if (a.heading != b.heading || a.columns != b.columns || a.rows.size() != b.rows.size()) return false;
+        for (size_t r = 0; r < a.rows.size(); ++r) {
+            auto &old = a.rows[r], &row = b.rows[r];
+            if (old.header != row.header || old.spans.size() != row.spans.size()) return false;
+            for (size_t s = 0; s < old.spans.size(); ++s) {
+                auto& [column, items] = row.spans[s];
+                auto& before = old.spans[s].second;
+                if (old.spans[s].first != column || before.size() != items.size()) return false;
+                bool alone = items.size() == 1 && b.columns[column] == 'n';
+                for (size_t i = 0; i < items.size(); ++i, ++k) {
+                    auto &x = before[i], &y = items[i];
+                    if (x.muted != y.muted || x.line != y.line || x.value != y.value) return false;
+                    if (x.text == y.text && x.changed == y.changed) continue;
+                    if (!y.value || (!alone && x.text.size() != y.text.size())) return false;
+                    changed.push_back(k);
+                }
+            }
+        }
+    }
+    if (k != boxes_.size()) return false;
+    tables_ = std::move(tables);
+    k = 0;
+    for (auto& t : tables_)
+        for (auto& row : t.rows)
+            for (auto& span : row.spans)
+                for (auto& item : span.second) boxes_[k++].item = &item;
+    auto dc = GetDC(window_);
+    for (size_t c : changed) {
+        auto& box = boxes_[c];
+        RECT r = box.r;
+        box.r.right = box.r.left + wide(dc, *box.item);
+        r.right = std::max(r.right, box.r.right);
+        OffsetRect(&r, -x_, 0);
+        InvalidateRect(window_, &r, FALSE);
+    }
+    ReleaseDC(window_, dc);
+    return true;
+}
 void VfNumbers::set(std::vector<VfTable> tables) {
+    if (update(tables)) return;
     if (laid_ >= 0) { // otherwise boxes_ may point into tables that are gone
         wrapped_.clear();
         for (auto& b : boxes_)
@@ -65,8 +114,6 @@ void VfNumbers::layout(int width) {
     shaded_.clear();
     headings_.clear();
     auto dc = GetDC(window_);
-    // A number's width: its text and a little room for the highlight.
-    auto wide = [&](const VfItem& item) { return extent(dc, mono_, item.text).cx + 2 * scale(3); };
     int pad = scale(4), line = extent(dc, font_, L"Ag").cy,
         number = extent(dc, mono_, L"-0.000000000e-00").cx + scale(6) + 2 * pad;
     int y = 0;
@@ -88,7 +135,7 @@ void VfNumbers::layout(int width) {
             for (auto& [column, items] : row.spans)
                 if (t.columns[column] == 's') {
                     int w = 2 * pad;
-                    for (auto& item : items) w += item.value ? wide(item) : extent(dc, font_, item.text).cx;
+                    for (auto& item : items) w += item.value ? wide(dc, item) : extent(dc, font_, item.text).cx;
                     widths[column] = std::max(widths[column], w);
                 }
         std::vector<int> left{0};
@@ -102,7 +149,7 @@ void VfNumbers::layout(int width) {
                 HFONT f = row.header ? bold_ : font_;
                 for (auto& item : items) {
                     if (item.value) {
-                        int w = wide(item);
+                        int w = wide(dc, item);
                         boxes_.push_back({{x, top, x + w, top + line}, &item});
                         x += w;
                         h = std::max(h, line);

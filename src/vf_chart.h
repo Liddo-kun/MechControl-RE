@@ -1,6 +1,7 @@
 #pragma once
 #include <windows.h>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <set>
 #include <string>
@@ -58,6 +59,7 @@ private:
     static LRESULT CALLBACK procedure(HWND, UINT, WPARAM, LPARAM);
     LRESULT message(UINT, WPARAM, LPARAM);
     void paint(HDC);
+    void draw(HDC, const RECT& client);
     float px(float n) const { return n * dpi_ / 96; }
     RECT plot() const;
     View view() const;
@@ -81,5 +83,7 @@ private:
     };
     std::optional<Drag> drag_;
     RECT buttons_[5]{}; // as hit() numbers them; empty where not shown
+    struct Kept;
+    std::unique_ptr<Kept> kept_;
 };
 }

@@ -146,7 +146,10 @@ then reads back. The V/F Curve tab is offered on any NVIDIA GPU and is created o
 selection (`vf_tab.*`, with `vf_chart.*` drawing the curve in GDI+ and `vf_numbers.*` painting the
 read-only tables of every equation number), so nothing of it runs before then. It reads the driver
 only when opened, on Read and after a write, and the timer that works out its slider bars stops
-while the window is hidden. Import and Export use the VFCURVE `vfe-tune.json` file; the tuner
+while the window is hidden. A slider step paints the chart and the changed texts before the next
+mouse move is taken: Windows paints only when no input waits, and in a fast drag the next move
+always does. The chart keeps its bitmap for half a second after its last repaint. Import and
+Export use the VFCURVE `vfe-tune.json` file; the tuner
 refuses a tune of another version or other cards instead of converting it. After a write that
 changed equations the driver serves a slower fallback curve for a few seconds, so the tab reads
 once more 5 s later and compares that with the calculation.

@@ -38,6 +38,8 @@ private:
     LRESULT message(UINT, WPARAM, LPARAM);
     int scale(int n) const { return MulDiv(n, dpi_, 96); }
     void layout(int width);
+    bool update(std::vector<VfTable>&);
+    int wide(HDC, const VfItem&) const;
     void paint(HDC, const RECT& area);
     void scrolled();
     struct Box {
