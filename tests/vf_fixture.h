@@ -116,21 +116,23 @@ struct Driver {
     Synthetic s;
     Bytes live = s.records;
     std::vector<uint32_t> base_khz, uv;
+    std::vector<double> grid;
     std::array<int32_t, 100> offsets{};
     std::vector<int> sets; // equation SetControl calls: the equation each wrote
     int offset_sets = 0;
     bool refuse_records = false;
-    bool follow = false; // the curve follows written equations (ui-pages-check); otherwise it stays stock
+    bool follow = false; // the curve follows written equations; otherwise it stays stock
     Driver() {
-        for (int p = 0; p < 96; ++p) uv.push_back(uint32_t(std::ceil((498750 + 7500.0 * p) / 5000 - 1e-9) * 5000));
+        for (int p = 0; p < 96; ++p) {
+            grid.push_back(498750 + 7500.0 * p);
+            uv.push_back(uint32_t(std::ceil(grid.back() / 5000 - 1e-9) * 5000));
+        }
         curve(s.records_trimmed());
     }
     void curve(const Bytes& records) {
         Model m(s.info_trimmed(), records, s.variable_info, s.variable_records);
-        std::vector<double> raw;
-        for (int p = 0; p < 96; ++p) raw.push_back(Env(m, m.E, 498750 + 7500.0 * p, 45).equ(0));
         base_khz.clear();
-        for (double r : hold(raw)) base_khz.push_back(uint32_t(to_step(r, 15) * 1000));
+        for (double c : vf::curve(m, m.E, 0, grid, 45, 15)) base_khz.push_back(uint32_t(c * 1000));
     }
     void call(uint32_t id, Bytes& b) {
         switch (id) {

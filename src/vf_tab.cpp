@@ -135,11 +135,12 @@ struct VfTab::Impl {
     };
     struct Limit {
         HWND edit = nullptr;
-        std::string field;
+        std::optional<double> Tune::* value;
+        bool lo;
         std::wstring name, hint;
     };
     struct RuleChecks {
-        HWND preview = nullptr, remove = nullptr;
+        HWND remove = nullptr;
     };
     struct CellRef {
         int equ;
@@ -184,7 +185,6 @@ struct VfTab::Impl {
     std::shared_ptr<const Tuner> tuner;
     std::shared_ptr<const VfReading> reading;
     Tune tune;
-    Fields fields;
     Equations equations;
     std::wstring invalid; // why the tune cannot be written
     std::vector<double> offsets;
@@ -192,7 +192,7 @@ struct VfTab::Impl {
     View view;
     std::map<std::string, std::vector<double>> sheet;
     std::wstring sheetName;
-    std::optional<Fields> liveFields;
+    std::optional<Live> onGpu;
     std::vector<int> liveOffsets; // kHz
     std::string hot;              // the card the user works on
 
@@ -202,11 +202,8 @@ struct VfTab::Impl {
     // A profile was loaded: the next read shows the tune of the curve on the GPU and waits for the driver to settle if
     // the equations changed. Unapplied changes go, as on the other tabs.
     bool loaded = false, loadedRead = false;
-    std::optional<Settle> settle;
-    Clock::time_point settleStart;
     std::wstring settleWhat;
     std::wstring openError, readError;
-    std::vector<int> undescribed;
     std::optional<Readback> readback;
 
     std::vector<Slider> sliders;
@@ -308,7 +305,7 @@ struct VfTab::Impl {
     // ---- the tuner's controls, made once it is open ----
     void build() {
         auto& t = *tuner;
-        tune = t.tune(config::Json::object());
+        tune = {};
         view = {};
         view.stock[sixty] = view.fresh[sixty] = view.fresh[sixty + 1] = view.band[sixty] = true;
         modeBox = make(panel, WC_COMBOBOXW, L"", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL);
@@ -349,9 +346,9 @@ struct VfTab::Impl {
                 number(step) + L" MHz each).",
             "", 0, 0);
         sliders.back().doubleStep = true;
-        for (auto [field, name, hint] :
-             {std::tuple("lo", L"Floor", L"lowest clock"), {"hi", L"Ceiling", L"highest clock"}}) {
-            Limit l{make(panel, L"EDIT", L"", WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL | ES_RIGHT), field, name, hint};
+        for (auto [field, lo, name, hint] : {std::tuple(&Tune::floor, true, L"Floor", L"lowest clock"),
+                                             {&Tune::ceiling, false, L"Ceiling", L"highest clock"}}) {
+            Limit l{make(panel, L"EDIT", L"", WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL | ES_RIGHT), field, lo, name, hint};
             styleFrame(l.edit);
             SetWindowSubclass(l.edit, editProcedure, 1, DWORD_PTR(this));
             addTip(l.edit, std::wstring(L"The ") + hint + L" the curve can give (equation " +
@@ -362,13 +359,6 @@ struct VfTab::Impl {
             RuleChecks c;
             std::vector<std::wstring> equs;
             for (int i : r.equs) equs.push_back(std::to_wstring(i));
-            if (r.kind == "diff") {
-                c.preview =
-                    make(panel, L"BUTTON", L"Show the corrected curve (plot only)", WS_TABSTOP | BS_AUTOCHECKBOX);
-                addTip(c.preview, L"Draws every curve as if channel " + std::to_wstring(r.hot) +
-                                      L" were hotter than channel " + std::to_wstring(r.cold) +
-                                      L". Nothing is written.");
-            }
             c.remove =
                 make(panel, L"BUTTON", L"Remove the correction (written with Apply)", WS_TABSTOP | BS_AUTOCHECKBOX);
             addTip(c.remove, std::wstring(L"Apply sets equation") + (equs.size() > 1 ? L"s " : L" ") +
@@ -392,7 +382,6 @@ struct VfTab::Impl {
         structureLink = make(panel, WC_LINK, L"<a>Show</a>", WS_TABSTOP | LWS_TRANSPARENT);
         numbers = std::make_unique<VfNumbers>(instance, panel);
         structure = std::make_unique<VfNumbers>(instance, panel);
-        numbers->edited = structure->edited = [this](int cell, const std::wstring& s) { edited(cell, s); };
         recalc();
         tables();
         sync();
@@ -400,18 +389,12 @@ struct VfTab::Impl {
     }
 
     // ---- the calculation ----
-    std::map<int, double> hotter() const {
-        std::map<int, double> d;
-        for (auto& r : tuner->rules)
-            if (r.kind == "diff" && tune.preview.contains(r.id) && tune.preview.at(r.id)) d[r.hot] = 1;
-        return d;
-    }
     const Calc& stock(int c) {
-        if (!stockCalc[c]) stockCalc[c] = tuner->calc(tuner->m.E, columns[c].calc, hotter());
+        if (!stockCalc[c]) stockCalc[c] = tuner->calc(tuner->m.E, columns[c].calc);
         return *stockCalc[c];
     }
     const Calc& tuned(int c) {
-        if (!tunedCalc[c]) tunedCalc[c] = tuner->calc(equations, columns[c].calc, hotter());
+        if (!tunedCalc[c]) tunedCalc[c] = tuner->calc(equations, columns[c].calc);
         return *tunedCalc[c];
     }
     // The new curve with the offsets.
@@ -427,8 +410,7 @@ struct VfTab::Impl {
     }
     void recalc() {
         try {
-            fields = tuner->fields(tune);
-            equations = tuner->edited(fields);
+            equations = tuner->equations(tune);
             invalid.clear();
         } catch (const std::exception& e) {
             invalid = w(e.what());
@@ -481,16 +463,13 @@ struct VfTab::Impl {
             if (GetFocus() != s.edit && windowText(s.edit) != t) SetWindowTextW(s.edit, t.c_str());
         }
         for (auto& l : limits) {
-            auto key = std::to_string(tuner->meta.root) + "." + l.field;
-            auto m = tune.manual.find(key);
-            auto v = m != tune.manual.end() ? m->second : tuner->stock_value(tuner->meta.root, l.field);
+            auto v = tune.*l.value ? tune.*l.value : stockLimit(l);
             auto t = v ? number(*v) : L"";
             if (GetFocus() != l.edit && windowText(l.edit) != t) SetWindowTextW(l.edit, t.c_str());
         }
         for (size_t i = 0; i < ruleChecks.size(); ++i) {
             auto& id = tuner->rules[i].id;
             auto on = [&](auto& map) { return map.contains(id) && map.at(id); };
-            if (ruleChecks[i].preview) Button_SetCheck(ruleChecks[i].preview, on(tune.preview));
             Button_SetCheck(ruleChecks[i].remove, on(tune.rules));
         }
         for (int c = 0; c < 8; ++c) {
@@ -536,16 +515,21 @@ struct VfTab::Impl {
             }
         for (auto& l : limits)
             if (l.edit == edit) {
-                auto key = std::to_string(tuner->meta.root) + "." + l.field;
                 auto v = parse(s);
-                auto b = tuner->stock_value(tuner->meta.root, l.field);
+                auto b = stockLimit(l);
                 if (!v || (b && f32(*v) == *b))
-                    tune.manual.erase(key);
+                    tune.*l.value = std::nullopt;
                 else
-                    tune.manual[key] = f32(*v);
+                    tune.*l.value = f32(*v);
                 changed();
                 return;
             }
+    }
+    // The clock equation's stock floor or ceiling; none where it has no limit.
+    std::optional<double> stockLimit(const Limit& l) const {
+        auto& e = tuner->m.E[tuner->meta.root];
+        double v = l.lo ? e.lo : e.hi;
+        return std::abs(v) < unbounded ? std::optional(v) : std::nullopt;
     }
 
     // ---- the chart ----
@@ -601,11 +585,6 @@ struct VfTab::Impl {
                  : view.mode == 2 ? L"MHz above the reference curve at the same temperature"
                                   : L"MHz";
         p.relative = view.mode != 0;
-        for (auto& r : t.rules)
-            if (r.kind == "diff" && tune.preview.contains(r.id) && tune.preview.at(r.id))
-                p.notes.push_back(L"Shown as if channel " + std::to_wstring(r.hot) + L" is hotter than channel " +
-                                  std::to_wstring(r.cold));
-        p.notes.resize(std::min<size_t>(p.notes.size(), 3));
         chart->set(std::move(p));
     }
 
@@ -635,13 +614,11 @@ struct VfTab::Impl {
         s.value(t) = s.lo + (s.hi - s.lo) * j / zoneSteps;
         std::vector<double> out;
         try {
-            auto E = tuner->edited(tuner->fields(t));
-            auto heat = hotter();
+            auto E = tuner->equations(t);
             for (int c : zones.columns) {
                 double top = s.p0 ? tuned(c).raw[s.p0 - 1] : -INFINITY;
                 for (int p = s.p0; p <= s.p1; ++p) {
-                    top = std::max(top,
-                                   Env(tuner->m, E, tuner->meta.uv[p], columns[c].calc, 0, heat).equ(tuner->meta.root));
+                    top = std::max(top, Env(tuner->m, E, tuner->meta.uv[p], columns[c].calc).equ(tuner->meta.root));
                     out.push_back(to_step(top, tuner->meta.step));
                 }
             }
@@ -772,12 +749,25 @@ struct VfTab::Impl {
         structure->set({std::move(tests)}, std::vector<VfCell>(values.begin() + lineCells, values.end()));
     }
     size_t structureOffset = 0;
+    // A cell's number: none for a limit at or beyond 3e38, a compare's crit while it uses an equation, and a
+    // coefficient the formula lacks.
+    static std::optional<double> cellValue(const Equations& E, const CellRef& c) {
+        auto& e = E.at(c.equ);
+        auto& f = c.field;
+        auto limit = [](double v) { return std::abs(v) < unbounded ? std::optional(v) : std::nullopt; };
+        if (f == "lo") return limit(e.lo);
+        if (f == "hi") return limit(e.hi);
+        if (f == "crit") return e.ref ? std::nullopt : std::optional(e.crit);
+        if (f == "func") return e.func;
+        if (f == "max") return e.max;
+        int j = f[1] - '0';
+        return j < e.nk ? std::optional(e.k[j]) : std::nullopt;
+    }
     std::vector<VfCell> cellTexts() const {
-        auto add = tuner->additions(tune);
         std::vector<VfCell> out;
         for (auto& c : cells) {
-            auto v = tuner->value(tune, add, c.equ, c.field);
-            auto b = tuner->stock_value(c.equ, c.field);
+            auto v = cellValue(equations, c);
+            auto b = cellValue(tuner->m.E, c);
             VfCell cell{L"", v != b};
             if (c.kind == 'f' || c.kind == 'm') {
                 cell.choices = c.kind == 'f' ? std::vector<std::wstring>{L"=", L"≥", L">"}
@@ -793,47 +783,6 @@ struct VfTab::Impl {
         auto values = cellTexts();
         numbers->cells(std::vector<VfCell>(values.begin(), values.begin() + structureOffset));
         structure->cells(std::vector<VfCell>(values.begin() + structureOffset, values.end()));
-    }
-    // A number typed into a cell, or a choice made (vfe-ui.html cell and amountCell).
-    void edited(int index, const std::wstring& s) {
-        auto& c = cells.at(index);
-        auto key = std::to_string(c.equ) + "." + c.field;
-        auto b = tuner->stock_value(c.equ, c.field);
-        if (c.kind == 'a') {
-            auto v = parse(s);
-            for (auto f : {"lo", "hi"}) {
-                auto k = std::to_string(c.equ) + "." + f;
-                if (!v || f32(*v) == tuner->stock_value(c.equ, f))
-                    tune.manual.erase(k);
-                else
-                    tune.manual[k] = f32(*v);
-            }
-            changed();
-            return;
-        }
-        std::optional<double> v;
-        if (c.kind == 'f' || c.kind == 'm')
-            v = std::stoi(s);
-        else if (s.find_first_not_of(L" \t") == std::wstring::npos)
-            v = c.field == "lo" || c.field == "hi" ? std::nullopt : b;
-        else if (auto x = parse(s))
-            v = f32(*x);
-        else {
-            refreshCells();
-            return;
-        }
-        if (tuner->slider(c.equ, c.field)) {
-            auto add = tuner->additions(tune);
-            double sum = b.value_or(NAN) + (add.contains(key) ? add.at(key) : 0);
-            if (!v || f32(sum) == *v)
-                tune.mdelta.erase(key);
-            else
-                tune.mdelta[key] = *v - sum;
-        } else if (v == b)
-            tune.manual.erase(key);
-        else
-            tune.manual[key] = v;
-        changed();
     }
 
     // ---- the driver ----
@@ -884,17 +833,10 @@ struct VfTab::Impl {
         } else {
             settleSeq = 0;
             job = Job::none;
-            if (failed) {
+            if (failed)
                 readError = L"Could not read the driver: " + message;
-                settle.reset();
-            } else if (!settled(r.vf->points)) {
-                reading = r.vf;
-                job = Job::settling;
-                SetTimer(root, settleTimer, 500, nullptr);
-            } else {
-                settle.reset();
+            else
                 read(r.vf, settleWhat);
-            }
         }
         if (loaded && job == Job::none) refresh();
         buttons();
@@ -902,16 +844,13 @@ struct VfTab::Impl {
         layout(true);
         InvalidateRect(panel, nullptr, FALSE);
     }
-    // After an equation write the driver shows a slower fallback curve for a few seconds; the readback waits until it
-    // is gone (vf_tuner.h Settle), reading every 0.5 s.
+    // After an equation write the driver shows a slower fallback curve for a few seconds; the readback reads once 5 s
+    // after the write.
     void readBack(const std::shared_ptr<const VfReading>& r, bool wrote, const std::wstring& what) {
         if (wrote && live(r)) {
-            settle = tuner->settling(liveEquations());
-            settleStart = Clock::now();
             settleWhat = what;
-            settled(r->points);
             job = Job::settling;
-            SetTimer(root, settleTimer, 500, nullptr);
+            SetTimer(root, settleTimer, 5000, nullptr);
         } else
             read(r, what);
     }
@@ -933,32 +872,16 @@ struct VfTab::Impl {
             error(L"The profile's V/F curve settings cannot be shown: " + w(e.what()));
         }
     }
-    bool settled(const Points& points) {
-        try {
-            return settle->done(points, std::chrono::duration<double>(Clock::now() - settleStart).count());
-        } catch (const std::exception&) {
-            return true; // verify() says why the curve cannot be compared
-        }
-    }
-    // The equations now on the GPU, as far as the tuner can describe them.
-    Equations liveEquations() const {
-        Fields known = *liveFields;
-        for (auto& [i, d] : known) d.erase("other");
-        return tuner->edited(known);
-    }
     bool live(const std::shared_ptr<const VfReading>& r) {
         reading = r;
         try {
-            liveFields = tuner->live_fields(r->records);
+            onGpu = tuner->live(r->records);
             liveOffsets.clear();
             for (auto& p : r->points.graphics) liveOffsets.push_back(p.offset_khz);
-            undescribed.clear();
-            for (auto& [i, d] : *liveFields)
-                if (d.contains("other")) undescribed.push_back(i);
             readError.clear();
             return true;
         } catch (const std::exception& e) {
-            liveFields.reset();
+            onGpu.reset();
             readError = L"Could not read the driver: " + w(e.what());
             return false;
         }
@@ -966,74 +889,26 @@ struct VfTab::Impl {
     void read(const std::shared_ptr<const VfReading>& r, std::wstring what) {
         if (!live(r)) return;
         if (what.empty())
-            what = liveFields->empty() ? L"GPU now: stock equations."
-                                       : L"GPU now: " + plural(liveFields->size(), L"equation") + L" changed.";
+            what = onGpu->changed.empty() ? L"GPU now: stock equations."
+                                          : L"GPU now: " + plural(onGpu->changed.size(), L"equation") + L" changed.";
         verify(what);
         plot();
     }
     // The driver's curve, read back, against the calculation with the equations on the GPU (vfe-ui.html verify).
     void verify(const std::wstring& what) {
         Readback b{what};
-        auto& t = *tuner;
-        int n = t.points();
-        double step = t.meta.step;
+        auto n = std::to_wstring(tuner->points());
         try {
-            auto& points = reading->points;
-            auto driver = driver_stock(points);
-            if (int(driver.size()) != n)
-                throw std::runtime_error("The driver's curve has " + std::to_string(driver.size()) +
-                                         " points; the tuner expects " + std::to_string(n) + ".");
-            for (auto& x : driver) x = snap(x, step);
-            auto fit = t.fit(liveEquations(), driver);
-            std::vector<Fit::Diff> bad, edge;
-            for (auto& d : fit.diffs) (d.edge ? edge : bad).push_back(d);
-            auto list = [&](const std::vector<Fit::Diff>& a) {
-                std::vector<std::wstring> s;
-                for (size_t i = 0; i < a.size() && i < 15; ++i)
-                    s.push_back(number(t.mv(a[i].point)) + L" mV: driver " + number(a[i].driver) + L", tab " +
-                                number(a[i].computed));
-                return join(s, L"; ") + (a.size() > 15 ? L"; …" : L"");
-            };
-            auto apart = L"one " + number(step) + L" MHz step apart (rounding)";
-            b.ok = bad.empty();
-            if (!bad.empty())
-                b.verdict = L"Readback differs from this tab at " + std::to_wstring(bad.size()) + L" of " +
-                            std::to_wstring(n) + L" points: " + list(bad) +
-                            (edge.empty() ? L"" : L" · " + std::to_wstring(edge.size()) + L" more " + apart);
-            else
-                b.verdict = L"Readback matches this tab: " +
-                            (edge.empty() ? L"all " + std::to_wstring(n) + L" points equal"
-                                          : std::to_wstring(n - edge.size()) + L" of " + std::to_wstring(n) +
-                                                L" points equal, " + std::to_wstring(edge.size()) + L" " + apart);
+            auto fit = tuner->fit(onGpu->E, reading->points);
+            b.ok = fit.equal == tuner->points();
+            b.verdict = b.ok ? L"Readback matches this tab: all " + n + L" points equal"
+                             : L"Readback differs from this tab at " + std::to_wstring(tuner->points() - fit.equal) +
+                                   L" of " + n + L" points";
             b.more = L"Compared at " + number(fit.celsius) +
-                     L" °C, the temperature at which the calculation fits the driver's curve" +
-                     (fit.lo != fit.hi ? L" (" + number(fit.lo) + L" to " + number(fit.hi) + L" °C fit equally)" : L"");
-            if (auto temp = host.gpu_temp ? host.gpu_temp() : std::nullopt)
-                b.more += L"; the EC reads " + std::to_wstring(*temp) + L" °C for the GPU";
-            b.more += L".";
-            if (!edge.empty()) b.more += L"\nOne step apart: " + list(edge) + L".";
-            if (!t.meta.recorded.empty())
-                b.more +=
-                    L"\nNVIDIA's stock equations were recorded on " + w(t.meta.recorded).replace(10, 1, L" ") + L".";
-            // The final clock: the driver's own clock plus its offsets by the measured rule, against what it reports.
-            if (std::ranges::any_of(points.graphics, [](auto& p) { return p.offset_khz != 0; })) {
-                std::vector<double> o;
-                for (auto& p : points.graphics) o.push_back(p.offset_khz / 1000.0);
-                auto predicted = with_offsets(driver, o, step);
-                std::vector<std::wstring> s;
-                int count = 0;
-                for (int p = 0; p < n; ++p) {
-                    double final = snap(points.graphics[p].final_khz / 1000.0, step);
-                    if (final == predicted[p]) continue;
-                    if (++count <= 15)
-                        s.push_back(number(t.mv(p)) + L" mV: driver " + number(final) + L", tab " +
-                                    number(predicted[p]));
-                }
-                if (count)
-                    b.offsets = L"With the Afterburner Style OC offsets, the final clock differs from this tab at " +
-                                std::to_wstring(count) + L" of " + std::to_wstring(n) + L" points: " + join(s, L"; ") +
-                                (count > 15 ? L"; …" : L"");
-            }
+                     L" °C, the temperature at which the calculation fits the driver's curve.";
+            if (fit.offsets)
+                b.offsets = L"With the Afterburner Style OC offsets, the final clock differs from this tab at " +
+                            std::to_wstring(fit.offsets) + L" of " + n + L" points.";
         } catch (const std::exception& e) {
             b.verdict = w(e.what());
             b.ok = false;
@@ -1057,7 +932,7 @@ struct VfTab::Impl {
             return;
         }
         std::vector<std::wstring> ids;
-        for (auto& [i, d] : fields) ids.push_back(std::to_wstring(i));
+        for (auto& [i, r] : curve.records) ids.push_back(std::to_wstring(i));
         size_t moved = 0;
         for (size_t p = 0; p < curve.offsets_khz.size(); ++p)
             moved += curve.offsets_khz[p] != (p < liveOffsets.size() ? liveOffsets[p] : 0);
@@ -1076,9 +951,7 @@ struct VfTab::Impl {
     }
     // The tab's settings go with the write, so that a profile Save stores them beside the curve.
     void submitWrite(std::optional<Curve> curve) {
-        Tune t = tune;
-        t.view = viewJson();
-        auto state = tuner->state(t);
+        auto state = tuner->state(tune);
         bool stock = !curve;
         applySeq = host.submit(VfApply{std::move(curve), std::move(state)}, true);
         if (!applySeq) return;
@@ -1091,9 +964,7 @@ struct VfTab::Impl {
         if (!confirm(
                 L"Set every slider and Afterburner Style OC offset to 0, clear every edited number and untick the corrections? (Nothing is written to the GPU.)"))
             return;
-        auto keep = tune.view;
-        tune = tuner->tune(config::Json::object());
-        tune.view = keep;
+        tune = {};
         chart->clear_selection();
         changed();
     }
@@ -1162,7 +1033,7 @@ struct VfTab::Impl {
     }
     void take(const config::Json& state) {
         tune = tuner->tune(state);
-        loadView(tune.view);
+        loadView(state);
         chart->clear_selection();
         changed();
     }
@@ -1174,16 +1045,12 @@ struct VfTab::Impl {
         }
         auto path = file(true, L"Tune (*.json)\0*.json\0", L"json");
         if (!path) return;
-        Tune t = tune;
-        t.view = viewJson();
-        auto j = config::Json{{"saved", now()}, {"state", tuner->state(t)}};
+        auto state = tuner->state(tune);
+        state.update(viewJson());
+        auto j = config::Json{{"saved", now()}, {"state", std::move(state)}};
         j["offsets"] = config::Json::array();
         for (double o : offsets) j["offsets"].push_back(std::round(o * 1000) / 1000);
-        j["fields"] = config::Json::object();
-        for (auto& [i, d] : fields)
-            for (auto& [f, v] : d)
-                j["fields"][std::to_string(i)][f] =
-                    (f == "lo" || f == "hi") && std::abs(v) >= unbounded ? config::Json(nullptr) : config::Json(v);
+        j["fields"] = tuner->fields(equations);
         try {
             config::write_json(*path, j, true);
         } catch (const std::exception& e) {
@@ -1217,12 +1084,13 @@ struct VfTab::Impl {
             statusText = L"Reading back…";
         else if (job == Job::reading)
             statusText = L"Reading…";
-        else if (!liveFields)
+        else if (!onGpu)
             statusText = L"GPU not read";
         else {
-            bool same = invalid.empty() && fields == *liveFields && offsets.size() == liveOffsets.size();
+            bool same = invalid.empty() && equations == onGpu->E && onGpu->undescribed.empty() &&
+                        offsets.size() == liveOffsets.size();
             for (size_t i = 0; same && i < offsets.size(); ++i) same = std::lround(offsets[i] * 1000) == liveOffsets[i];
-            bool stockNow = liveFields->empty() && std::ranges::all_of(liveOffsets, [](int o) { return o == 0; });
+            bool stockNow = onGpu->changed.empty() && std::ranges::all_of(liveOffsets, [](int o) { return o == 0; });
             statusText = same ? L"Applied to the GPU" : stockNow ? L"Unapplied (currently stock)" : L"Unapplied";
             statusColor = same ? p.ok : p.warn;
         }
@@ -1329,9 +1197,9 @@ struct VfTab::Impl {
         if (!openError.empty()) banners.push_back(openError);
         if (tuner && !tuner->refusal.empty()) banners.push_back(L"Apply is off on this GPU: " + w(tuner->refusal));
         bool issue = !banners.empty();
-        if (!undescribed.empty()) {
+        if (onGpu && !onGpu->undescribed.empty()) {
             std::vector<std::wstring> ids;
-            for (int i : undescribed) ids.push_back(std::to_wstring(i));
+            for (int i : onGpu->undescribed) ids.push_back(std::to_wstring(i));
             banners.push_back(L"The driver has changes in equation " + join(ids, L", ") +
                               L" that this tab cannot show. \"Restore stock\" removes them.");
         }
@@ -1367,15 +1235,15 @@ struct VfTab::Impl {
         // Current changes.
         {
             std::vector<std::wstring> ids, parts, removed;
-            for (auto& [i, d] : fields)
-                if (!t.switch_fields.contains(i)) ids.push_back(std::to_wstring(i));
+            for (size_t i = 0; i < equations.size(); ++i)
+                if (equations[i] != t.m.E[i] && !t.switches.contains(int(i))) ids.push_back(std::to_wstring(i));
             for (auto& r : t.rules)
                 if (tune.rules.contains(r.id) && tune.rules.at(r.id)) {
                     auto s = w(r.title.substr(0, r.title.find(',')));
                     std::ranges::transform(s, s.begin(), towlower);
                     removed.push_back(s + L" removed");
                 }
-            bool sw = !t.switch_fields.empty();
+            bool sw = !t.switches.empty();
             size_t moved = std::ranges::count_if(offsets, [](double o) { return o != 0; });
             if (sw) parts.push_back(L"Slow curve disabled");
             if (!ids.empty()) parts.push_back(plural(ids.size(), L"equation") + L" changed");
@@ -1386,14 +1254,9 @@ struct VfTab::Impl {
             size_t frame = fr.size();
             open(L"Current Changes", x, right, y);
             say(summary, left, end, y, pal.text);
-            for (auto& r : t.rules)
-                if (r.kind == "diff" && tune.preview.contains(r.id) && tune.preview.at(r.id))
-                    say(L"Shown as if channel " + std::to_wstring(r.hot) + L" is hotter than channel " +
-                            std::to_wstring(r.cold) + L" (plot only)",
-                        left, end, y, pal.text, fonts.bold);
             if (!ids.empty()) {
                 std::vector<std::wstring> sws;
-                for (auto& [i, d] : t.switch_fields) sws.push_back(std::to_wstring(i));
+                for (auto& [i, fixed] : t.switches) sws.push_back(std::to_wstring(i));
                 say(L"Equations " + join(ids, L", ") +
                         (sw ? L", and " + join(sws, L", ") + L" to disable the slow curve" : L"") + L".",
                     left, end, y, pal.muted);
@@ -1552,7 +1415,7 @@ struct VfTab::Impl {
                 auto [labelWidth, tail] = sliderRows({&sliders[0], &sliders[1]}, l, r, at);
                 int numberWidth = extent(fonts.font, L"-0000.00") + ref(20), unitWidth = tail - numberWidth;
                 for (auto& lim : limits) {
-                    bool set = tune.manual.contains(std::to_string(t.meta.root) + "." + lim.field);
+                    bool set = (tune.*lim.value).has_value();
                     int trackRight = r - unitWidth - numberWidth - ref(16);
                     tx.push_back({{l, at, l + labelWidth, at + row},
                                   lim.name,
@@ -1586,7 +1449,6 @@ struct VfTab::Impl {
                         say(w(t.rules[i].title), l, r, at, pal.text, fonts.bold);
                         at += ref(2);
                         say(w(t.rules[i].text), l, r, at, pal.muted);
-                        if (ruleChecks[i].preview) check(ruleChecks[i].preview, l, at);
                         check(ruleChecks[i].remove, l, at);
                     }
                     close(at, frame);
@@ -1848,11 +1710,6 @@ struct VfTab::Impl {
         }
         for (size_t i = 0; i < ruleChecks.size(); ++i) {
             auto& id = tuner->rules[i].id;
-            if (from == ruleChecks[i].preview) {
-                tune.preview[id] = on;
-                stockCalc = {};
-                changed();
-            }
             if (from == ruleChecks[i].remove) {
                 tune.rules[id] = on;
                 changed();

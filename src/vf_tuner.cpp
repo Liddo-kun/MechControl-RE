@@ -1,11 +1,7 @@
 // The tuner: VFCURVE blackbox/vfe-ui.py and the calculation of vfe-ui.html.
 #include "vf_tuner.h"
-#include "config_text.h"
 #include <algorithm>
-#include <chrono>
 #include <cmath>
-#include <cstring>
-#include <sstream>
 
 namespace mech::nv::vf {
 namespace {
@@ -25,7 +21,6 @@ std::string signed_g(double x) {
     return b;
 }
 std::string text(int i) { return std::to_string(i); }
-double f32(double v) { return static_cast<float>(v); }
 std::string join(const std::vector<std::string>& v, const std::string& by) {
     std::string s;
     for (size_t i = 0; i < v.size(); ++i) s += (i ? by : "") + v[i];
@@ -37,66 +32,14 @@ std::string join(const std::vector<int>& v, const std::string& by) {
     return join(s, by);
 }
 bool contains(const std::vector<int>& v, int x) { return std::ranges::find(v, x) != v.end(); }
-// A JSON value as a JavaScript number would read it in the page; NaN where it is none.
-double number(const config::Json& j) {
-    if (j.is_number()) return j.get<double>();
-    if (j.is_boolean()) return j.get<bool>();
-    if (j.is_null()) return 0;
-    return NAN;
-}
-double number(const config::Json& o, const char* key) {
-    return o.is_object() && o.contains(key) ? number(o[key]) : NAN;
-}
-bool truthy(const config::Json& j) {
-    return j.is_boolean()  ? j.get<bool>()
-           : j.is_number() ? j.get<double>() != 0
-                           : j.is_string() && !j.get<std::string>().empty();
-}
-std::string local_time(std::chrono::system_clock::time_point t) {
-    auto s = std::chrono::system_clock::to_time_t(t);
-    std::tm tm{};
-    localtime_s(&tm, &s);
-    char b[32];
-    strftime(b, sizeof b, "%Y-%m-%dT%H:%M:%S", &tm);
-    return b;
-}
-// "k0" to "k9" -> 0 to 9; -1 for any other field.
-int coefficient(const std::string& f) {
-    return f.size() == 2 && f[0] == 'k' && f[1] >= '0' && f[1] <= '9' ? f[1] - '0' : -1;
-}
-// Where coefficient j of a formula is in its control record.
-size_t coefficient_at(const Equation& e, int j) { return e.type == 3 ? 44 + 4 * j : 76 + 8 * j; }
-// A control record with field values written into it (vfe-ui.py record()).
-Bytes with_fields(std::span<const uint8_t> record, const Equation& e, const std::map<std::string, double>& fields) {
-    Bytes r(record.begin(), record.end());
-    auto put_f32 = [&](size_t p, double v) {
-        float f = float(v);
-        std::memcpy(r.data() + p, &f, 4);
-    };
-    for (auto& [f, v] : fields) {
-        if (f == "lo")
-            put_f32(4, v);
-        else if (f == "hi")
-            put_f32(8, v);
-        else if (coefficient(f) >= 0)
-            put_f32(coefficient_at(e, coefficient(f)), v);
-        else if (f == "crit")
-            put_f32(48, v);
-        else if (f == "ref")
-            r[45] = uint8_t(v);
-        else if (f == "func" || f == "max")
-            r[44] = uint8_t(v);
-    }
-    return r;
-}
 }
 
 Tuner::Tuner(Model model, Meta mt) : m(std::move(model)), meta(std::move(mt)) {
     if (meta.uv.size() < 2) throw std::runtime_error("Malformed V/F curve points");
     m.at(m.E, meta.root);
-    tree = m.tree(meta.root);
+    tree_ = m.tree(meta.root);
     std::map<int, int> channels;
-    for (int i : tree)
+    for (int i : tree_)
         if (auto& e = m.E[i]; e.leaf())
             for (int j = 0; j < e.nvars; ++j)
                 if (size_t(e.vars[j]) < m.V.size() && m.V[e.vars[j]].type == 8) ++channels[m.V[e.vars[j]].channel];
@@ -106,24 +49,23 @@ Tuner::Tuner(Model model, Meta mt) : m(std::move(model)), meta(std::move(mt)) {
     // voltage); its true branch is the fast curve. If the switch voltage starts with a fixed amount, that amount becomes
     // -1,000 mV (tested on Jon's laptop); otherwise the compare is made against the constant 0 (not tested on hardware).
     std::vector<std::string> how;
-    bool tested = true, any = false;
-    for (int i : tree) {
+    bool tested = true;
+    for (int i : tree_) {
         auto& e = m.E[i];
         if (!m.is_switch(e)) continue;
-        any = true;
         auto& b = m.at(m.E, e.refidx);
         if (b.leaf() && b.lo == b.hi) {
-            switch_fields[e.refidx] = {{"lo", f32(off_uv)}, {"hi", f32(off_uv)}};
+            switches[e.refidx] = true;
             how.push_back("the fixed part of the switch voltage (equation " + text(e.refidx) + ") is set to " +
                           g(off_uv / 1000) + " mV, so no point is below the switch voltage");
         } else if (e.func == 1 || e.func == 2) {
-            switch_fields[i] = {{"ref", 0}, {"crit", 0.0}};
+            switches[i] = false;
             tested = false;
             how.push_back("equation " + text(i) + " compares the voltage with 0 instead of the switch voltage");
         } else
             throw std::runtime_error("V/F equation " + text(i) + " is a switch this tab cannot turn off");
     }
-    if (!any)
+    if (switches.empty())
         switch_text = "No slow curve was found on this GPU; the curve is edited as it is.";
     else {
         switch_text =
@@ -131,7 +73,8 @@ Tuner::Tuner(Model model, Meta mt) : m(std::move(model)), meta(std::move(mt)) {
             (tested ? "." : " (by a kind of write that is untested).");
         switch_detail = "The slow curve is disabled like this: " + join(how, "; ") + ".";
     }
-    fast = edited(m.E, switch_fields);
+    fast = m.E;
+    switch_off(fast);
     discover();
     form_names();
     if (meta.equal < 0.9 * points())
@@ -139,70 +82,45 @@ Tuner::Tuner(Model model, Meta mt) : m(std::move(model)), meta(std::move(mt)) {
                   " points on this GPU, so the tab cannot be trusted here and writes nothing.";
 }
 
-std::vector<double> Tuner::raw_curve(const Equations& E, double celsius, int flag,
-                                     const std::map<int, double>& hotter) const {
-    std::vector<double> raw;
-    for (double u : meta.uv) raw.push_back(Env(m, E, u, celsius, flag, hotter).equ(meta.root));
-    return hold(std::move(raw));
+void Tuner::switch_off(Equations& E) const {
+    for (auto [i, fixed] : switches) {
+        auto& e = E[i];
+        if (fixed)
+            e.lo = e.hi = off_uv;
+        else {
+            e.ref = e.refidx = 0;
+            e.crit = 0;
+        }
+    }
 }
-std::vector<double> Tuner::curve(const Equations& E, double celsius, int flag,
-                                 const std::map<int, double>& hotter) const {
-    auto c = raw_curve(E, celsius, flag, hotter);
-    for (auto& x : c) x = to_step(x, meta.step);
-    return c;
+std::vector<double> Tuner::curve(const Equations& E, double celsius) const {
+    return vf::curve(m, E, meta.root, meta.uv, celsius, meta.step);
 }
-Calc Tuner::calc(const Equations& E, double celsius, const std::map<int, double>& hotter) const {
+Calc Tuner::calc(const Equations& E, double celsius) const {
     std::set<int> shown; // the cards' lines
     for (auto& s : sections) shown.insert(s.heads.begin(), s.heads.end());
     Calc out;
     int n = points();
     for (int h : shown) out.lines[h].assign(n, std::nullopt);
     auto& top = m.at(E, meta.root);
+    std::vector<std::optional<double>> values(E.size());
     for (int p = 0; p < n; ++p) {
-        Env env(m, E, meta.uv[p], celsius, 0, hotter);
-        int head = Calc::none;
-        // The page's evaluator: the value of equation i and the main formula that set it.
-        auto eq = [&](auto& self, int i) -> double {
-            auto& e = m.at(E, i);
-            double r;
-            int h = Calc::none;
-            if (e.type == 1) {
-                double crit = e.ref ? self(self, e.refidx) : e.crit;
-                r = self(self, env.test(e, crit) ? e.yes : e.no);
-                h = head;
-            } else if (e.type == 2) {
-                double a = self(self, e.a);
-                int ha = head;
-                double b = self(self, e.b);
-                if (e.max ? a >= b : a <= b) {
-                    r = a;
-                    h = ha;
-                } else {
-                    r = b;
-                    h = head;
-                }
-            } else {
-                r = env.formula(e);
-                if (shown.contains(i)) h = i;
-            }
-            r = std::max(e.lo, std::min(r, e.hi));
-            if (e.next >= 0) {
-                r += self(self, e.next);
-                if (h < 0) h = head;
-            }
-            if (shown.contains(i)) out.lines[i][p] = r;
-            head = h;
-            return r;
-        };
-        double raw = eq(eq, meta.root);
+        Env env(m, E, meta.uv[p], celsius);
+        std::ranges::fill(values, std::nullopt);
+        env.values = &values;
+        std::vector<int> path;
+        double raw = env.equ(meta.root, &path);
+        // The main formula that sets it: the first card's line on the result's path.
+        auto head = std::ranges::find_if(path, [&](int i) { return shown.contains(i); });
         int win = std::abs(top.lo) < unbounded && raw == top.lo   ? Calc::floor
                   : std::abs(top.hi) < unbounded && raw == top.hi ? Calc::ceiling
-                                                                  : head;
+                  : head != path.end()                            ? *head
+                                                                  : Calc::none;
         if (p && raw < out.raw[p - 1]) {
             raw = out.raw[p - 1];
-            ++out.held;
             win = Calc::held_flat;
         }
+        for (int h : shown) out.lines[h][p] = values[h];
         out.raw.push_back(raw);
         out.win.push_back(win);
         out.clock.push_back(to_step(raw, meta.step));
@@ -210,66 +128,8 @@ Calc Tuner::calc(const Equations& E, double celsius, const std::map<int, double>
     return out;
 }
 
-Equations Tuner::edited(const Equations& base, const Fields& fields) const {
-    auto E = base;
-    for (auto& [i, d] : fields) {
-        auto& e = E.at(i);
-        for (auto& [f, v] : d) {
-            if (f == "lo")
-                e.lo = v;
-            else if (f == "hi")
-                e.hi = v;
-            else if (f == "crit")
-                e.crit = v;
-            else if (f == "ref")
-                e.ref = int(v);
-            else if (f == "func")
-                e.func = int(v);
-            else if (f == "max")
-                e.max = int(v);
-            else if (f.size() == 2 && f[0] == 'k')
-                e.k[f[1] - '0'] = v;
-        }
-    }
-    return E;
-}
-Equations Tuner::edited(const Fields& fields) const { return edited(m.E, fields); }
-
 // ---- discovery: which equations can matter on this chip ----
 namespace {
-// An evaluation that records the visited leaves, the leaves on the result path and the visited nodes.
-double trace(Env& env, int i, std::set<int>& vis, std::set<int>& nodes, std::vector<int>& path) {
-    auto& e = env.m.at(env.E, i);
-    nodes.insert(i);
-    double r;
-    path.clear();
-    if (e.type == 1) {
-        double crit = e.crit;
-        if (e.ref) {
-            std::set<int> v2, n2;
-            std::vector<int> p2;
-            crit = trace(env, e.refidx, v2, n2, p2);
-        }
-        r = trace(env, env.test(e, crit) ? e.yes : e.no, vis, nodes, path);
-    } else if (e.type == 2) {
-        std::vector<int> pa, pb;
-        double a = trace(env, e.a, vis, nodes, pa), b = trace(env, e.b, vis, nodes, pb);
-        bool first = e.max ? a >= b : a <= b;
-        r = first ? a : b;
-        path = first ? pa : pb;
-    } else {
-        r = env.formula(e);
-        vis.insert(i);
-        path = {i};
-    }
-    r = std::max(e.lo, std::min(r, e.hi));
-    if (e.next >= 0) {
-        std::vector<int> pn;
-        r += trace(env, e.next, vis, nodes, pn);
-        path.insert(path.end(), pn.begin(), pn.end());
-    }
-    return r;
-}
 std::vector<std::pair<std::string, std::string>> section_names(size_t n) {
     if (n == 1) return {{"main", "Main line"}};
     if (n == 2) return {{"low", "Low"}, {"high", "High"}};
@@ -406,7 +266,7 @@ void Tuner::discover() {
     // it stays closest above. Also the corrections that can be removed.
     std::set<double> t;
     for (int x = -5; x < 106; x += 5) t.insert(x);
-    for (int i : tree) {
+    for (int i : tree_) {
         auto& e = fast[i];
         if (e.type != 1 || e.ref) continue;
         auto& s = m.sym.at(e.var);
@@ -425,15 +285,12 @@ void Tuner::discover() {
     };
     for (size_t ti = 0; ti < nt; ++ti)
         for (int p = 0; p < n; ++p) {
-            std::set<int> v, nd;
+            std::set<int> seen;
             std::vector<int> path;
-            Env env(m, fast, meta.uv[p], ts_[ti]);
-            trace(env, meta.root, v, nd, path);
+            Env(m, fast, meta.uv[p], ts_[ti]).equ(meta.root, &path, &seen);
             size_t c = size_t(p) * nt + ti;
-            for (int i : v) mark(vis, i, c);
+            for (int i : seen) mark(fast[i].leaf() ? vis : nodes, i, c);
             for (int i : path) mark(win, i, c);
-            for (int i : nd)
-                if (!v.contains(i)) mark(nodes, i, c);
         }
     auto each = [&](const Cells& cs, auto f) {
         for (size_t c = 0; c < cs.size(); ++c)
@@ -553,7 +410,6 @@ void Tuner::discover() {
     for (size_t k = 0; k < main.size(); ++k) {
         int h = main[k];
         Section s{names[k].first, names[k].second};
-        std::tie(s.lo0, s.hi0) = rng(points_of(win[h]));
         // The card's voltage range: where the line is evaluated and a line outside the foot sets the clock. Two lines
         // that share a voltage segment (the clock is the lower one) get the same range.
         std::vector<int> ps;
@@ -580,8 +436,6 @@ void Tuner::discover() {
             ps.insert(ps.end(), q.begin(), q.end());
         }
         std::tie(s.lo, s.hi) = rng(ps);
-        s.lo0 = s.lo;
-        s.hi0 = s.hi;
         s.heads = lost;
         s.note = "Lines that are evaluated but never compared with a line that sets the clock.";
         sections.push_back(s);
@@ -596,10 +450,6 @@ void Tuner::discover() {
             }
         s.p0 = *std::ranges::min_element(ps);
         s.p1 = *std::ranges::max_element(ps);
-        if (s.id == "foot") {
-            s.lo0 = s.lo;
-            s.hi0 = s.hi;
-        }
         for (int h : s.heads) {
             s.chains.push_back({h, chain_rows(h, win, vis)});
             for (auto& r : s.chains.back().second) listed.insert(r.equ);
@@ -715,9 +565,6 @@ void Tuner::find_rules() {
     for (auto& d : diff) {
         Rule r;
         r.id = "ch" + text(d.hot);
-        r.kind = "diff";
-        r.hot = d.hot;
-        r.cold = d.cold;
         r.equs = d.plus;
         r.equs.insert(r.equs.end(), d.minus.begin(), d.minus.end());
         r.title = "Channel " + text(d.hot) + " correction";
@@ -733,15 +580,11 @@ void Tuner::find_rules() {
         if (t.secs == std::set<std::string>{"foot"}) continue;
         int ch = m.V[t.v].channel;
         bool is_below = t.side == "below";
-        Fields zero;
-        for (int i : t.leaves) zero[i] = {{"lo", 0.0}, {"hi", 0.0}};
-        auto eff = effect(edited(fast, zero), fast, is_below ? t.crit - 0.5 : t.crit + 0.5);
+        auto zeroed = fast;
+        for (int i : t.leaves) zeroed[i].lo = zeroed[i].hi = 0;
+        auto eff = effect(zeroed, fast, is_below ? t.crit - 0.5 : t.crit + 0.5);
         Rule r;
         r.id = is_below ? (++below == 1 ? "cold" : "cold" + text(below)) : (++from == 1 ? "hot" : "hot" + text(from));
-        r.kind = "temp";
-        r.channel = ch;
-        r.crit = t.crit;
-        r.side = t.side;
         r.equs = t.leaves;
         auto when = is_below      ? "below " + g(t.crit) + " °C"
                     : t.func == 1 ? "at " + g(t.crit) + " °C or more"
@@ -811,95 +654,17 @@ void Tuner::form_names() {
 }
 
 // ---- a tune ----
-Card Tuner::load_card(const Section& s, const config::Json& q, const config::Json& t) const {
-    // Settings made on the voltage range lo0..hi0 -> the same line with today's sliders on the card's range (older
-    // saves used Offset and Tilt, on the range where the line set the stock clock).
-    auto from_old = [&](double lo0, double hi0, std::map<std::string, double> o) {
-        auto gv = [&](const char* k) { return std::isnan(o[k]) ? 0.0 : o[k]; };
-        double h0 = (hi0 - lo0) / 2, a = (s.hi - s.lo) / 2 / h0, b = ((s.lo + s.hi) / 2 - (lo0 + hi0) / 2) / h0;
-        double bend = gv("bend") * a * a, tilt = gv("tilt") * a - 2 * gv("bend") * a * b,
-               off = gv("off") + gv("tilt") * b + gv("bend") * (1 - b * b) - bend;
-        double temp = gv("temp") + gv("ttilt") * b, tt = gv("ttilt") * a;
-        return Card{off - tilt, off + tilt, bend, temp - tt, temp + tt, gv("tbend")};
+Equations Tuner::equations(const Tune& t) const {
+    auto E = m.E;
+    auto checked = [](int i, double v) { // a 32-bit value the driver takes
+        if (!std::isfinite(v) || std::abs(v) > std::numeric_limits<float>::max())
+            throw std::runtime_error("Equation " + text(i) + " would get a value outside the driver's 32-bit range");
+        return double(float(v));
     };
-    auto num = [&](const char* k) { return number(q, k); };
-    if (!(t.contains("ver") && t["ver"] == 2))
-        return from_old(s.lo0, s.hi0,
-                        {{"off", num("off")},
-                         {"tilt", num("tilt")},
-                         {"bend", num("bend")},
-                         {"temp", num("temp")},
-                         {"ttilt", num("ttilt")},
-                         {"tbend", num("tbend")}});
-    const config::Json* r = nullptr;
-    if (t.contains("ranges") && t["ranges"].is_object() && t["ranges"].contains(s.id)) r = &t["ranges"][s.id];
-    if (!r || (r->is_array() && r->size() == 2 && number((*r)[0]) == s.lo && number((*r)[1]) == s.hi)) {
-        auto z = [&](const char* k) { return q.is_object() && q.contains(k) ? number(q[k]) : 0.0; };
-        return {z("l"), z("r"), z("bend"), z("tl"), z("tr"), z("tbend")};
-    }
-    return from_old(number((*r)[0]), number((*r)[1]),
-                    {{"off", (num("l") + num("r")) / 2},
-                     {"tilt", (num("r") - num("l")) / 2},
-                     {"bend", num("bend")},
-                     {"temp", (num("tl") + num("tr")) / 2},
-                     {"ttilt", (num("tr") - num("tl")) / 2},
-                     {"tbend", num("tbend")}});
-}
-Tune Tuner::tune(const config::Json& t) const {
-    config::object(t);
-    Tune out;
-    for (auto& s : sections) out.cards[s.id] = {};
-    if (t.contains("global")) out.global = number(t["global"]);
-    if (t.contains("po")) out.po = number(t["po"]);
-    if (t.contains("pp")) {
-        config::object(t["pp"]);
-        for (auto& [k, v] : t["pp"].items())
-            if (!k.empty() && k.size() < 6 && k.find_first_not_of("0123456789") == std::string::npos)
-                out.pp[std::stoi(k)] = number(v);
-    }
-    if (t.contains("manual")) {
-        config::object(t["manual"]);
-        for (auto& [k, v] : t["manual"].items()) out.manual[k] = v.is_null() ? std::nullopt : std::optional(number(v));
-    }
-    if (t.contains("mdelta")) {
-        config::object(t["mdelta"]);
-        for (auto& [k, v] : t["mdelta"].items()) out.mdelta[k] = number(v);
-    }
-    for (const char* k : {"rules", "preview"})
-        if (t.contains(k) && t[k].is_object())
-            for (auto& [id, v] : t[k].items()) (k[0] == 'r' ? out.rules : out.preview)[id] = truthy(v);
-    for (auto& s : sections)
-        if (t.contains("sec") && t["sec"].is_object() && t["sec"].contains(s.id))
-            out.cards[s.id] = load_card(s, t["sec"][s.id], t);
-    for (const char* k : {"showStock", "showNew", "showBand", "lines", "ymode"})
-        if (t.contains(k)) out.view[k] = t[k];
-    return out;
-}
-config::Json Tuner::state(const Tune& t) const {
-    auto j = t.view;
-    j["global"] = t.global;
-    j["po"] = t.po;
-    j["pp"] = config::Json::object();
-    for (auto [p, v] : t.pp) j["pp"][text(p)] = v;
-    j["sec"] = config::Json::object();
-    for (auto& [id, c] : t.cards)
-        j["sec"][id] = {{"l", c.l}, {"r", c.r}, {"bend", c.bend}, {"tl", c.tl}, {"tr", c.tr}, {"tbend", c.tbend}};
-    j["manual"] = config::Json::object();
-    for (auto& [k, v] : t.manual) j["manual"][k] = config::nullable(v);
-    j["mdelta"] = t.mdelta;
-    j["rules"] = t.rules;
-    j["preview"] = t.preview;
-    j["ver"] = 2;
-    j["ranges"] = config::Json::object();
-    for (auto& s : sections) j["ranges"][s.id] = {s.lo, s.hi};
-    return j;
-}
-
-std::map<std::string, double> Tuner::additions(const Tune& t) const {
     // Added clock = off + tilt·u + bend·(1 - u²) + (temp + ttilt·u)·t + tbend·t², with u = (mV - Vc)/h (-1 at the
     // card's left end, +1 at its right end) and t = (T - Tref)/10. In the formula the voltage is in µV: k0 constant, V,
     // V², T, T² and V·T.
-    std::map<std::string, double> add;
+    std::map<int, std::array<double, 10>> add;
     for (auto& s : sections) {
         auto it = t.cards.find(s.id);
         auto q = it != t.cards.end() ? it->second : Card{};
@@ -914,103 +679,19 @@ std::map<std::string, double> Tuner::additions(const Tune& t) const {
         for (int hd : s.heads) {
             auto& k = slots.at(hd);
             for (auto [slot, d] : {std::pair(k.c, d0), {k.v, dv}, {k.v2, d4}, {k.t, d6}, {k.t2, d7}, {k.vt, d9}})
-                if (slot >= 0 && d != 0 && !std::isnan(d)) add["" + text(hd) + ".k" + text(slot)] += d;
+                if (slot >= 0 && d != 0 && !std::isnan(d)) add[hd][slot] += d;
         }
     }
-    return add;
-}
-std::optional<double> Tuner::stock_value(int i, const std::string& f) const {
-    auto& e = m.at(m.E, i);
-    auto limit = [](double v) { return std::abs(v) >= unbounded ? std::nullopt : std::optional(v); };
-    if (f == "lo") return limit(e.lo);
-    if (f == "hi") return limit(e.hi);
-    if (f == "crit") return e.ref ? std::nullopt : std::optional(e.crit);
-    if (f == "func") return e.func;
-    if (f == "max") return e.max;
-    if (coefficient(f) >= 0 && coefficient(f) < e.nk) return e.k[coefficient(f)];
-    return std::nullopt;
-}
-bool Tuner::slider(int i, const std::string& f) const {
-    auto s = slots.find(i);
-    if (s == slots.end() || !std::ranges::any_of(sections, [&](auto& c) { return contains(c.heads, i); })) return false;
-    for (int k : {s->second.c, s->second.v, s->second.v2, s->second.t, s->second.t2, s->second.vt})
-        if (k >= 0 && f == "k" + text(k)) return true;
-    return false;
-}
-std::optional<double> Tuner::value(const Tune& t, const std::map<std::string, double>& add, int i,
-                                   const std::string& f) const {
-    auto key = text(i) + "." + f;
-    if (f == "lo" || f == "hi")
-        for (auto& r : rules)
-            if (auto it = t.rules.find(r.id); it != t.rules.end() && it->second && contains(r.equs, i)) return 0.0;
-    auto b = stock_value(i, f);
-    if (slider(i, f)) {
-        auto a = add.find(key);
-        auto md = t.mdelta.find(key);
-        return f32(b.value_or(NAN) + (a != add.end() ? a->second : 0) +
-                   (md != t.mdelta.end() && !std::isnan(md->second) ? md->second : 0));
-    }
-    if (auto mn = t.manual.find(key); mn != t.manual.end()) return mn->second;
-    return b;
-}
-
-Fields Tuner::fields(const Tune& t) const {
-    auto add = additions(t);
-    std::set<std::string> keys; // add, mdelta, manual and the removed corrections, as the page collects them
-    for (auto& [k, v] : add) keys.insert(k);
+    for (auto& [h, ks] : add)
+        for (int j = 0; j < 10; ++j)
+            if (ks[j] != 0) E[h].k[j] = checked(h, float(m.E[h].k[j] + ks[j]));
+    if (t.floor) E[meta.root].lo = checked(meta.root, *t.floor);
+    if (t.ceiling) E[meta.root].hi = checked(meta.root, *t.ceiling);
     for (auto& r : rules)
         if (auto it = t.rules.find(r.id); it != t.rules.end() && it->second)
-            for (int i : r.equs) keys.insert({text(i) + ".lo", text(i) + ".hi"});
-    for (auto& [k, v] : t.mdelta) keys.insert(k);
-    for (auto& [k, v] : t.manual) keys.insert(k);
-    std::map<int, std::map<std::string, std::optional<double>>> raw;
-    for (auto& key : keys) {
-        auto dot = key.find('.');
-        if (dot == std::string::npos || dot == 0 || key.find_first_not_of("0123456789") != dot)
-            throw std::runtime_error("The tune names an unknown field: " + key);
-        int i = std::stoi(key.substr(0, dot));
-        auto f = key.substr(dot + 1);
-        auto b = stock_value(i, f), v = value(t, add, i, f);
-        bool same = v.has_value() == b.has_value() && (!v || *v == *b);
-        if (!same) raw[i][f] = v;
-    }
-    for (auto& [i, d] : switch_fields)
-        for (auto& [f, v] : d) raw[i][f] = v;
-    // vfe-ui.py clean(): checked 32-bit values; the switch always off.
-    Fields out;
-    for (auto& [i, d] : raw) {
-        if (!tree.contains(i)) throw std::runtime_error("Equation " + text(i) + " is not part of the clock curve");
-        auto& e = m.E[i];
-        for (auto& [f, v] : d) {
-            auto bad = [&] {
-                return std::runtime_error("Equation " + text(i) + ": '" + f + "' cannot be set to that value");
-            };
-            if (f == "ref" && e.type == 1 && v && (*v == 0 || *v == 1)) {
-                out[i][f] = *v;
-                continue;
-            }
-            if (f == "lo" || f == "hi") {
-                if (!v) {
-                    out[i][f] = f == "lo" ? -float_max : float_max;
-                    continue;
-                }
-            } else if (e.leaf() && coefficient(f) >= 0 && coefficient(f) < e.nk) {
-            } else if (f == "crit" && e.type == 1 && (!e.ref || (d.contains("ref") && d.at("ref") == 0.0))) {
-            } else if (f == "func" && e.type == 1 && v && (*v == 0 || *v == 1 || *v == 2)) {
-                out[i][f] = *v;
-                continue;
-            } else if (f == "max" && e.type == 2 && v && (*v == 0 || *v == 1)) {
-                out[i][f] = *v;
-                continue;
-            } else
-                throw bad();
-            if (!v || !std::isfinite(*v) || std::abs(*v) > float_max) throw bad();
-            out[i][f] = f32(*v);
-        }
-    }
-    for (auto& [i, d] : switch_fields)
-        for (auto& [f, v] : d) out[i][f] = v;
-    return out;
+            for (int i : r.equs) E[i].lo = E[i].hi = 0;
+    switch_off(E);
+    return E;
 }
 std::vector<double> Tuner::offsets(const Tune& t) const {
     std::vector<double> o(points());
@@ -1022,124 +703,132 @@ std::vector<double> Tuner::offsets(const Tune& t) const {
     return o;
 }
 Curve Tuner::compile(const Tune& t, const Gpu& gpu) const {
+    auto E = equations(t);
     Curve c{gpu};
-    for (auto& [i, d] : fields(t)) {
-        auto stock = record(m.stock, i);
-        auto r = with_fields(stock, m.E[i], d);
-        if (!std::ranges::equal(r, stock)) c.records.emplace(i, std::move(r));
-    }
+    for (int i = 0; i < int(E.size()); ++i)
+        if (auto r = m.record(i, E[i]); !std::ranges::equal(r, record(m.stock, i))) c.records.emplace(i, std::move(r));
     for (double o : offsets(t)) c.offsets_khz.push_back(int(std::lround(o * 1000)));
     return c;
 }
-
-Fields Tuner::live_fields(const Bytes& live) const {
-    Fields out;
+config::Json Tuner::fields(const Equations& E) const {
+    auto out = config::Json::object();
+    auto limit = [](double v) { return std::abs(v) >= unbounded ? config::Json() : config::Json(v); };
+    for (size_t i = 0; i < E.size(); ++i) {
+        auto &e = E[i], &s = m.E[i];
+        auto f = config::Json::object();
+        if (e.lo != s.lo) f["lo"] = limit(e.lo);
+        if (e.hi != s.hi) f["hi"] = limit(e.hi);
+        for (int j = 0; j < e.nk; ++j)
+            if (e.k[j] != s.k[j]) f["k" + text(j)] = e.k[j];
+        if (e.crit != s.crit) f["crit"] = e.crit;
+        for (auto [name, a, b] : {std::tuple("ref", e.ref, s.ref), {"func", e.func, s.func}, {"max", e.max, s.max}})
+            if (a != b) f[name] = double(a);
+        if (!f.empty()) out[text(int(i))] = std::move(f);
+    }
+    return out;
+}
+Live Tuner::live(const Bytes& records) const {
+    Live out{m.E};
     for (int i = 0; i < int(m.E.size()); ++i) {
-        auto r = record(live, i);
+        auto r = record(records, i);
         if (std::ranges::equal(r, record(m.stock, i))) continue;
-        auto& e = m.E[i];
-        auto at = [&](size_t p) {
-            float f;
-            std::memcpy(&f, r.data() + p, 4);
-            return double(f);
-        };
-        auto& d = out[i];
-        if (at(4) != e.lo) d["lo"] = at(4);
-        if (at(8) != e.hi) d["hi"] = at(8);
-        if (e.leaf())
-            for (int j = 0; j < e.nk; ++j) {
-                double v = at(coefficient_at(e, j));
-                if (v != e.k[j]) d["k" + text(j)] = v;
-            }
-        else if (e.type == 1) {
-            if (r[44] != e.func) d["func"] = r[44];
-            if (r[45] != e.ref) d["ref"] = r[45];
-            if (!r[45] && (e.ref || at(48) != e.crit)) d["crit"] = at(48);
-        } else if (e.type == 2 && r[44] != e.max)
-            d["max"] = r[44];
-        // A difference that these fields do not describe.
-        if (!std::ranges::equal(with_fields(record(m.stock, i), e, d), r)) d["other"] = 1;
+        out.changed.push_back(i);
+        out.E[i] = m.read(i, r);
+        if (!std::ranges::equal(m.record(i, out.E[i]), r)) out.undescribed.push_back(i);
     }
     return out;
 }
 
-Fit Tuner::fit(const Equations& E, const std::vector<double>& stock) const {
-    // The temperature (0.1 °C steps) at which the computed curve equals the driver's at the most points.
+Fit Tuner::fit(const Equations& E, const Points& read) const {
     int n = points();
-    auto score = [&](double celsius) {
+    if (int(read.graphics.size()) != n)
+        throw std::runtime_error("The driver's curve has " + text(int(read.graphics.size())) +
+                                 " points; the tuner expects " + text(n) + ".");
+    std::vector<double> driver;
+    for (auto& p : read.graphics) driver.push_back(snap(p.base_khz / 1000.0, meta.step));
+    auto equal = [&](double celsius) {
         auto c = curve(E, celsius);
-        int equal = 0;
-        double off = 0;
-        for (int p = 0; p < n; ++p) {
-            equal += c[p] == stock[p];
-            off -= std::abs(c[p] - stock[p]);
-        }
-        return std::tuple(equal, off, c);
+        int k = 0;
+        for (int p = 0; p < n; ++p) k += c[p] == driver[p];
+        return k;
     };
-    int best = -1;
+    Fit f{0, -1};
     double t0 = 0;
     for (int t2 = -10; t2 < 211; t2 += 5)
-        if (int s = std::get<0>(score(t2 / 2.0)); s > best) std::tie(best, t0) = std::pair(s, t2 / 2.0);
-    struct Cand {
-        int equal;
-        double off, celsius;
-        std::vector<double> c;
-    };
-    std::vector<Cand> cand;
+        if (int k = equal(t2 / 2.0); k > f.equal) std::tie(f.equal, t0) = std::pair(k, t2 / 2.0);
+    f.equal = -1;
     for (int d = -25; d < 26; ++d)
         if (double x = t0 + d / 10.0; x >= -5 && x <= 105) {
             double celsius = std::round(x * 10) / 10;
-            auto [e, o, c] = score(celsius);
-            cand.push_back({e, o, celsius, std::move(c)});
+            if (int k = equal(celsius); k > f.equal) std::tie(f.equal, f.celsius) = std::pair(k, celsius);
         }
-    auto top = cand.begin();
-    for (auto it = cand.begin(); it != cand.end(); ++it)
-        if (it->equal > top->equal) top = it;
-    Fit f;
-    f.celsius = top->celsius;
-    f.lo = INFINITY;
-    f.hi = -INFINITY;
-    for (auto& c : cand)
-        if (c.equal == top->equal && c.off == top->off) {
-            f.lo = std::min(f.lo, c.celsius);
-            f.hi = std::max(f.hi, c.celsius);
-        }
-    f.equal = top->equal;
-    f.computed = top->c;
-    auto raws = raw_curve(E, f.celsius);
-    for (int p = 0; p < n; ++p) {
-        if (f.computed[p] == stock[p]) continue;
-        bool edge = std::abs(stock[p] - f.computed[p]) == meta.step &&
-                    std::abs(raws[p] - std::max(stock[p], f.computed[p])) < 1.0;
-        f.diffs.push_back({p, stock[p], f.computed[p], std::round(raws[p] * 1000) / 1000, edge});
-        f.edge += edge;
+    // The final clock: the driver's stock clock plus its offsets by the measured rule, against what it reports.
+    if (std::ranges::any_of(read.graphics, [](auto& p) { return p.offset_khz != 0; })) {
+        std::vector<double> o;
+        for (auto& p : read.graphics) o.push_back(p.offset_khz / 1000.0);
+        auto predicted = with_offsets(driver, o, meta.step);
+        for (int p = 0; p < n; ++p) f.offsets += snap(read.graphics[p].final_khz / 1000.0, meta.step) != predicted[p];
     }
     return f;
 }
-bool Settle::done(const Points& read, double waited) {
-    auto s = driver_stock(read);
-    for (auto& x : s) x = snap(x, step);
-    int same = 0;
-    for (size_t p = 0; p < s.size() && p < fallback.size(); ++p) same += s[p] == fallback[p];
-    bool settled = waited >= 20 || (waited >= 5 && same <= 0.8 * double(fallback.size()) && last == s);
-    last = std::move(s);
-    return settled;
-}
-Settle Tuner::settling(const Equations& E) const {
-    auto fallback = curve(E, 50.0, 1);
-    if (fallback == curve(E, 50.0)) fallback.clear();
-    return {fallback, meta.step};
-}
-Points Tuner::settle(const Equations& E, bool wrote, const std::function<Points()>& read) const {
-    auto start = std::chrono::steady_clock::now();
-    auto c = read();
-    if (!wrote) return c;
-    auto s = settling(E);
-    for (;;) {
-        Sleep(500);
-        c = read();
-        if (s.done(c, std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count())) return c;
+
+Tune Tuner::tune(const config::Json& j) const {
+    auto refuse = [](const std::string& what) {
+        return std::runtime_error("The settings were saved for other V/F curve cards or by an older version (" +
+                                  what + ")");
+    };
+    config::object(j);
+    if (!j.contains("ver") || j["ver"] != 2) throw refuse("version");
+    if (j.value("ranges", config::Json()) != state({})["ranges"]) throw refuse("card ranges");
+    auto part = [&](const char* key) -> const config::Json& { // an object, empty where it is missing
+        static const auto none = config::Json::object();
+        if (!j.contains(key)) return none;
+        config::object(j[key]);
+        return j[key];
+    };
+    Tune t;
+    config::field(j, "global", t.global);
+    config::field(j, "po", t.po);
+    for (auto& [k, v] : part("pp").items()) {
+        if (k.empty() || k.size() > 5 || k.find_first_not_of("0123456789") != std::string::npos ||
+            std::stoi(k) >= points())
+            throw refuse("an offset at point " + k);
+        t.pp[std::stoi(k)] = v.get<double>();
     }
+    for (auto& [id, q] : part("sec").items()) {
+        if (std::ranges::none_of(sections, [&](auto& s) { return s.id == id; })) throw refuse("card " + id);
+        t.cards[id] = {q.value("l", 0.0), q.value("r", 0.0), q.value("bend", 0.0),
+                       q.value("tl", 0.0), q.value("tr", 0.0), q.value("tbend", 0.0)};
+    }
+    for (auto& [k, v] : part("manual").items()) {
+        auto root = text(meta.root);
+        if ((k != root + ".lo" && k != root + ".hi") || !v.is_number()) throw refuse("a number typed into " + k);
+        (k.ends_with("lo") ? t.floor : t.ceiling) = v.get<double>();
+    }
+    if (!part("mdelta").empty()) throw refuse("numbers typed into the tables");
+    for (auto& [id, v] : part("rules").items()) {
+        bool on = v.get<bool>();
+        if (std::ranges::any_of(rules, [&](auto& r) { return r.id == id; }))
+            t.rules[id] = on;
+        else if (on)
+            throw refuse("correction " + id);
+    }
+    return t;
+}
+config::Json Tuner::state(const Tune& t) const {
+    config::Json j{{"ver", 2}, {"global", t.global}, {"po", t.po}, {"pp", config::Json::object()},
+                   {"sec", config::Json::object()}, {"ranges", config::Json::object()},
+                   {"manual", config::Json::object()}, {"rules", t.rules}};
+    for (auto [p, v] : t.pp) j["pp"][text(p)] = v;
+    for (auto& s : sections) {
+        auto it = t.cards.find(s.id);
+        auto c = it != t.cards.end() ? it->second : Card{};
+        j["sec"][s.id] = {{"l", c.l}, {"r", c.r}, {"bend", c.bend}, {"tl", c.tl}, {"tr", c.tr}, {"tbend", c.tbend}};
+        j["ranges"][s.id] = {s.lo, s.hi};
+    }
+    if (t.floor) j["manual"][text(meta.root) + ".lo"] = *t.floor;
+    if (t.ceiling) j["manual"][text(meta.root) + ".hi"] = *t.ceiling;
+    return j;
 }
 
 std::map<std::string, std::vector<double>> Tuner::reference(const std::filesystem::path& path) const {
@@ -1147,27 +836,27 @@ std::map<std::string, std::vector<double>> Tuner::reference(const std::filesyste
     for (auto& c : columns)
         if (*c.band) sheet[c.band].assign(points(), NAN);
     auto content = config::read_text(path);
-    if (content.starts_with("\xEF\xBB\xBF")) content.erase(0, 3);
-    std::istringstream in(content);
-    std::string line;
-    std::vector<std::string> head;
-    auto split = [](const std::string& s) {
-        std::vector<std::string> cells;
-        std::stringstream ss(s);
-        std::string c;
-        while (std::getline(ss, c, ',')) cells.push_back(c);
-        return cells;
-    };
-    while (std::getline(in, line)) {
-        if (line.ends_with('\r')) line.pop_back();
-        auto cells = split(line);
+    std::string_view rest = content;
+    if (rest.starts_with("\xEF\xBB\xBF")) rest.remove_prefix(3);
+    std::vector<std::string_view> head;
+    while (!rest.empty()) {
+        auto line = rest.substr(0, rest.find('\n'));
+        rest.remove_prefix(std::min(rest.size(), line.size() + 1));
+        if (line.ends_with('\r')) line.remove_suffix(1);
+        std::vector<std::string_view> cells;
+        for (size_t at = 0; at <= line.size();) {
+            auto end = std::min(line.find(',', at), line.size());
+            cells.push_back(line.substr(at, end - at));
+            at = end + 1;
+        }
         if (head.empty()) {
             head = cells;
             continue;
         }
-        auto get = [&](const std::string& name) -> std::string {
+        auto get = [&](std::string_view name) {
             auto it = std::ranges::find(head, name);
-            return it == head.end() || size_t(it - head.begin()) >= cells.size() ? "" : cells[it - head.begin()];
+            return it != head.end() && size_t(it - head.begin()) < cells.size() ? std::string(cells[it - head.begin()])
+                                                                                : "";
         };
         auto index = get("index");
         if (get("domain") != "graphics" || index.empty() ||
@@ -1182,27 +871,21 @@ std::map<std::string, std::vector<double>> Tuner::reference(const std::filesyste
 
 Tuner open(Api& api, const std::filesystem::path& directory) {
     auto info = equation_info(api);
-    auto gpu_now = gpu(api.identity, info);
-    auto variables = vf::variable_info(api);
-    auto variable_control = vf::variable_records(api, variables);
+    auto now = gpu(api.identity, info);
+    auto variables = variable_info(api);
+    auto variable_control = variable_records(api, variables);
     auto live = records(api, info);
-    auto stock = load_stock(directory, gpu_now, info);
-    auto meta_path = stock_path(directory, gpu_now).replace_extension(".json");
+    auto stock = load_stock(directory, now, info);
+    auto meta_path = stock_path(directory, now).replace_extension(".json");
     std::optional<Meta> meta;
-    std::string recorded;
     if (!stock) {
-        save_stock(directory, gpu_now, live);
+        save_stock(directory, now, live);
         stock = live;
-        recorded = local_time(std::chrono::system_clock::now());
     } else if (std::filesystem::exists(meta_path))
         meta = meta_from_json(config::read_json(meta_path));
-    else
-        recorded = local_time(std::chrono::clock_cast<std::chrono::system_clock>(
-            std::filesystem::last_write_time(stock_path(directory, gpu_now))));
     if (!meta) {
         // The driver's curve comes from the live records, which may not be stock.
         meta = find_meta(Model(info, live, variables, variable_control), points(api));
-        meta->recorded = recorded;
         config::write_json(meta_path, to_json(*meta), true);
     }
     return Tuner(Model(info, *stock, variables, variable_control), *meta);

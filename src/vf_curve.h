@@ -38,9 +38,9 @@ Bytes variable_info(Api&);
 Bytes variable_records(Api&, const Bytes& variable_info);
 
 struct Point {
-    uint32_t uv = 0;                  // the voltage the driver lists
-    std::optional<uint32_t> base_khz; // the clock from the equations, where the driver reports it
-    uint32_t final_khz = 0;           // with the offset
+    uint32_t uv = 0;       // the voltage the driver lists
+    uint32_t base_khz = 0; // the clock from the equations
+    uint32_t final_khz = 0; // with the offset
     int32_t offset_khz = 0;
     bool programmable = false; // takes an offset
 };
@@ -50,16 +50,14 @@ struct Points {
     int32_t offset_min_khz = 0, offset_max_khz = 0;
 };
 Points points(Api&);
-// Makes the graphics offsets equal `khz`, one per graphics point, and reads them back. Returns how many changed.
-// Refuses while MSI Afterburner runs, because it writes its own copy of the curve.
-int set_offsets(Api&, const std::vector<int>& khz);
 
 struct Applied {
     int equations = 0, offsets = 0; // how many were written
 };
 // Makes the driver's equations equal its stock records with the curve's records, then its offsets equal the curve's,
 // and reads both back. The stock records come from `directory` (store_directory()). Refuses a curve made for another
-// GPU, VBIOS, driver or equation list, and one without recorded stock, before any write.
+// GPU, VBIOS, driver or equation list, one without recorded stock, and offsets while MSI Afterburner runs (it writes
+// its own copy of them), before any write.
 Applied apply(Api&, const Curve&, const std::filesystem::path& directory);
 // Stock equations and every offset 0.
 Applied restore(Api&, const std::filesystem::path& directory);

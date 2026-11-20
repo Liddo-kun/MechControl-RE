@@ -13,8 +13,13 @@ double f32(std::span<const uint8_t> b, size_t p) {
     std::memcpy(&f, b.data() + p, 4);
     return f;
 }
+void put_f32(Bytes& b, size_t p, double v) {
+    float f = float(v);
+    std::memcpy(b.data() + p, &f, 4);
+}
 int u16(std::span<const uint8_t> b, size_t p) { return b[p] | b[p + 1] << 8; }
-std::string text(int i) { return std::to_string(i); }
+// Where coefficient j of a formula is in its control record.
+size_t coefficient_at(const Equation& e, int j) { return e.type == 3 ? 44 + 4 * j : 76 + 8 * j; }
 }
 
 Model::Model(const Bytes& info, const Bytes& records, const Bytes& variable_info, const Bytes& variable_records)
@@ -24,41 +29,20 @@ Model::Model(const Bytes& info, const Bytes& records, const Bytes& variable_info
     E.resize(n);
     for (size_t i = 0; i < n; ++i) {
         auto a = std::span(info).subspan(equation_header + i * info_size, info_size);
-        auto c = record(records, i);
         auto& e = E[i];
         e.type = int(u32(a, 0));
         e.var = u16(a, 4);
         e.next = u16(a, 6) == 0xffff ? -1 : u16(a, 6);
-        e.lo = f32(c, 4);
-        e.hi = f32(c, 8);
         if (e.type == 1) {
             e.yes = u16(a, 42);
             e.no = u16(a, 44);
-            e.func = c[44];
-            e.ref = c[45];
-            e.crit = f32(c, 48);
-            e.refidx = int(std::min<uint32_t>(u32(c, 48), INT_MAX));
         } else if (e.type == 2) {
             e.a = u16(a, 42);
             e.b = u16(a, 44);
-            e.max = c[44];
-        } else if (e.type == 3) {
-            e.nvars = 1;
-            e.vars[0] = e.var;
-            e.nk = 3;
-            for (int j = 0; j < 3; ++j) e.k[j] = f32(c, 44 + 4 * j);
-        } else if (e.type == 6) {
-            auto nv = u32(c, 68), nk = u32(c, 152);
-            if (nv > 3 || nk > 10)
-                throw std::runtime_error("V/F equation " + text(int(i)) +
-                                         " has a formula layout MechControl does not know");
-            e.nvars = int(nv);
-            e.nk = int(nk);
-            for (int j = 0; j < e.nvars; ++j) e.vars[j] = int(std::min<uint32_t>(u32(c, 48 + 8 * j), INT_MAX));
-            for (int j = 0; j < e.nk; ++j) e.k[j] = f32(c, 76 + 8 * j);
-        } else
-            throw std::runtime_error("V/F equation " + text(int(i)) + " has a type MechControl does not know (" +
-                                     text(e.type) + ")");
+        } else if (!e.leaf())
+            throw std::runtime_error("V/F equation " + std::to_string(i) + " has a type MechControl does not know (" +
+                                     std::to_string(e.type) + ")");
+        e = read(int(i), vf::record(records, i));
     }
     if (variable_info.size() < variable_header || variable_records.size() < variable_control_header)
         throw std::runtime_error("Truncated V/F variable list");
@@ -101,7 +85,8 @@ Model::Model(const Bytes& info, const Bytes& records, const Bytes& variable_info
         if (x.type == 8) sym[i] = {x.channel};
         if (x.type == 2 || x.type == 3) {
             if (size_t(x.a) >= count || size_t(x.b) >= count)
-                throw std::runtime_error("V/F variable " + text(int(i)) + " refers to a variable that does not exist");
+                throw std::runtime_error("V/F variable " + std::to_string(i) +
+                                         " refers to a variable that does not exist");
             auto s = self(self, x.a);
             auto& t = self(self, x.b);
             s.insert(t.begin(), t.end());
@@ -112,19 +97,62 @@ Model::Model(const Bytes& info, const Bytes& records, const Bytes& variable_info
     };
     for (size_t i = 0; i < count; ++i) work(work, i);
 }
+Equation Model::read(int i, std::span<const uint8_t> c) const {
+    auto e = E[i];
+    e.lo = f32(c, 4);
+    e.hi = f32(c, 8);
+    if (e.type == 1) {
+        e.func = c[44];
+        e.ref = c[45];
+        e.crit = f32(c, 48);
+        e.refidx = int(std::min<uint32_t>(u32(c, 48), INT_MAX));
+    } else if (e.type == 2)
+        e.max = c[44];
+    else if (e.type == 3) {
+        e.nvars = 1;
+        e.vars[0] = e.var;
+        e.nk = 3;
+    } else {
+        auto nv = u32(c, 68), nk = u32(c, 152);
+        if (nv > 3 || nk > 10)
+            throw std::runtime_error("V/F equation " + std::to_string(i) +
+                                     " has a formula layout MechControl does not know");
+        e.nvars = int(nv);
+        e.nk = int(nk);
+        for (int j = 0; j < e.nvars; ++j) e.vars[j] = int(std::min<uint32_t>(u32(c, 48 + 8 * j), INT_MAX));
+    }
+    for (int j = 0; j < e.nk; ++j) e.k[j] = f32(c, coefficient_at(e, j));
+    return e;
+}
+Bytes Model::record(int i, const Equation& e) const {
+    auto& s = E[i];
+    auto stock_record = vf::record(stock, i);
+    Bytes r(stock_record.begin(), stock_record.end());
+    if (e.lo != s.lo) put_f32(r, 4, e.lo);
+    if (e.hi != s.hi) put_f32(r, 8, e.hi);
+    for (int j = 0; j < e.nk; ++j)
+        if (e.k[j] != s.k[j]) put_f32(r, coefficient_at(e, j), e.k[j]);
+    if (e.type == 1) {
+        if (e.func != s.func) r[44] = uint8_t(e.func);
+        if (e.ref != s.ref) r[45] = uint8_t(e.ref);
+        if (e.crit != s.crit) put_f32(r, 48, e.crit);
+    }
+    if (e.type == 2 && e.max != s.max) r[44] = uint8_t(e.max);
+    return r;
+}
 const Equation& Model::at(const Equations& list, int i) const {
     if (i < 0 || size_t(i) >= list.size())
-        throw std::runtime_error("A V/F equation refers to equation " + text(i) + ", which does not exist");
+        throw std::runtime_error("A V/F equation refers to equation " + std::to_string(i) + ", which does not exist");
     return list[i];
 }
 bool Model::is_switch(const Equation& e) const {
     return e.type == 1 && e.ref && size_t(e.var) < sym.size() && sym[e.var].contains(voltage);
 }
-std::vector<int> Model::kids(const Equation& e, bool refs) const {
+std::vector<int> Model::kids(const Equation& e) const {
     std::vector<int> k;
     if (e.type == 1) {
         k = {e.yes, e.no};
-        if (e.ref && refs) k.push_back(e.refidx);
+        if (e.ref) k.push_back(e.refidx);
     }
     if (e.type == 2) k = {e.a, e.b};
     if (e.next >= 0) k.push_back(e.next);
@@ -142,30 +170,24 @@ std::set<int> Model::tree(int root) const {
     return seen;
 }
 
-Env::Env(const Model& model, const Equations& list, double uv, double celsius, int flag,
-         const std::map<int, double>& hotter)
-    : m(model), E(list), uv_(uv), celsius_(celsius), flag_(flag), hotter_(hotter), value_(model.V.size()),
-      known_(model.V.size()) {}
+Env::Env(const Model& model, const Equations& list, double uv, double celsius)
+    : m(model), E(list), uv_(uv), celsius_(celsius), value_(model.V.size()), known_(model.V.size()) {}
 double Env::var(int i) {
     if (i < 0 || size_t(i) >= m.V.size())
-        throw std::runtime_error("A V/F equation refers to variable " + text(i) + ", which does not exist");
+        throw std::runtime_error("A V/F equation refers to variable " + std::to_string(i) + ", which does not exist");
     if (known_[i]) return value_[i];
     auto& x = m.V[i];
     double r;
     switch (x.type) {
     case 13: r = x.value; break;
-    case 8: {
-        auto h = hotter_.find(x.channel);
-        r = h != hotter_.end() ? celsius_ + h->second : celsius_;
-        break;
-    }
+    case 8: r = celsius_; break;
     case 9: r = uv_; break;
-    case 15: r = flag_; break;
+    case 15: r = 0; break;
     case 2: r = var(x.a) * var(x.b); break;
     case 3: r = var(x.a) + var(x.b); break;
     default:
-        throw std::runtime_error("V/F variable " + text(i) + " has a type MechControl does not know (" + text(x.type) +
-                                 ")");
+        throw std::runtime_error("V/F variable " + std::to_string(i) + " has a type MechControl does not know (" +
+                                 std::to_string(x.type) + ")");
     }
     known_[i] = 1;
     return value_[i] = std::max(x.lo, std::min(r, x.hi));
@@ -185,26 +207,44 @@ double Env::formula(const Equation& e) {
     if (e.nk == 10) r += k[6] * x[2] + k[7] * x[2] * x[2] + k[8] * x[0] * x[2] + k[9] * x[1] * x[2];
     return r;
 }
-double Env::equ(int i) {
+double Env::equ(int i, std::vector<int>* path, std::set<int>* seen) {
     auto& e = m.at(E, i);
     if (++depth_ > 10000) throw std::runtime_error("The V/F equations refer to each other in a loop");
+    if (seen) seen->insert(i);
     double r;
     if (e.type == 1)
-        r = equ(test(e, e.ref ? equ(e.refidx) : e.crit) ? e.yes : e.no);
+        r = equ(test(e, e.ref ? equ(e.refidx) : e.crit) ? e.yes : e.no, path, seen);
     else if (e.type == 2) {
-        double a = equ(e.a), b = equ(e.b);
-        r = e.max ? std::max(a, b) : std::min(a, b);
-    } else
+        size_t from = path ? path->size() : 0;
+        std::vector<int> second;
+        double a = equ(e.a, path, seen), b = equ(e.b, path ? &second : nullptr, seen);
+        if (e.max ? a >= b : a <= b)
+            r = a;
+        else {
+            r = b;
+            if (path) {
+                path->resize(from);
+                path->insert(path->end(), second.begin(), second.end());
+            }
+        }
+    } else {
         r = formula(e);
+        if (path) path->push_back(i);
+    }
     r = std::max(e.lo, std::min(r, e.hi));
-    if (e.next >= 0) r += equ(e.next);
+    if (e.next >= 0) r += equ(e.next, path, seen);
+    if (values) (*values)[i] = r;
     --depth_;
     return r;
 }
 
 double to_step(double x, double step) { return (std::ceil((std::floor(x + 1e-9) + 1) / step - 1e-9) - 1) * step; }
-std::vector<double> hold(std::vector<double> c) {
-    for (size_t i = 1; i < c.size(); ++i) c[i] = std::max(c[i], c[i - 1]);
+std::vector<double> curve(const Model& m, const Equations& E, int root, const std::vector<double>& uv, double celsius,
+                          double step) {
+    std::vector<double> c;
+    double top = -INFINITY;
+    for (double u : uv) c.push_back(top = std::max(Env(m, E, u, celsius).equ(root), top));
+    for (auto& x : c) x = to_step(x, step);
     return c;
 }
 std::vector<double> with_offsets(const std::vector<double>& base, const std::vector<double>& off, double st) {
@@ -223,32 +263,9 @@ double snap(double v, double step) {
     double c = std::ceil(v / step - 1e-9) * step;
     return c - v < 1 ? c : v;
 }
-std::vector<double> driver_stock(const Points& points) {
-    std::vector<double> out;
-    for (auto& p : points.graphics) {
-        if (!p.base_khz && p.offset_khz)
-            throw std::runtime_error(
-                "This driver does not report the stock clock and offsets are set, so the stock curve is not known. Set every offset to 0 first.");
-        out.push_back((p.base_khz ? double(*p.base_khz) : std::max(0.0, double(p.final_khz) - p.offset_khz)) / 1000);
-    }
-    return out;
-}
 
 config::Json to_json(const Meta& m) {
-    config::Json grid = {{"npoints", m.uv.size()}};
-    if (m.v0 && m.vstep) {
-        grid["v0"] = *m.v0;
-        grid["vstep"] = *m.vstep;
-    } else
-        grid["uv"] = m.uv;
-    return {
-        {"root", m.root},
-        {"grid", grid},
-        {"step", m.step},
-        {"fit",
-         {{"points_equal", m.equal}, {"of", m.uv.size()}, {"temperature", m.temperature}, {"voltages", m.voltages}}},
-        {"candidates", m.candidates},
-        {"recorded", m.recorded}};
+    return {{"root", m.root}, {"grid", {{"uv", m.uv}}}, {"step", m.step}, {"fit", {{"points_equal", m.equal}}}};
 }
 Meta meta_from_json(const config::Json& j) {
     Meta m;
@@ -256,33 +273,32 @@ Meta meta_from_json(const config::Json& j) {
     auto& g = j.at("grid");
     if (g.contains("uv"))
         m.uv = g.at("uv").get<std::vector<double>>();
-    else {
-        m.v0 = g.at("v0").get<double>();
-        m.vstep = g.at("vstep").get<double>();
-        for (int i = 0; i < g.at("npoints").get<int>(); ++i) m.uv.push_back(*m.v0 + *m.vstep * i);
-    }
+    else // a straight grid, as vfe.py and the first versions of the tab saved it
+        for (int i = 0; i < g.at("npoints").get<int>(); ++i)
+            m.uv.push_back(g.at("v0").get<double>() + g.at("vstep").get<double>() * i);
     if (m.uv.size() < 2) throw std::runtime_error("Malformed V/F curve points");
     m.step = j.at("step").get<double>();
-    auto& f = j.at("fit");
-    m.equal = f.at("points_equal").get<int>();
-    m.temperature = f.at("temperature").get<double>();
-    m.voltages = f.at("voltages").get<std::string>();
-    if (j.contains("candidates")) m.candidates = j.at("candidates").get<std::vector<int>>();
-    if (j.contains("recorded")) m.recorded = j.at("recorded").get<std::string>();
+    m.equal = j.at("fit").at("points_equal").get<int>();
     return m;
 }
 
 Meta find_meta(const Model& m, const Points& points) {
-    auto stock = driver_stock(points);
+    std::vector<double> stock, uv;
+    std::vector<long long> listed;
+    for (auto& p : points.graphics) {
+        stock.push_back(p.base_khz / 1000.0);
+        listed.push_back(p.uv);
+        uv.push_back(p.uv);
+    }
     size_t n = stock.size();
     if (n < 8) throw std::runtime_error("The driver's curve has fewer than 8 points");
     std::set<int> par;
     for (auto& e : m.E)
         for (int k : m.kids(e)) par.insert(k);
     auto vdep = [&](int i) {
+        auto depends = [&](int v) { return size_t(v) < m.sym.size() && m.sym[v].contains(voltage); };
         for (int j : m.tree(i)) {
             auto& e = m.E[j];
-            auto depends = [&](int v) { return size_t(v) < m.sym.size() && m.sym[v].contains(voltage); };
             for (int k = 0; k < e.nvars; ++k)
                 if (depends(e.vars[k])) return true;
             if (e.type == 1 && depends(e.var)) return true;
@@ -294,23 +310,14 @@ Meta find_meta(const Model& m, const Points& points) {
         if (!par.contains(i) && vdep(i)) roots.push_back(i);
     if (roots.empty()) throw std::runtime_error("No V/F equation depends on the voltage");
     auto score = [&](int root, const std::vector<double>& uv, double step, double celsius) {
-        std::vector<double> raw;
-        for (double u : uv) raw.push_back(Env(m, m.E, u, celsius).equ(root));
-        raw = hold(std::move(raw));
+        auto c = curve(m, m.E, root, uv, celsius, step);
         int equal = 0;
-        for (size_t i = 0; i < n; ++i) equal += to_step(raw[i], step) == snap(stock[i], step);
+        for (size_t i = 0; i < n; ++i) equal += c[i] == snap(stock[i], step);
         return equal;
     };
     // Point voltage candidates: straight grids whose values, rounded up to 5 mV, give the listed voltages, then the
     // listed voltages themselves.
-    struct Candidate {
-        bool grid;
-        double v0, st;
-        std::vector<double> uv;
-    };
-    std::vector<Candidate> cands;
-    std::vector<long long> listed;
-    for (auto& p : points.graphics) listed.push_back(p.uv);
+    std::vector<std::vector<double>> cands;
     double est = double(listed.back() - listed.front()) / double(n - 1);
     std::vector<long long> steps;
     for (int d = -1250; d <= 1250; d += 625) steps.push_back((long long)std::nearbyint(est / 625.0) * 625 + d);
@@ -323,40 +330,27 @@ Meta find_meta(const Model& m, const Points& points) {
             for (size_t i = 0; i < n && fits; ++i)
                 fits = std::ceil(double(v0 + st * (long long)i) / 5000.0 - 1e-9) * 5000 == double(listed[i]);
             if (!fits) continue;
-            Candidate c{true, double(v0), double(st), {}};
-            for (size_t i = 0; i < n; ++i) c.uv.push_back(double(v0 + st * (long long)i));
-            cands.push_back(std::move(c));
+            auto& c = cands.emplace_back();
+            for (size_t i = 0; i < n; ++i) c.push_back(double(v0 + st * (long long)i));
         }
     }
-    cands.push_back({false, 0, 0, {}});
-    for (auto v : listed) cands.back().uv.push_back(double(v));
-    int best = -1, root = 0;
-    double step = 0, t0 = 0;
+    cands.push_back(uv);
+    int best = -1;
+    Meta meta;
+    double t0 = 0;
     for (int r : roots)
         for (auto* c : {&cands.front(), &cands.back()})
             for (double st : {7.5, 15.0})
                 for (int t = -5; t < 106; t += 10)
-                    if (int s = score(r, c->uv, st, t); s > best)
-                        std::tie(best, root, step, t0) = std::tuple(s, r, st, double(t));
+                    if (int s = score(r, *c, st, t); s > best) std::tie(best, meta.root, meta.step, t0) = std::tuple(s, r, st, double(t));
     best = -1;
-    double celsius = 0;
-    const Candidate* found = nullptr;
     for (auto& c : cands)
         for (int t2 = int(t0 * 2) - 20; t2 < int(t0 * 2) + 21; ++t2)
-            if (int s = score(root, c.uv, step, t2 / 2.0); s > best)
-                std::tie(best, celsius, found) = std::tuple(s, t2 / 2.0, &c);
-    Meta meta;
-    meta.root = root;
-    meta.uv = found->uv;
-    if (found->grid) {
-        meta.v0 = found->v0;
-        meta.vstep = found->st;
-    }
-    meta.step = step;
+            if (int s = score(meta.root, c, meta.step, t2 / 2.0); s > best) {
+                best = s;
+                meta.uv = c;
+            }
     meta.equal = best;
-    meta.temperature = celsius;
-    meta.voltages = found->grid ? "grid" : "listed";
-    meta.candidates = roots;
     return meta;
 }
 }
