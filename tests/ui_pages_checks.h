@@ -435,7 +435,8 @@ void Application::checkPages(const std::filesystem::path& directory, const std::
         RECT r{};
         GetWindowRect(pages_[1].window, &r);
         auto screen = GetDC(nullptr);
-        COLORREF c = GetPixel(screen, r.left + scale(40), r.top + scale(60));
+        // Inside the first card, left of its accent mark, where no control sits.
+        COLORREF c = GetPixel(screen, r.left + scale(14), r.top + scale(20));
         ReleaseDC(nullptr, screen);
         return c;
     };

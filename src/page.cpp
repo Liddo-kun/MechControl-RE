@@ -4,9 +4,6 @@
 
 namespace mech {
 namespace {
-// Where a section's title sits in its card: below the top edge, and right of the accent mark that starts at the
-// content's inset.
-constexpr int titleTop = 10, titleLeft = 29;
 COLORREF fill(const PageFrame& f) {
     auto& p = palette();
     return f.alert ? mix(p.card, p.error, p.dark ? 0.22 : 0.10) : p.card;
@@ -17,7 +14,7 @@ bool PageText::operator==(const PageText& o) const {
     return EqualRect(&rect, &o.rect) && text == o.text && color == o.color && font == o.font && format == o.format;
 }
 bool PageFrame::operator==(const PageFrame& o) const {
-    return EqualRect(&rect, &o.rect) && title == o.title && alert == o.alert;
+    return EqualRect(&rect, &o.rect) && title == o.title && alert == o.alert && check == o.check;
 }
 int pageRef(UINT dpi, int n) { return MulDiv(n, dpi, 144); }
 
@@ -29,14 +26,15 @@ void Page::paint(HDC dc, const RECT& area, const PageFonts& fonts) const {
         RECT visible{};
         if (!IntersectRect(&visible, &f.rect, &area)) continue;
         roundRect(dc, f.rect, ref(12), fill(f), f.alert ? p.error : p.border);
-        if (f.title.empty()) continue;
+        if (f.title.empty() && !f.check) continue;
         // A card with a short accent mark before its bold title.
         SelectObject(dc, fonts.title);
-        SIZE size{};
-        GetTextExtentPoint32W(dc, f.title.c_str(), int(f.title.size()), &size);
-        int top = f.rect.top + ref(titleTop);
-        RECT mark{f.rect.left + ref(15), top + size.cy / 5, f.rect.left + ref(20), top + size.cy - size.cy / 5};
+        TEXTMETRICW metrics{};
+        GetTextMetricsW(dc, &metrics);
+        int top = f.rect.top + ref(titleTop), h = metrics.tmHeight;
+        RECT mark{f.rect.left + ref(15), top + h / 5, f.rect.left + ref(20), top + h - h / 5};
         roundRect(dc, mark, ref(3), p.accent, p.accent);
+        if (f.check) continue;
         SetTextColor(dc, p.text);
         TextOutW(dc, f.rect.left + ref(titleLeft), top, f.title.c_str(), int(f.title.size()));
     }
@@ -210,6 +208,19 @@ void PageLayout::open(const std::wstring& title, int from, int to) {
     frames.push_back({{from, y, to, 0}, title});
     y += ref(titleTop) + titleHeight + ref(8);
 }
+int PageLayout::open(HWND check, int from, int to) {
+    frames.push_back({{from, y, to, 0}, L"", false, true});
+    int middle = y + ref(titleTop) + titleHeight / 2, h = titleHeight + ref(4);
+    put(check, from + ref(titleLeft), middle - h / 2, checkWidth(check, fonts.title), h);
+    y += ref(titleTop) + titleHeight + ref(8);
+    return middle;
+}
+int PageLayout::checkWidth(HWND control, HFONT font) {
+    int n = GetWindowTextLengthW(control);
+    std::wstring s(n + 1, L'\0');
+    s.resize(GetWindowTextW(control, s.data(), n + 1));
+    return extent(font, s) + ref(40);
+}
 void PageLayout::close() {
     y += ref(14);
     frames.back().rect.bottom = y;
@@ -220,10 +231,7 @@ int PageLayout::fit(const std::wstring& title, int from, int contentRight) {
 }
 void PageLayout::check(HWND control, int from, bool shown, HFONT font, int widest) {
     if (shown) y += ref(6);
-    int n = GetWindowTextLengthW(control);
-    std::wstring s(n + 1, L'\0');
-    s.resize(GetWindowTextW(control, s.data(), n + 1));
-    put(control, from, y, std::min(extent(font, s) + ref(40), widest), box, shown);
+    put(control, from, y, std::min(checkWidth(control, font), widest), box, shown);
     if (shown) y += box;
 }
 int PageLayout::paragraph(const std::wstring& s, int from, int top, int to, COLORREF color, HFONT font) {

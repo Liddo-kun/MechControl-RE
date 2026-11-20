@@ -23,11 +23,12 @@ struct PageText {
     UINT format = DT_WORDBREAK | DT_NOPREFIX;
     bool operator==(const PageText& o) const;
 };
-// A card with its title inside; an alert (a banner, without a title) is tinted with the error color.
+// A card with its title inside; an alert (a banner, without a title) is tinted with the error color. With check, the
+// title is a check box placed over the card, and only its accent mark is painted.
 struct PageFrame {
     RECT rect;
     std::wstring title;
-    bool alert = false;
+    bool alert = false, check = false;
     bool operator==(const PageFrame& o) const;
 };
 struct Page {
@@ -54,6 +55,9 @@ struct Page {
     void shift(int by, const RECT* from = nullptr, const RECT* into = nullptr);
 };
 int pageRef(UINT dpi, int n); // the reference's 144-DPI pixel constants at a DPI
+// Where a section's title sits in its card (in pageRef units): below the top edge, and right of the accent mark that
+// starts at the content's inset.
+constexpr int titleTop = 10, titleLeft = 29;
 // WM_CTLCOLOR*: edit boxes and lists have the field color, other controls the color behind them.
 LRESULT controlColors(UINT message, HDC dc, COLORREF back);
 // NM_CUSTOMDRAW for a link: links in the link color, the other text in `text`.
@@ -97,6 +101,11 @@ struct PageLayout {
     void open(const std::wstring& title) { open(title, x, right); }
     // A section is a card with its title inside; Page::paint draws it.
     void open(const std::wstring& title, int from, int to);
+    // A section whose title is the check box that turns it on, in the title font. Returns the title's vertical middle.
+    int open(HWND check) { return open(check, x, right); }
+    int open(HWND check, int from, int to);
+    // The width of a check box sized to its text.
+    int checkWidth(HWND control, HFONT font);
     void close();
     // The right edge of a section that fits its content (to contentRight) or its title, whichever is wider.
     int fit(const std::wstring& title, int from, int contentRight);

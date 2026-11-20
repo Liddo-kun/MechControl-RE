@@ -257,10 +257,13 @@ std::wstring dlppcTip(const Json& detected) {
     return tip + L"\nDetected: PERF_CF policy " + std::to_wstring(detected.value("policy", 0)) + L", controller " +
            controllers + L"; currently " + (detected.value("active", false) ? L"enabled" : L"disabled") + L".";
 }
-// A slider's label, track and value.
+// Lighting zones 0-2.
+constexpr const wchar_t* zoneTitles[]{L"Keyboard Backlight", L"Light Bar (Front)", L"Logo LED (Rear Cover)"};
+// A slider's label, track and value. The label may be the check box that enables the slider.
 struct Row {
     HWND label = nullptr, control = nullptr, number = nullptr;
     int id = 0;
+    bool check = false;
 };
 // The note of a control withheld on this model: what the issue it opens is about, what else to send, and why.
 struct Support {
@@ -591,13 +594,15 @@ private:
         for (auto choice : choices) SendMessageW(box, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(choice));
         SendMessageW(box, CB_SETCURSEL, 0, 0);
     }
-    void slider(int page, int id, const wchar_t* title, int minimum, int maximum, int initial) {
+    // check: an existing check box that enables the slider and stands as its label.
+    void slider(int page, int id, const wchar_t* title, int minimum, int maximum, int initial, int check = 0) {
         // Positional sliders have ticks and a formatted value label instead of an edit box.
         bool ticks = positional(id);
         auto& r = pages_[page].rows.emplace_back();
         r.id = id;
         r.control = row(page, id, title, TRACKBAR_CLASSW, WS_TABSTOP | (ticks ? TBS_AUTOTICKS : TBS_NOTICKS));
-        r.label = control(pages_[page].window, L"STATIC", title, SS_NOPREFIX, 0);
+        r.check = check != 0;
+        r.label = check ? get(check) : control(pages_[page].window, L"STATIC", title, SS_NOPREFIX, 0);
         // A trackbar starts at 0..100; clearing it lets value() set the ticks and page size for that range too.
         if (ticks) {
             r.number = control(pages_[page].window, L"STATIC", L"", SS_NOPREFIX, id + 1000);
@@ -657,8 +662,8 @@ private:
         slider(0, tgpId, L"GPU TGP (before Dynamic Boost)", 0, 1, 0);
         check(0, unlockId, L"Unlock GPU power / current limits");
         check(0, dlppcId, L"Disable DLPPC (AI-controlled GPU memory clock)");
-        check(0, dbOnId, L"Enable Dynamic Boost");
-        slider(0, dbId, L"Dynamic Boost Max", 0, 1, 0);
+        check(0, dbOnId, L"Dynamic Boost");
+        slider(0, dbId, L"Dynamic Boost Max", 0, 1, 0, dbOnId);
         slider(0, gpuTargetId, L"GPU Temp Target", 0, 1, 0);
         check(0, keepAwakeId, L"Display-off wake crash workaround (dGPU mode)");
         slider(0, nvId, L"NVVDD / Core current limit", 0, 1, 0);
@@ -708,9 +713,10 @@ private:
                  std::wstring(id == inputId ? L"154" : L"140") +
                  L"% of the stock current; raising an older ceiling restarts the GPU."),
                 TTF_IDISHWND);
-        check(1, boostId, L"Enable Fan Boost");
+        // Section titles that are the check box turning the section on.
+        check(1, boostId, L"Fan Boost");
         button(1, boostApplyId, L"Apply", true);
-        check(1, switchId, L"Enable Fan Switch Speed");
+        check(1, switchId, L"Custom Fan Switch Speed");
         slider(1, switchMsId, L"Switch Speed", 1, 127, 3);
         button(1, switchApplyId, L"Apply", true);
         check(1, curveId, L"Custom Fan Curve");
@@ -723,7 +729,7 @@ private:
         row(1, debugCpuId, L"CPU (Sent to EC)", chartClass, WS_BORDER);
         row(1, debugGpuId, L"GPU (Sent to EC)", chartClass, WS_BORDER);
         support(2, thermalSupportId, L"Thermal failsafe");
-        check(2, protectionId, L"Enable thermal failsafe");
+        check(2, protectionId, L"GPU Thermal Failsafe");
         slider(2, thresholdId, L"GPU trigger temperature", 50, 95, 70);
         SendMessageW(get(thresholdId), TBM_SETPAGESIZE, 0,
                      1); // As in the reference, a click on the track moves the trigger one degree.
@@ -751,7 +757,7 @@ private:
         // Zones 0-2 are the keyboard, light bar and logo; the page shows the logo first, as in the reference.
         for (int zone : {2, 0, 1}) {
             int id = zoneBaseId + zone * 16;
-            check(4, id, L"Enabled");
+            check(4, id, zoneTitles[zone]); // the zone's section title
             slider(4, id + 4, L"Brightness", 0, 100, 0);
             rgb(4, id);
             button(4, id + 5, L"Apply", true);
@@ -821,8 +827,12 @@ private:
         }
         for (auto& p : pages_)
             for (auto& r : p.rows) SendMessageW(r.label, WM_SETFONT, reinterpret_cast<WPARAM>(bold), TRUE);
-        for (int id : {dbOnId, boostId, switchId, curveId, linkId, fanSupportId, protectionId})
+        for (int id : {dbOnId, curveId, linkId, fanSupportId})
             SendMessageW(get(id), WM_SETFONT, reinterpret_cast<WPARAM>(bold), TRUE);
+        // Check boxes that are section titles.
+        for (int id :
+             std::initializer_list<int>{boostId, switchId, protectionId, zoneBaseId, zoneBaseId + 16, zoneBaseId + 32})
+            SendMessageW(get(id), WM_SETFONT, reinterpret_cast<WPARAM>(title), TRUE);
         SendMessageW(tooltip_, TTM_SETMAXTIPWIDTH, 0, ref(600));
         if (alert_)
             EnumChildWindows(
@@ -872,7 +882,9 @@ private:
         Sections(Application& a, TabPage& p, int pageWidth, bool placing)
             : PageLayout(p, a.fonts(), pageWidth, placing), app(a) {}
         // A check box sized to its text.
-        int checkWidth(int id, HFONT font) { return extent(font, text(app.get(id))) + ref(40); }
+        int checkWidth(int id, HFONT font) { return PageLayout::checkWidth(app.get(id), font); }
+        int open(int checkId) { return PageLayout::open(app.get(checkId)); }
+        using PageLayout::open;
         // A check box on its own row, at most widest wide.
         void check(int id, bool shown, HFONT font, int widest = INT_MAX) {
             PageLayout::check(app.get(id), left, shown, font, widest);
@@ -880,14 +892,23 @@ private:
         // The label and value column widths of sliders that line up.
         std::pair<int, int> columns(std::initializer_list<int> ids, const wchar_t* widest) {
             int label = 0;
-            for (int id : ids) label = std::max(label, extent(app.bold_, text(app.find(id).label)));
+            for (int id : ids) {
+                auto& r = app.find(id);
+                // A check box label takes its box's width (as checkWidth) instead of the text padding.
+                label = std::max(label, extent(app.bold_, text(r.label)) + (r.check ? ref(40) - 2 * pad : 0));
+            }
             return {label + 2 * pad, extent(app.font_, widest) + 2 * pad};
         }
-        // A slider row across the section, less inset on each side: its label, track and value.
-        void slide(int id, std::pair<int, int> c, bool shown = true, int inset = 0) {
+        // A slider row across the section, less inset on each side and reserve on the right: its label, track and
+        // value. A check box label starts at the edge with its text level with the other labels; a label column of
+        // width 0 hides the label.
+        void slide(int id, std::pair<int, int> c, bool shown = true, int inset = 0, int reserve = 0) {
             auto& r = app.find(id);
-            int from = left + inset, to = end - inset, track = from + c.first + ref(8);
-            put(r.label, from + pad, y + ref(8), c.first - pad, line, shown);
+            int from = left + inset, to = end - inset - reserve, track = from + (c.first ? c.first + ref(8) : 0);
+            if (r.check)
+                put(r.label, from, y + ref(6), c.first, box, shown);
+            else
+                put(r.label, from + pad, y + ref(8), c.first - pad, line, shown && c.first);
             put(r.control, track, y, to - c.second - ref(8) - track, slider, shown);
             put(r.number, to - c.second + pad, y + ref(8), c.second - pad, line, shown);
             if (shown) y += slider;
@@ -975,7 +996,6 @@ private:
         s.open(L"GPU Power");
         c = s.columns({tgpId, dbId, gpuTargetId}, L"000 W");
         s.slide(tgpId, c, gpu);
-        s.check(dbOnId, gpu, bold_);
         s.slide(dbId, c, gpu);
         s.slide(gpuTargetId, c, gpu && tempTargetShown());
         support(gpuSupportId, true, palette().error, 0);
@@ -1073,20 +1093,18 @@ private:
             s.put(get(cpu), from, s.y, (hasGpu ? half : to - from) - ref(4), chart, shown);
             s.put(get(gpu), from + half + ref(4), s.y, to - from - half - ref(4), chart, shown && hasGpu);
         };
-        s.open(L"Fan Boost");
-        int boost = check(boostId);
-        s.put(get(boostId), s.left, s.y + ref(6), boost, box);
-        s.put(get(boostApplyId), s.left + boost + ref(16), s.y, ref(110), s.button);
-        s.y += ref(34);
+        // Fan Boost is one row: its title and Apply, centred in a card that fits them.
+        int top = s.y, middle = s.open(boostId), boost = s.x + ref(titleLeft) + s.checkWidth(boostId, title_) + ref(16);
+        s.put(get(boostApplyId), boost, middle - s.button / 2, ref(110), s.button);
+        s.y = 2 * middle - top - ref(14);
         s.close();
-        s.frames.back().rect.right = s.left + boost + ref(141); // This section fits its contents, not the page.
-        s.open(L"Fan Switch Speed");
-        s.put(get(switchId), s.left, s.y + ref(4), check(switchId), box);
-        s.y += ref(35);
-        s.slide(switchMsId, s.columns({switchMsId}, L"12700 ms"), true, ref(3));
-        s.y += ref(9);
-        s.put(get(switchApplyId), s.left, s.y, ref(110), s.button);
-        s.y += s.button;
+        s.frames.back().rect.right = boost + ref(125);
+        // The title enables the speed, so the slider needs no label; Apply ends its row.
+        s.open(switchId);
+        top = s.y;
+        s.slide(switchMsId, {0, s.extent(font_, L"12700 ms") + 2 * s.pad}, true, 0, ref(126));
+        s.put(get(switchApplyId), s.end - ref(110), top, ref(110), s.button);
+        s.y = std::max(s.y, top + s.button);
         s.close();
         s.open(L"Custom Fan Curve");
         int curve = check(curveId), link = check(linkId);
@@ -1105,7 +1123,7 @@ private:
             s.paragraph(warning, s.left + s.pad, s.y + ref(6), s.end - s.pad, palette().warn, bold_);
             s.y += ref(94);
         } else {
-            int top = s.y;
+            top = s.y;
             s.supportNote(fanSupportId, true, palette().error, s.left + s.pad, ref(6), s.end - s.left - 2 * s.pad);
             s.y = std::max(top + ref(94), s.y + ref(6));
         }
@@ -1144,7 +1162,7 @@ private:
         auto note = [&](const std::wstring& t) {
             s.y = paragraph(t, s.left + s.pad, s.y + ref(3), gray, font_) + ref(3);
         };
-        s.open(L"GPU Thermal Failsafe");
+        s.open(protectionId);
         note(thermalDescription);
         bool unavailable = state_.contains("thermalActions") && !(state_["thermalActions"].get<int>() & Gpu);
         explain(thermalSupportId,
@@ -1152,7 +1170,6 @@ private:
                             : L"",
                 state_.value("enabled", std::set<std::string>{}).contains("gpuPower"));
         s.supportNote(thermalSupportId, true, palette().error, s.left + s.pad, ref(3), s.end - s.left - 2 * s.pad);
-        s.check(protectionId, true, bold_, s.end - s.left);
         s.y += ref(6);
         s.slide(thresholdId, s.columns({thresholdId}, L"00 °C"));
         for (int id : {reduceId, fanBoostId, showWindowId}) s.check(id, true, font_, s.end - s.left);
@@ -1261,14 +1278,10 @@ private:
     void layoutLighting(Sections& s) {
         int row = ref(36);
         std::array<RECT, 3> swatches{};
-        const wchar_t* titles[]{L"Keyboard Backlight", L"Light Bar (Front)", L"Logo LED (Rear Cover)"};
         for (int zone : {2, 0, 1}) {
             int base = zoneBaseId + zone * 16;
-            s.open(titles[zone]);
+            s.open(base);
             if (zone == 2) s.supportNote(logoSupportId, true, palette().error, s.left, 0, s.end - s.left);
-            s.y += ref(4);
-            s.put(get(base), s.left, s.y, s.checkWidth(base, font_), s.box);
-            s.y += s.box + ref(6);
             s.slide(base + 4, s.columns({base + 4}, L"100 %"));
             s.y += ref(6);
             int cx = s.colors(base, s.left, row);
