@@ -38,7 +38,7 @@ private:
     LRESULT message(UINT, WPARAM, LPARAM);
     int scale(int n) const { return MulDiv(n, dpi_, 96); }
     void layout(int width);
-    void paint(HDC);
+    void paint(HDC, const RECT& area);
     void scrolled();
     struct Box {
         RECT r;
@@ -52,6 +52,13 @@ private:
     std::vector<Box> boxes_;          // laid out, in content coordinates
     std::vector<RECT> grid_, shaded_; // table cell frames; header rows
     std::vector<std::pair<RECT, std::wstring>> headings_;
+    // The wrapping texts of the last layout in order, as measured: a slider step changes numbers, not these.
+    struct Wrapped {
+        std::wstring text;
+        RECT r;
+        bool header;
+    };
+    std::vector<Wrapped> wrapped_;
     int content_ = 0, widest_ = 0, laid_ = -1, x_ = 0;
 };
 }

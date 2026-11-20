@@ -134,12 +134,18 @@ struct VfTab::Impl {
         COLORREF color;
         HFONT font;
         UINT format = DT_WORDBREAK | DT_NOPREFIX;
+        bool operator==(const Text& o) const {
+            return EqualRect(&r, &o.r) && s == o.s && color == o.color && font == o.font && format == o.format;
+        }
     };
     struct Frame {
         RECT r;
         std::wstring title;
         COLORREF fill, edge;
         std::string card; // a section's id
+        bool operator==(const Frame& o) const {
+            return EqualRect(&r, &o.r) && title == o.title && fill == o.fill && edge == o.edge && card == o.card;
+        }
     };
     struct View {
         std::array<bool, 8> stock{}, fresh{}, band{};
@@ -420,10 +426,20 @@ struct VfTab::Impl {
         status();
         buttons();
     }
-    // What is shown changed: the cards' statuses, the chart and the zones follow.
+    // What is shown changed: the cards' statuses, the chart and the zones follow. Of the cards, only what changed
+    // repaints; a slider step usually changes a few texts.
     void shown() {
+        auto oldFrames = frames;
+        auto oldTexts = texts;
         layout(true);
-        InvalidateRect(panel, nullptr, FALSE);
+        if (frames != oldFrames || texts.size() != oldTexts.size())
+            InvalidateRect(panel, nullptr, FALSE);
+        else
+            for (size_t i = 0; i < texts.size(); ++i)
+                if (texts[i] != oldTexts[i]) {
+                    InvalidateRect(panel, &oldTexts[i].r, FALSE);
+                    InvalidateRect(panel, &texts[i].r, FALSE);
+                }
         plot();
         scheduleZones();
     }
@@ -439,16 +455,20 @@ struct VfTab::Impl {
             auto t = fmt(tune.*l.value ? tune.*l.value : stockLimit(l));
             if (GetFocus() != l.edit && windowText(l.edit) != t) SetWindowTextW(l.edit, t.c_str());
         }
+        // Only where it changes: setting a check box repaints it, and a slider step changes none.
+        auto check = [](HWND box, bool on) {
+            if ((Button_GetCheck(box) == BST_CHECKED) != on) Button_SetCheck(box, on);
+        };
         for (size_t i = 0; i < ruleChecks.size(); ++i) {
             auto it = tune.rules.find(tuner->rules[i].id);
-            Button_SetCheck(ruleChecks[i], it != tune.rules.end() && it->second);
+            check(ruleChecks[i], it != tune.rules.end() && it->second);
         }
         for (int c = 0; c < 8; ++c) {
-            Button_SetCheck(shows[0][c], view.stock[c]);
-            Button_SetCheck(shows[1][c], view.fresh[c]);
-            Button_SetCheck(shows[2][c], view.band[c]);
+            check(shows[0][c], view.stock[c]);
+            check(shows[1][c], view.fresh[c]);
+            check(shows[2][c], view.band[c]);
         }
-        Button_SetCheck(linesCheck, view.lines);
+        check(linesCheck, view.lines);
         modeItems();
     }
     // The difference from the reference curve is offered once one is loaded.
@@ -456,7 +476,7 @@ struct VfTab::Impl {
         if (sheetName.empty() && view.mode == 2) view.mode = 0;
         if (!sheetName.empty() && SendMessageW(modeBox, CB_GETCOUNT, 0, 0) == 2)
             SendMessageW(modeBox, CB_ADDSTRING, 0, LPARAM(modes[2]));
-        SendMessageW(modeBox, CB_SETCURSEL, view.mode, 0);
+        if (SendMessageW(modeBox, CB_GETCURSEL, 0, 0) != view.mode) SendMessageW(modeBox, CB_SETCURSEL, view.mode, 0);
     }
     void touch(Slider& s, double v) {
         s.value(tune) = s.doubleStep ? std::round(v / (2 * tuner->meta.step)) * 2 * tuner->meta.step : v;
@@ -559,6 +579,7 @@ struct VfTab::Impl {
         for (bool first : {true, false})
             for (size_t i = 0; i < sliders.size(); ++i)
                 if (!sliders[i].card.empty() && (sliders[i].card == hot) == first) {
+                    if (!sliders[i].stale) InvalidateRect(panel, &sliders[i].strip, FALSE); // paler until worked out
                     sliders[i].stale = true;
                     zones.order.push_back(i);
                 }
@@ -974,13 +995,13 @@ struct VfTab::Impl {
             error(L"Could not read " + path->filename().wstring() + L": " + w(e.what()));
             return;
         }
-        layout(true);
         shown();
     }
 
     // ---- the status beside the buttons ----
     void status() {
         auto& p = palette();
+        auto before = std::pair(statusText, statusColor);
         statusColor = p.muted;
         if (!tuner)
             statusText = job == Job::opening ? L"Opening…" : L"Not open";
@@ -1000,7 +1021,7 @@ struct VfTab::Impl {
             statusText = same ? L"Applied to the GPU" : stockNow ? L"Unapplied (currently stock)" : L"Unapplied";
             statusColor = same ? p.ok : p.warn;
         }
-        InvalidateRect(root, &statusRect, FALSE);
+        if (before != std::pair(statusText, statusColor)) InvalidateRect(root, &statusRect, FALSE);
     }
 
     // ---- layout ----
@@ -1064,16 +1085,27 @@ struct VfTab::Impl {
             RECT now{};
             GetWindowRect(child, &now);
             MapWindowPoints(nullptr, panel, reinterpret_cast<POINT*>(&now), 2);
+            // A moved control repaints: copying its old pixels can copy those of a control moved there before it.
             if (now.left != cx || now.top != cy || now.right - now.left != cw || now.bottom - now.top != ch)
-                SetWindowPos(child, nullptr, cx, cy, std::max(0, cw), std::max(0, ch), SWP_NOZORDER | SWP_NOACTIVATE);
+                SetWindowPos(child, nullptr, cx, cy, std::max(0, cw), std::max(0, ch),
+                             SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOCOPYBITS);
             if (!IsWindowVisible(child)) ShowWindow(child, SW_SHOW);
         };
         auto say = [&](const std::wstring& s, int from, int to, int& at, COLORREF color, HFONT f = nullptr) {
             if (s.empty()) return RECT{from, at, from, at};
             f = f ? f : fonts.font;
             RECT r{from, at, to, at};
-            SelectObject(dc, f);
-            DrawTextW(dc, s.c_str(), -1, &r, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
+            // Most texts are the same as in the last pass, which measured them already (the notes are long).
+            auto known = std::ranges::find_if(texts, [&](const Text& t) {
+                return t.font == f && t.r.right - t.r.left == to - from && t.format == (DT_WORDBREAK | DT_NOPREFIX) &&
+                       t.s == s;
+            });
+            if (known != texts.end())
+                r.bottom = at + known->r.bottom - known->r.top;
+            else {
+                SelectObject(dc, f);
+                DrawTextW(dc, s.c_str(), -1, &r, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
+            }
             r.right = to;
             tx.push_back({r, s, color, f});
             at = r.bottom;
@@ -1494,13 +1526,25 @@ struct VfTab::Impl {
         GetScrollInfo(panel, SB_VERT, &si);
         target = std::clamp(target, 0, std::max(0, si.nMax + 1 - int(si.nPage)));
         if (target == scroll) return;
-        ScrollWindowEx(panel, 0, scroll - target, nullptr, nullptr, nullptr, nullptr,
+        RECT exposed{};
+        ScrollWindowEx(panel, 0, scroll - target, nullptr, nullptr, nullptr, &exposed,
                        SW_SCROLLCHILDREN | SW_INVALIDATE);
+        // The scroll leaves the border of a number box it brings into view partly unpainted.
+        for (auto child = GetWindow(panel, GW_CHILD); child; child = GetWindow(child, GW_HWNDNEXT)) {
+            RECT r{};
+            GetWindowRect(child, &r);
+            MapWindowPoints(nullptr, panel, reinterpret_cast<POINT*>(&r), 2);
+            wchar_t type[8]{};
+            GetClassNameW(child, type, 8);
+            if (!_wcsicmp(type, L"Edit") && IsWindowVisible(child) && IntersectRect(&r, &r, &exposed))
+                RedrawWindow(child, nullptr, nullptr, RDW_FRAME | RDW_INVALIDATE);
+        }
         scroll = target;
         layout(false);
     }
     void style(const VfFonts& f) {
         fonts = f;
+        texts.clear(); // measured with the old fonts, whose handles may be reused
         auto font = [](HWND child, LPARAM value) -> BOOL {
             SendMessageW(child, WM_SETFONT, WPARAM(value), TRUE);
             return TRUE;

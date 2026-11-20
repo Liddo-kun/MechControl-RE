@@ -32,6 +32,11 @@ VfNumbers::~VfNumbers() {
     if (mono_) DeleteObject(mono_);
 }
 void VfNumbers::set(std::vector<VfTable> tables) {
+    if (laid_ >= 0) { // otherwise boxes_ may point into tables that are gone
+        wrapped_.clear();
+        for (auto& b : boxes_)
+            if (b.item->line) wrapped_.push_back({b.item->text, b.r, b.header});
+    }
     tables_ = std::move(tables);
     laid_ = -1;
     InvalidateRect(window_, nullptr, FALSE);
@@ -44,6 +49,7 @@ void VfNumbers::style(HFONT font, HFONT bold, UINT dpi) {
     mono_ = CreateFontW(-MulDiv(9, dpi, 72), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
                         OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, FIXED_PITCH, L"Consolas");
     laid_ = -1;
+    wrapped_.clear();
     InvalidateRect(window_, nullptr, FALSE);
 }
 int VfNumbers::height(int width) {
@@ -64,6 +70,7 @@ void VfNumbers::layout(int width) {
     int pad = scale(4), line = extent(dc, font_, L"Ag").cy,
         number = extent(dc, mono_, L"-0.000000000e-00").cx + scale(6) + 2 * pad;
     int y = 0;
+    size_t wraps = 0; // the wrapping texts so far
     for (auto& t : tables_) {
         if (!t.heading.empty()) {
             y += scale(8);
@@ -102,8 +109,15 @@ void VfNumbers::layout(int width) {
                     } else if (item.line) {
                         if (x > from + pad || h) top += h, h = 0;
                         RECT r{from + pad, top, to - pad, top};
-                        SelectObject(dc, f);
-                        DrawTextW(dc, item.text.c_str(), -1, &r, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
+                        auto* known = wraps < wrapped_.size() ? &wrapped_[wraps] : nullptr;
+                        ++wraps;
+                        if (known && known->text == item.text && known->header == row.header &&
+                            known->r.right - known->r.left == r.right - r.left)
+                            r.bottom = top + known->r.bottom - known->r.top;
+                        else {
+                            SelectObject(dc, f);
+                            DrawTextW(dc, item.text.c_str(), -1, &r, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
+                        }
                         r.right = to - pad;
                         boxes_.push_back({r, &item, row.header});
                         top = r.bottom;
@@ -137,30 +151,36 @@ void VfNumbers::scrolled() {
                   x_};
     SetScrollInfo(window_, SB_HORZ, &si, TRUE);
 }
-void VfNumbers::paint(HDC target) {
+// Only `area`: the table is far taller than the part of it in view.
+void VfNumbers::paint(HDC target, const RECT& area) {
+    if (IsRectEmpty(&area)) return;
     RECT client{};
     GetClientRect(window_, &client);
-    if (IsRectEmpty(&client)) return;
     layout(laid_ < 0 ? client.right : laid_);
-    Buffer buffer(target, client);
+    Buffer buffer(target, area);
     auto dc = buffer.dc;
     auto& p = palette();
-    FillRect(dc, &client, brush(p.card));
-    SetViewportOrgEx(dc, -x_, 0, nullptr);
-    for (auto& r : shaded_) FillRect(dc, &r, brush(mix(p.card, p.border, 0.35)));
+    FillRect(dc, &area, brush(p.card));
+    // What is drawn, in content coordinates.
+    RECT view = area, overlap{};
+    OffsetRect(&view, x_, 0);
+    SetViewportOrgEx(dc, -x_ - area.left, -area.top, nullptr);
+    for (auto& r : shaded_)
+        if (IntersectRect(&overlap, &r, &view)) FillRect(dc, &r, brush(mix(p.card, p.border, 0.35)));
     for (auto r : grid_) {
         r.right += 1;
         r.bottom += 1;
-        FrameRect(dc, &r, brush(mix(p.card, p.border, 0.8)));
+        if (IntersectRect(&overlap, &r, &view)) FrameRect(dc, &r, brush(mix(p.card, p.border, 0.8)));
     }
     SelectObject(dc, bold_);
     SetTextColor(dc, p.text);
     for (auto& [r, s] : headings_) {
         RECT t{x_, r.top, x_ + r.right, r.bottom}; // headings stay in view
-        DrawTextW(dc, s.c_str(), -1, &t, DT_SINGLELINE | DT_NOPREFIX);
+        if (IntersectRect(&overlap, &t, &view)) DrawTextW(dc, s.c_str(), -1, &t, DT_SINGLELINE | DT_NOPREFIX);
     }
     for (auto& b : boxes_) {
         RECT r = b.r;
+        if (!IntersectRect(&overlap, &r, &view)) continue;
         auto& item = *b.item;
         if (!item.value) {
             SelectObject(dc, b.header ? bold_ : font_);
@@ -174,7 +194,7 @@ void VfNumbers::paint(HDC target) {
         SetTextColor(dc, p.text);
         DrawTextW(dc, item.text.c_str(), -1, &r, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
     }
-    SetViewportOrgEx(dc, -client.left, -client.top, nullptr);
+    SetViewportOrgEx(dc, -area.left, -area.top, nullptr);
 }
 LRESULT CALLBACK VfNumbers::procedure(HWND window, UINT message, WPARAM wp, LPARAM lp) {
     auto self = reinterpret_cast<VfNumbers*>(GetWindowLongPtrW(window, GWLP_USERDATA));
@@ -192,7 +212,7 @@ LRESULT VfNumbers::message(UINT message, WPARAM wp, LPARAM lp) {
     case WM_PAINT: {
         PAINTSTRUCT ps{};
         auto dc = BeginPaint(window_, &ps);
-        paint(dc);
+        paint(dc, ps.rcPaint);
         EndPaint(window_, &ps);
         return 0;
     }
