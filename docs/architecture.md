@@ -7,6 +7,10 @@ Windows' app mode (system colors under high contrast), and draws the native cont
 them: buttons, check boxes and trackbars through custom draw, the tabs, up-down arrows and
 edit frames through small subclasses, and Windows' own dark theme classes for scroll bars,
 drop-down lists and tooltips. Menus and message boxes stay as Windows draws them.
+`page.*` is the page code of every tab, the V/F Curve tab included: a pass lays a page out as cards
+with painted texts and native controls, moving only controls that are not already in place and
+reusing the heights of wrapped texts the last pass measured; scrolling moves the painted bits and
+the controls together, and a repaint of a few parts far apart paints each part alone.
 `ControlWorker` (`worker.*`) owns a serialized command queue,
 controller and monitor on one `std::jthread`. Besides its one-second timer it arms a second, one-shot
 timer only while System Info is shown, for the smoothed input power: it reads two EC bytes just after
@@ -143,8 +147,9 @@ equation, its lines, corrections and slow-curve switch on the running chip and t
 such a curve. The worker runs it through two commands: `VfRead` reads the driver's equations and
 curve (and with `open` builds the tuner), and `VfApply` writes a curve, or stock without one,
 then reads back. The V/F Curve tab is offered on any NVIDIA GPU and is created on its first
-selection (`vf_tab.*`, with `vf_chart.*` drawing the curve in GDI+ and `vf_numbers.*` painting the
-read-only tables of every equation number), so nothing of it runs before then. It reads the driver
+selection (`vf_tab.*` on the shared page code, with `vf_chart.*` drawing the curve in GDI+ and
+`vf_numbers.*` painting the read-only tables of every equation number), so nothing of it runs before then.
+Like the other tabs, it follows the window's size only while it is shown. It reads the driver
 only when opened, on Read and after a write, and the timer that works out its slider bars stops
 while the window is hidden. A slider step paints the chart and the changed texts before the next
 mouse move is taken: Windows paints only when no input waits, and in a fast drag the next move

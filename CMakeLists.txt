@@ -43,7 +43,7 @@ add_library(foundation STATIC src/log.cpp src/worker.cpp src/counters.cpp
   "${CMAKE_CURRENT_BINARY_DIR}/mechcontrol_counters.h")
 target_include_directories(foundation PUBLIC src PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 target_link_libraries(foundation PUBLIC advapi32 windowsapp ec)
-add_executable(MechControl WIN32 src/ui.cpp src/fan_chart.cpp src/theme.cpp src/gpu_keepawake.cpp src/vf_tab.cpp src/vf_chart.cpp
+add_executable(MechControl WIN32 src/ui.cpp src/fan_chart.cpp src/theme.cpp src/page.cpp src/gpu_keepawake.cpp src/vf_tab.cpp src/vf_chart.cpp
   src/vf_numbers.cpp resources/app.rc
   "${CMAKE_CURRENT_BINARY_DIR}/counters.rc")
 # GDI+ draws the window's rounded shapes, fan curves and V/F chart, and Direct3D runs the GPU keep-awake.
@@ -83,7 +83,7 @@ if(BUILD_TESTING)
   target_link_libraries(ec-check PRIVATE foundation)
   add_dependencies(ec-check profiles)
   add_test(NAME ec COMMAND ec-check)
-  add_executable(ui-pages-check WIN32 src/ui.cpp src/fan_chart.cpp src/theme.cpp src/gpu_keepawake.cpp src/vf_tab.cpp
+  add_executable(ui-pages-check WIN32 src/ui.cpp src/fan_chart.cpp src/theme.cpp src/page.cpp src/gpu_keepawake.cpp src/vf_tab.cpp
     src/vf_chart.cpp src/vf_numbers.cpp resources/app.rc "${CMAKE_CURRENT_BINARY_DIR}/counters.rc")
   target_compile_definitions(ui-pages-check PRIVATE MECHCONTROL_PAGE_CHECK)
   target_link_libraries(ui-pages-check PRIVATE foundation comctl32 shell32 gdi32 comdlg32 gdiplus d3d11 dxgi wevtapi cfgmgr32 delayimp uxtheme dwmapi)

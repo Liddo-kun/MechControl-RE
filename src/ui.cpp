@@ -2,6 +2,7 @@
 #include "fan_chart.h"
 #include "config_text.h"
 #include "gpu_keepawake.h"
+#include "page.h"
 #include "theme.h"
 #include "vf_tab.h"
 #ifdef MECHCONTROL_WITH_CLI
@@ -261,24 +262,14 @@ struct Row {
     HWND label = nullptr, control = nullptr, number = nullptr;
     int id = 0;
 };
-struct Text {
-    RECT rect;
-    std::wstring text;
-    COLORREF color;
-    HFONT font = nullptr; // No font: the normal one.
-};
 // The note of a control withheld on this model: what the issue it opens is about, what else to send, and why.
 struct Support {
     const wchar_t *subject = L"", *also = L"";
     std::wstring reason;
     COLORREF color = 0;
 };
-struct Page {
-    HWND window = nullptr;
+struct TabPage : Page {
     std::vector<Row> rows;
-    int scroll = 0;
-    std::vector<std::pair<RECT, const wchar_t*>> frames;
-    std::vector<Text> texts;
 };
 
 // Small native edit dialog, shared only by the existing slot rename workflow.
@@ -481,20 +472,13 @@ private:
         if (message == WM_PARENTNOTIFY && LOWORD(wp) == WM_CREATE) return 0;
         if (message == WM_ERASEBKGND) return 1;
         if (message == WM_PAINT) {
-            PAINTSTRUCT ps{};
-            auto dc = BeginPaint(window, &ps);
-            app->paintPage(app->index(window), dc, ps.rcPaint);
-            EndPaint(window, &ps);
+            int page = app->index(window);
+            paintParts(window, [&](HDC dc, const RECT& area) { app->paintPage(page, dc, area); });
             return 0;
         }
-        // Links, sliders, check boxes and combo boxes (for their corners) ask for the page behind them. The clip region
-        // gives the asking control's area, which lies in one section or outside all of them.
+        // Links, sliders, check boxes and combo boxes (for their corners) ask for the page behind them.
         if (message == WM_PRINTCLIENT) {
-            auto dc = reinterpret_cast<HDC>(wp);
-            RECT r{};
-            GetClipBox(dc, &r);
-            FillRect(dc, &r,
-                     brush(app->backdrop(app->index(window), {(r.left + r.right) / 2, (r.top + r.bottom) / 2})));
+            app->pages_[app->index(window)].printClient(reinterpret_cast<HDC>(wp));
             return 0;
         }
         if (message >= WM_CTLCOLORMSGBOX && message <= WM_CTLCOLORSTATIC)
@@ -534,12 +518,9 @@ private:
         return DefSubclassProc(window, message, wp, lp);
     }
     HWND control(HWND parent, const wchar_t* type, const std::wstring& title, DWORD style, int id) {
-        auto child = CreateWindowExW(0, type, title.c_str(), WS_CHILD | WS_VISIBLE | style, 0, 0, 0, 0, parent,
-                                     reinterpret_cast<HMENU>(INT_PTR(id)), instance_, nullptr);
-        if (!child) throw std::runtime_error("Cannot create native control");
+        auto child = pageControl(instance_, parent, type, title, style, id);
         if (id) controls_[id] = child;
         SetWindowSubclass(child, focusProcedure, 1, reinterpret_cast<DWORD_PTR>(this));
-        if (!wcscmp(type, TRACKBAR_CLASSW) || !wcscmp(type, WC_LINK)) paintWhole(child);
         return child;
     }
     HWND get(int id) const {
@@ -589,11 +570,8 @@ private:
     int scale(int n) const { return MulDiv(n, dpi_, 96); }
     // Power page metrics are the reference PowerTab's pixel constants, which it drew unscaled on its 144 DPI
     // screen. Scaling them from 144 DPI keeps the same proportions to the text at every DPI.
-    int ref(int n) const { return MulDiv(n, dpi_, 144); }
-    // Where a section's title sits in its card: below the top edge, and right of the accent mark that starts at the
-    // content's inset.
-    int titleTop() const { return ref(10); }
-    int titleLeft() const { return ref(29); }
+    int ref(int n) const { return pageRef(dpi_, n); }
+    PageFonts fonts() const { return {font_, bold_, title_, dpi_}; }
     void place(HWND child, int x, int y, int width, int height) {
         MoveWindow(child, x, y, std::max(0, width), std::max(0, height), TRUE);
     }
@@ -647,12 +625,7 @@ private:
         }
     }
     void tip(UINT_PTR id, const std::wstring& text, UINT flags = 0, UINT message = TTM_ADDTOOLW) {
-        TOOLINFOW tool{sizeof tool};
-        tool.uFlags = flags | TTF_SUBCLASS;
-        tool.hwnd = pages_[0].window;
-        tool.uId = id;
-        tool.lpszText = const_cast<wchar_t*>(text.c_str());
-        SendMessageW(tooltip_, message, 0, reinterpret_cast<LPARAM>(&tool));
+        addTip(tooltip_, pages_[0].window, id, text, flags, message);
     }
     void initialize() {
         dpi_ = GetDpiForWindow(window_);
@@ -868,8 +841,9 @@ private:
         heading_ = heading;
         for (int id : {cpuChartId, gpuChartId, debugCpuId, debugGpuId}) SendMessageW(get(id), chartDpiMessage, dpi_, 0);
         setThemeDpi(dpi_);
+        for (auto& p : pages_) p.texts.clear(); // measured with the old fonts, whose handles may be reused
         layout(true);
-        if (vf_) vf_->style({font_, bold_, title_, dpi_});
+        if (vf_) vf_->style(fonts());
     }
     // Windows' app mode chooses light or dark; the UI checks choose for themselves.
     void applyTheme(bool dark) {
@@ -884,94 +858,24 @@ private:
         }
         // Painted texts take their colors in the layout.
         if (font_) layout();
-        if (vf_) vf_->style({font_, bold_, title_, dpi_});
+        if (vf_) vf_->style(fonts());
         RedrawWindow(window_, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN);
     }
     // Edit boxes and lists have the field color; other children sit on their section or the page.
     LRESULT colors(UINT message, HDC dc, HWND child) const {
-        auto& p = palette();
-        COLORREF back = message == WM_CTLCOLOREDIT || message == WM_CTLCOLORLISTBOX ? p.field : backdrop(child);
-        SetTextColor(dc, p.text);
-        SetBkColor(dc, back);
-        return reinterpret_cast<LRESULT>(brush(back));
+        int page = index(GetParent(child));
+        return controlColors(message, dc, page >= 0 ? pages_[page].backdrop(child) : palette().window);
     }
-    COLORREF backdrop(HWND child) const {
-        RECT r{};
-        GetWindowRect(child, &r);
-        MapWindowPoints(nullptr, GetParent(child), reinterpret_cast<POINT*>(&r), 2);
-        return backdrop(index(GetParent(child)), {(r.left + r.right) / 2, (r.top + r.bottom) / 2});
-    }
-    // The color painted at a point of a page (-1: outside the pages).
-    COLORREF backdrop(int page, POINT at) const {
-        if (page >= 0)
-            for (auto& [frame, title] : pages_[page].frames)
-                if (PtInRect(&frame, at)) return palette().card;
-        return palette().window;
-    }
-    // One pass over a framed page: it measures the page and, with apply, also places the controls and keeps the
-    // painted frames and texts. y runs down the scrolled page.
-    struct Sections {
+    // One pass over a framed page (PageLayout) with this window's controls by ID.
+    struct Sections : PageLayout {
         Application& app;
-        Page& target;
-        int width, scroll;
-        bool apply;
-        HDC dc;
-        HGDIOBJ previous;
-        int titleHeight, line;
-        // pad: the reference's labels inset their text by about a third of the font's em on each side.
-        int x, right, left, end, y, pad, slider, box, button;
-        std::vector<std::pair<RECT, const wchar_t*>> frames;
-        std::vector<Text> texts;
-
-        Sections(Application& a, Page& p, int pageWidth, int scrolled, bool applying)
-            : app(a), target(p), width(pageWidth), scroll(scrolled), apply(applying), dc(GetDC(p.window)),
-              previous(SelectObject(dc, a.font_)), titleHeight(height(a.title_)), line(height(a.font_)), x(ref(16)),
-              right(width - ref(16)), left(x + ref(15)), end(right - ref(15)), y(ref(6) - scroll), pad(ref(6)),
-              slider(std::max(ref(30), ref(8) + line)), box(line + ref(4)), button(ref(32)) {}
-        ~Sections() {
-            SelectObject(dc, previous);
-            ReleaseDC(target.window, dc);
-        }
-        int ref(int n) const { return app.ref(n); }
-        int height(HFONT font) {
-            SelectObject(dc, font);
-            TEXTMETRICW metrics{};
-            GetTextMetricsW(dc, &metrics);
-            return metrics.tmHeight;
-        }
-        int extent(HFONT font, const std::wstring& s) {
-            SelectObject(dc, font);
-            SIZE size{};
-            GetTextExtentPoint32W(dc, s.c_str(), int(s.size()), &size);
-            return int(size.cx);
-        }
-        void put(HWND child, int cx, int cy, int w, int h, bool shown = true) {
-            if (!apply) return;
-            ShowWindow(child, shown ? SW_SHOW : SW_HIDE);
-            if (shown) app.place(child, cx, cy, w, h);
-        }
-        void open(const wchar_t* title) { open(title, x, right); }
-        // A section is a card with its title inside; paintPage draws it.
-        void open(const wchar_t* title, int from, int to) {
-            frames.push_back({{from, y, to, 0}, title});
-            y += app.titleTop() + titleHeight + ref(8);
-        }
-        void close() {
-            y += ref(14);
-            frames.back().first.bottom = y;
-            y += ref(12);
-        }
-        // The right edge of a section that fits its content (to contentRight) or its title, whichever is wider.
-        int fit(const wchar_t* title, int from, int contentRight) {
-            return std::max(contentRight, from + app.titleLeft() + extent(app.title_, title) + ref(15));
-        }
+        Sections(Application& a, TabPage& p, int pageWidth, bool placing)
+            : PageLayout(p, a.fonts(), pageWidth, placing), app(a) {}
         // A check box sized to its text.
         int checkWidth(int id, HFONT font) { return extent(font, text(app.get(id))) + ref(40); }
         // A check box on its own row, at most widest wide.
         void check(int id, bool shown, HFONT font, int widest = INT_MAX) {
-            if (shown) y += ref(6);
-            put(app.get(id), left, y, std::min(checkWidth(id, font), widest), box, shown);
-            if (shown) y += box;
+            PageLayout::check(app.get(id), left, shown, font, widest);
         }
         // The label and value column widths of sliders that line up.
         std::pair<int, int> columns(std::initializer_list<int> ids, const wchar_t* widest) {
@@ -988,29 +892,14 @@ private:
             put(r.number, to - c.second + pad, y + ref(8), c.second - pad, line, shown);
             if (shown) y += slider;
         }
-        // Painted text wrapped from 'from' to 'to'. Returns its bottom.
-        int paragraph(const std::wstring& s, int from, int top, int to, COLORREF color, HFONT font) {
-            RECT r{from, top, to, top};
-            SelectObject(dc, font);
-            DrawTextW(dc, s.c_str(), -1, &r, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
-            r.right = to;
-            texts.push_back({r, s, color, font});
-            return int(r.bottom);
-        }
-        // Painted text on one line (height 0: the normal font's line). Returns its right edge.
-        int say(const std::wstring& s, int cx, int cy, COLORREF color = palette().text, HFONT font = nullptr,
-                int h = 0) {
-            int to = cx + extent(font ? font : app.font_, s);
-            texts.push_back({{cx, cy, to, cy + (h ? h : line)}, s, color, font});
-            return to;
-        }
         // A color's R, G and B labels and boxes on a row of the given height, from cx. Returns the right edge.
         int colors(int base, int cx, int row) {
             int edit = line + ref(3);
             for (int n = 1; n <= 3; ++n) {
                 cx += n == 1 ? ref(6) : ref(14);
                 cx = say(n == 1 ? L"R:" : n == 2 ? L"G:" : L"B:", cx, y + (row - line) / 2) + ref(8);
-                if (apply) {
+                if (place) {
+                    // The up-down control takes its width from the box it is buddied to.
                     app.place(app.get(base + n + 1000), cx, y + (row - edit) / 2, ref(68), edit);
                     SendMessageW(app.get(base + n), UDM_SETBUDDY, reinterpret_cast<WPARAM>(app.get(base + n + 1000)),
                                  0);
@@ -1021,36 +910,21 @@ private:
         }
         // Places a support note top below y and moves y to its bottom; a hidden note leaves y.
         void supportNote(int id, bool shown, COLORREF color, int from, int top, int w) {
-            auto link = app.get(id);
             auto& s = app.support_.at(id);
             if (!shown || s.reason.empty()) {
-                if (apply) ShowWindow(link, SW_HIDE);
+                put(app.get(id), 0, 0, 0, 0, false);
                 return;
             }
             s.color = color;
-            SIZE ideal{};
-            int h = int(SendMessageW(link, LM_GETIDEALSIZE, w, reinterpret_cast<LPARAM>(&ideal)));
-            if (apply) {
-                ShowWindow(link, SW_SHOW);
-                app.place(link, from, y + top, w, h);
-            }
-            y += top + h;
-        }
-        // Keeps what the pass painted and returns the content height.
-        int finish() {
-            if (apply) {
-                target.frames = std::move(frames);
-                target.texts = std::move(texts);
-            }
-            return y + scroll + ref(6);
+            link(app.get(id), from, top, w);
         }
     };
-    void layoutPage(Page& p, bool redraw = true) {
+    void layoutPage(TabPage& p, bool redraw = true) {
         RECT rc{};
         GetClientRect(p.window, &rc);
         int page = index(p.window);
-        auto sections = [&](int scroll, bool apply) {
-            Sections s(*this, p, rc.right, scroll, apply);
+        auto sections = [&](bool place) {
+            Sections s(*this, p, rc.right, place);
             page == 0   ? layoutPower(s)
             : page == 1 ? layoutFans(s)
             : page == 2 ? layoutThermal(s)
@@ -1060,11 +934,7 @@ private:
                         : layoutInfo(s);
             return s.finish();
         };
-        int content = sections(0, false);
-        p.scroll = std::clamp(p.scroll, 0, std::max(0, content - int(rc.bottom)));
-        SCROLLINFO si{sizeof si, SIF_RANGE | SIF_PAGE | SIF_POS, 0, std::max(0, content - 1), UINT(rc.bottom), p.scroll,
-                      0};
-        SetScrollInfo(p.window, SB_VERT, &si, TRUE);
+        p.range(sections(false));
         RECT shown{};
         GetClientRect(p.window, &shown);
         // The scroll bar changed the width.
@@ -1072,7 +942,7 @@ private:
             layoutPage(p, redraw);
             return;
         }
-        sections(p.scroll, true);
+        sections(true);
         if (redraw) RedrawWindow(p.window, nullptr, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN);
     }
     Row& find(int id) {
@@ -1175,7 +1045,7 @@ private:
                 muted, ref(6));
             s.close();
         }
-        if (s.apply) {
+        if (s.place) {
             liveTable_ = {s.left, liveTop, s.width, liveTop + 8 * (ref(6) + s.line)};
             if (liveTop < 0)
                 for (UINT_PTR i = 1; i <= std::size(liveTips); ++i) {
@@ -1209,7 +1079,7 @@ private:
         s.put(get(boostApplyId), s.left + boost + ref(16), s.y, ref(110), s.button);
         s.y += ref(34);
         s.close();
-        s.frames.back().first.right = s.left + boost + ref(141); // This section fits its contents, not the page.
+        s.frames.back().rect.right = s.left + boost + ref(141); // This section fits its contents, not the page.
         s.open(L"Fan Switch Speed");
         s.put(get(switchId), s.left, s.y + ref(4), check(switchId), box);
         s.y += ref(35);
@@ -1261,7 +1131,7 @@ private:
             s.close();
         } else
             charts(debugCpuId, debugGpuId, 0, 0, false);
-        if (s.apply) linkedBar_ = bar;
+        if (s.place) linkedBar_ = bar;
     }
     // GPU Thermal Failsafe and its Status, as in the reference FailsafeTab.
     void layoutThermal(Sections& s) {
@@ -1331,7 +1201,7 @@ private:
         s.put(get(testId), s.left + ref(120), s.y, ref(140), s.button);
         s.y += s.button;
         s.close();
-        if (s.apply) thermalLive_ = live;
+        if (s.place) thermalLive_ = live;
     }
     // Battery Charging Mode, which fits its contents, and Battery Telemetry, as in the reference BatteryTab, with
     // Charge Limit between them. The support note takes the telemetry's place.
@@ -1421,12 +1291,12 @@ private:
         s.put(get(dimmingId), dimmingLeft, s.y + (row - s.box) / 2, check, s.box);
         s.y += row;
         s.close();
-        s.frames.push_back({{dimmingX, top, s.fit(dimmingTitle, dimmingX, dimmingLeft + check + ref(15)),
-                             s.frames.back().first.bottom},
-                            dimmingTitle});
+        s.frames.push_back(
+            {{dimmingX, top, s.fit(dimmingTitle, dimmingX, dimmingLeft + check + ref(15)), s.frames.back().rect.bottom},
+             dimmingTitle});
         s.put(get(lightingReadId), s.x, s.y, ref(140), s.button);
         s.y += s.button;
-        if (s.apply) swatches_ = swatches;
+        if (s.place) swatches_ = swatches;
     }
     // The connection, Radiator Fan, Pump and LED sections, as in the reference LiquidCoolerTab. The LED section fits
     // its contents.
@@ -1495,8 +1365,8 @@ private:
         s.put(get(coolerRgbApplyId), s.left, s.y, ref(110), s.button);
         s.y += s.button;
         s.close();
-        s.frames.back().first.right = cx + ref(135);
-        if (s.apply) coolerSwatch_ = swatch;
+        s.frames.back().rect.right = cx + ref(135);
+        if (s.place) coolerSwatch_ = swatch;
     }
     // System Identity, Temperatures and Power Delivery, as in the reference SystemInfoTab. Each section fits its
     // contents; the readings are painted into their cells.
@@ -1509,8 +1379,8 @@ private:
             right = 0;
         };
         auto close = [&] {
-            auto& [r, title] = s.frames.back();
-            r.right = s.fit(title, s.x, right + ref(21));
+            auto& f = s.frames.back();
+            f.rect.right = s.fit(f.title, s.x, right + ref(21));
             s.close();
         };
         // Bold captions and their readings' cells. Index -1 is a source heading.
@@ -1576,39 +1446,14 @@ private:
             s.y += s.line;
             close();
         }
-        if (s.apply) infoCells_ = cells;
+        if (s.place) infoCells_ = cells;
     }
     void paintPage(int index, HDC target, const RECT& area) {
-        auto& p = pages_[index];
-        if (IsRectEmpty(&area)) return;
         // Readings repaint small areas often, so the buffer covers only the area being painted.
         Buffer buffer(target, area);
         auto dc = buffer.dc;
         auto& theme = palette();
-        FillRect(dc, &area, brush(theme.window));
-        SelectObject(dc, title_);
-        SetTextColor(dc, theme.text);
-        for (auto& [r, title] : p.frames) {
-            RECT visible{};
-            if (!IntersectRect(&visible, &r, &area)) continue;
-            // A card with a short accent mark before its bold title.
-            roundRect(dc, r, ref(12), theme.card, theme.border);
-            int n = int(wcslen(title));
-            SIZE size{};
-            GetTextExtentPoint32W(dc, title, n, &size);
-            int top = r.top + titleTop();
-            RECT mark{r.left + ref(15), top + size.cy / 5, r.left + ref(20), top + size.cy - size.cy / 5};
-            roundRect(dc, mark, ref(3), theme.accent, theme.accent);
-            TextOutW(dc, r.left + titleLeft(), top, title, n);
-        }
-        for (auto& t : p.texts) {
-            RECT visible{};
-            if (!IntersectRect(&visible, &t.rect, &area)) continue;
-            SelectObject(dc, t.font ? t.font : font_);
-            SetTextColor(dc, t.color);
-            RECT r = t.rect;
-            DrawTextW(dc, t.text.c_str(), -1, &r, DT_WORDBREAK | DT_NOPREFIX);
-        }
+        pages_[index].paint(dc, area, fonts());
         if (index == 0 && liveTable_.top >= 0) paintLive(dc);
         if (index == 1 && linkedBar_.right > linkedBar_.left)
             paintLinkedStatus(dc, linkedBar_, state_.value("linkedStatus", Json::object()), dpi_);
@@ -1859,7 +1704,8 @@ private:
             place(pages_[i].window, page.left, page.top, page.right - page.left, page.bottom - page.top);
             if (all || i == selected) layoutPage(pages_[i]);
         }
-        if (vf_) place(vf_->window(), page.left, page.top, page.right - page.left, page.bottom - page.top);
+        pageArea_ = page;
+        if (vf_ && selected == vfPage) placeVf();
         place(progress_, 1, bar + 1, r.right - 2, ref(5));
         InvalidateRect(window_, &bar_, FALSE);
     }
@@ -1872,7 +1718,7 @@ private:
         GetTextMetricsW(dc, &metrics);
         int line = metrics.tmHeight, pitch = line + ref(2), pad = line / 6, left = 1 + ref(4),
             right = width - 1 - ref(4), x = left, y = 1 + ref(6), lowest = y + pitch + line;
-        std::vector<Text> texts;
+        std::vector<PageText> texts;
         auto gray = palette().muted;
         auto put = [&](const std::wstring& s, bool bold, COLORREF color, int margin) {
             // The reference measured its labels slightly wider than GDI does, hence the extra space after each.
@@ -1974,50 +1820,16 @@ private:
         int id = int(draw.hdr.idFrom);
         if (draw.hdr.hwndFrom != get(id)) return CDRF_DODEFAULT;
         // A support note takes the color of the painted note it stands in for; other link text is normal text.
-        if (id == advancedId || id == detailsId || support_.contains(id)) {
-            if (draw.dwDrawStage == CDDS_PREPAINT) return CDRF_NOTIFYITEMDRAW;
-            if (draw.dwDrawStage == CDDS_ITEMPREPAINT)
-                SetTextColor(draw.hdc, draw.dwItemSpec != UINT_PTR(-1) ? palette().link
-                                       : support_.contains(id)         ? support_.at(id).color
-                                                                       : palette().text);
-            return CDRF_DODEFAULT;
-        }
+        if (id == advancedId || id == detailsId || support_.contains(id))
+            return drawLink(draw, support_.contains(id) ? support_.at(id).color : palette().text);
         return drawControl(draw, primary_.contains(id));
     }
     void scroll(HWND window, UINT message, WPARAM wp) {
         for (auto& p : pages_)
-            if (p.window == window) {
-                int target = p.scroll;
-                if (message == WM_MOUSEWHEEL)
-                    target -= GET_WHEEL_DELTA_WPARAM(wp) * scale(54) / WHEEL_DELTA;
-                else {
-                    SCROLLINFO si{sizeof si, SIF_ALL};
-                    GetScrollInfo(window, SB_VERT, &si);
-                    switch (LOWORD(wp)) {
-                    case SB_LINEUP: target -= scale(28); break;
-                    case SB_LINEDOWN: target += scale(28); break;
-                    case SB_PAGEUP: target -= int(si.nPage); break;
-                    case SB_PAGEDOWN: target += int(si.nPage); break;
-                    case SB_THUMBTRACK: target = si.nTrackPos; break;
-                    case SB_TOP: target = 0; break;
-                    case SB_BOTTOM: target = si.nMax; break;
-                    }
-                }
-                scrollTo(p, target);
-                return;
-            }
+            if (p.window == window) scrollTo(p, p.target(message, wp, dpi_));
     }
-    // Moves the page's painted bits and its controls in one step, so only the strip scrolled into view repaints and
-    // no control is shown for a frame where others have not moved yet.
-    void scrollTo(Page& p, int target) {
-        SCROLLINFO si{sizeof si, SIF_RANGE | SIF_PAGE};
-        GetScrollInfo(p.window, SB_VERT, &si);
-        target = std::clamp(target, 0, std::max(0, si.nMax + 1 - int(si.nPage)));
-        if (target == p.scroll) return;
-        ScrollWindowEx(p.window, 0, p.scroll - target, nullptr, nullptr, nullptr, nullptr,
-                       SW_SCROLLCHILDREN | SW_INVALIDATE);
-        p.scroll = target;
-        layoutPage(p, false); // The frames and texts it paints follow; the controls are already in place.
+    void scrollTo(TabPage& p, int target) {
+        if (p.scrollTo(target)) layoutPage(p, false); // The frames and texts it paints follow the moved controls.
     }
     void reveal(HWND child) {
         int page = index(GetParent(child));
@@ -2033,27 +1845,34 @@ private:
             scrollTo(p, p.scroll + r.bottom - rc.bottom);
     }
     void openVf() {
-        VfHost host{
-            [this](ControlCommand command, bool busy) -> std::uint64_t {
-                if (!busy) {
-                    worker_->request(std::move(command), ++sequence_);
-                    return sequence_;
-                }
-                if (busy_) return 0;
-                request(std::move(command));
-                return busySequence_;
-            },
-            [this](const std::wstring& reason) { openUnelevated(issueUrl({L"V/F curve tuner", L"", reason})); }};
+        VfHost host{[this](ControlCommand command, bool busy) -> std::uint64_t {
+                        if (!busy) {
+                            worker_->request(std::move(command), ++sequence_);
+                            return sequence_;
+                        }
+                        if (busy_) return 0;
+                        request(std::move(command));
+                        return busySequence_;
+                    },
+                    [this](const std::wstring& reason) { openUnelevated(issueUrl({L"V/F curve tuner", L"", reason})); },
+                    tooltip_};
         vf_ = std::make_unique<VfTab>(instance_, window_, std::move(host));
         SetWindowPos(vf_->window(), HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
         EnableWindow(vf_->window(), !busy_);
-        vf_->style({font_, bold_, title_, dpi_});
+        vf_->style(fonts());
         layout();
+    }
+    // Like the pages, the V/F tab follows the window's size only while it is shown: its layout costs a resize.
+    void placeVf() {
+        place(vf_->window(), pageArea_.left, pageArea_.top, pageArea_.right - pageArea_.left,
+              pageArea_.bottom - pageArea_.top);
     }
     void selectPage() {
         int page = TabCtrl_GetCurSel(tabs_);
         if (page == vfPage && !vf_) openVf();
-        if (page < pageCount) layoutPage(pages_[page]); // The window may have been resized while the page was hidden.
+        // The window may have been resized while the page was hidden.
+        if (page < pageCount) layoutPage(pages_[page]);
+        if (vf_ && page == vfPage) placeVf();
         for (int i = 0; i < pageCount; ++i) ShowWindow(pages_[i].window, i == page ? SW_SHOW : SW_HIDE);
         if (vf_) ShowWindow(vf_->window(), page == vfPage ? SW_SHOW : SW_HIDE);
         enable(readId, !busy_ && !(page == 1 && state_.value("linked", false)));
@@ -3696,8 +3515,8 @@ private:
     HINSTANCE instance_;
     HWND window_ = nullptr, tabs_ = nullptr, progress_ = nullptr, alert_ = nullptr, alertText_ = nullptr;
     HWND tooltip_ = nullptr, hot_ = nullptr;
-    RECT bar_{}, linkedBar_{}, thermalLive_{};
-    std::vector<Text> barText_;
+    RECT bar_{}, linkedBar_{}, thermalLive_{}, pageArea_{};
+    std::vector<PageText> barText_;
     std::wstring status_, fanValidation_, fanKey_;
     std::array<std::wstring, 7> thermalText_;
     bool thermalDetails_ = false;
@@ -3720,7 +3539,7 @@ private:
     std::map<int, Support> support_;
     std::set<int> primary_;
     std::array<HPOWERNOTIFY, 2> powerNotifications_{};
-    std::array<Page, pageCount> pages_;
+    std::array<TabPage, pageCount> pages_;
     std::map<int, HWND> controls_;
     std::set<int> edited_;
     std::array<HICON, 5> slotIcons_{};

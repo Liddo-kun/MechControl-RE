@@ -1,5 +1,6 @@
 #pragma once
 #include "controller.h"
+#include "page.h"
 #include <windows.h>
 #include <functional>
 #include <memory>
@@ -13,10 +14,7 @@ struct VfHost {
     // operations and returns 0 while another one runs.
     std::function<std::uint64_t(ControlCommand, bool busy)> submit;
     std::function<void(const std::wstring& reason)> report; // opens a GitHub issue about this GPU
-};
-struct VfFonts {
-    HFONT font, bold, title;
-    UINT dpi;
+    HWND tooltip;                                            // the window's tooltip control
 };
 class VfTab {
 public:
@@ -25,9 +23,9 @@ public:
     VfTab(const VfTab&) = delete;
     VfTab& operator=(const VfTab&) = delete;
     HWND window() const;
-    void style(const VfFonts&); // after a DPI or theme change
-    void read();                // the profile bar's Read
-    void loaded();              // a profile was loaded: shows its tune and the GPU's curve
+    void style(const PageFonts&); // after a DPI or theme change
+    void read();                  // the profile bar's Read
+    void loaded();                // a profile was loaded: shows its tune and the GPU's curve
     void delivered(std::uint64_t sequence, const ControlResult&);
     std::wstring text() const; // the status beside the buttons and the readback, for the UI checks
 

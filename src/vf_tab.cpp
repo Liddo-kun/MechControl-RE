@@ -129,25 +129,6 @@ struct VfTab::Impl {
         double Equation::* stock;
         std::wstring name, hint;
     };
-    struct Text {
-        RECT r;
-        std::wstring s;
-        COLORREF color;
-        HFONT font;
-        UINT format = DT_WORDBREAK | DT_NOPREFIX;
-        bool operator==(const Text& o) const {
-            return EqualRect(&r, &o.r) && s == o.s && color == o.color && font == o.font && format == o.format;
-        }
-    };
-    struct Frame {
-        RECT r;
-        std::wstring title;
-        COLORREF fill, edge;
-        std::string card; // a section's id
-        bool operator==(const Frame& o) const {
-            return EqualRect(&r, &o.r) && title == o.title && fill == o.fill && edge == o.edge && card == o.card;
-        }
-    };
     struct View {
         std::array<bool, 8> stock{}, fresh{}, band{};
         bool lines = true;
@@ -163,8 +144,9 @@ struct VfTab::Impl {
 
     HINSTANCE instance;
     VfHost host;
-    VfFonts fonts{};
-    HWND root = nullptr, panel = nullptr, tooltip = nullptr;
+    PageFonts fonts{};
+    HWND root = nullptr, panel = nullptr;
+    Page page; // the scrolling cards in panel
     HWND applyButton = nullptr, restoreButton = nullptr, resetButton = nullptr, importButton = nullptr,
          exportButton = nullptr;
     HWND issueLink = nullptr, modeBox = nullptr, linesCheck = nullptr, referenceButton = nullptr, numbersLink = nullptr,
@@ -175,7 +157,7 @@ struct VfTab::Impl {
     std::shared_ptr<const Tuner> tuner;
     std::shared_ptr<const VfReading> reading;
     Tune tune;
-    Equations equations; // what Apply writes
+    Equations equations;  // what Apply writes
     std::wstring invalid; // why the tune cannot be written
     std::vector<double> offsets;
     std::array<std::optional<Calc>, 8> stockCalc, tunedCalc;
@@ -197,24 +179,23 @@ struct VfTab::Impl {
 
     std::vector<Slider> sliders;
     std::vector<Limit> limits;
-    std::vector<HWND> ruleChecks; // "Remove the correction" per rule
+    std::vector<HWND> ruleChecks;               // "Remove the correction" per rule
     std::array<std::array<HWND, 8>, 3> shows{}; // stock, new, reference by column
     std::array<RECT, 3> showLabels{};
     bool numbersOpen = false, structureOpen = false;
 
-    std::vector<Frame> frames, lastFrames; // lastFrames, lastTexts: of the layout before
-    std::vector<Text> texts, lastTexts;
-    // Sizes of the fixed texts (labels, names, units), by font and wrapping width (0: one line), and of the links.
-    std::map<std::tuple<HFONT, int, std::wstring>, SIZE> measured;
-    std::map<HWND, std::pair<int, SIZE>> linkSizes;
+    std::vector<PageFrame> lastFrames; // what the layout before painted
+    std::vector<PageText> lastTexts;
+    std::vector<std::pair<size_t, std::string>> cards;   // the frame of each section card and its id
     std::vector<double> pointMv;                         // each point's voltage
     std::vector<std::pair<int, std::wstring>> lineCards; // each card line's card name
-    SCROLLINFO scrollShown{};
-    std::vector<std::pair<RECT, std::wstring>> tips; // painted parts with a tooltip
-    std::map<HWND, std::wstring> controlTips;
+    std::vector<std::pair<RECT, std::wstring>> tips;     // painted parts with a tooltip
+    // The widths of the fixed texts (names, units, labels) by font, and the sizes of the tables' links.
+    std::map<std::pair<HFONT, std::wstring>, int> widths;
+    std::map<std::pair<std::wstring, int>, int> heights; // of the Show rows' names, by wrapping width
+    std::map<HWND, SIZE> linkSizes;
     std::wstring tipText;
     size_t tools = 0;
-    int scroll = 0;
     RECT statusRect{};
     std::wstring statusText;
     COLORREF statusColor = 0;
@@ -256,8 +237,6 @@ struct VfTab::Impl {
             CreateWindowExW(WS_EX_CONTROLPARENT, panelClass, L"", WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_CLIPCHILDREN,
                             0, 0, 0, 0, root, nullptr, instance, this);
         if (!panel) throw std::runtime_error("Cannot create the V/F Curve tab");
-        tooltip = CreateWindowExW(WS_EX_TOPMOST, TOOLTIPS_CLASSW, nullptr, WS_POPUP | TTS_ALWAYSTIP | TTS_NOPREFIX, 0,
-                                  0, 0, 0, root, nullptr, instance, nullptr);
         issueLink = make(panel, WC_LINK, L"To get this GPU supported, <a>open an issue</a> with mechcontrol.log.",
                          WS_TABSTOP | LWS_TRANSPARENT | LWS_NOPREFIX);
         ShowWindow(issueLink, SW_HIDE);
@@ -266,28 +245,19 @@ struct VfTab::Impl {
         sequence = host.submit(VfRead{.open = true}, false);
     }
     ~Impl() {
-        if (tooltip) DestroyWindow(tooltip);
         chart.reset();
         if (root) DestroyWindow(root);
     }
 
-    int ref(int n) const { return MulDiv(n, fonts.dpi ? fonts.dpi : 96, 144); }
-    int scale(int n) const { return MulDiv(n, fonts.dpi ? fonts.dpi : 96, 96); }
+    int ref(int n) const { return pageRef(fonts.dpi, n); }
+    int scale(int n) const { return MulDiv(n, fonts.dpi, 96); }
     HWND owner() const { return GetAncestor(root, GA_ROOT); }
     HWND make(HWND parent, const wchar_t* type, const std::wstring& title, DWORD style) {
-        auto child = CreateWindowExW(0, type, title.c_str(), WS_CHILD | WS_VISIBLE | style, 0, 0, 0, 0, parent, nullptr,
-                                     instance, nullptr);
-        if (!child) throw std::runtime_error("Cannot create native control");
-        if (!wcscmp(type, TRACKBAR_CLASSW) || !wcscmp(type, WC_LINK)) paintWhole(child);
+        auto child = pageControl(instance, parent, type, title, style);
         if (fonts.font) SendMessageW(child, WM_SETFONT, WPARAM(fonts.font), FALSE);
         return child;
     }
-    void addTip(HWND child, const std::wstring& s) {
-        controlTips[child] = s;
-        TOOLINFOW t{sizeof t, TTF_IDISHWND | TTF_SUBCLASS, panel, UINT_PTR(child)};
-        t.lpszText = LPSTR_TEXTCALLBACKW;
-        SendMessageW(tooltip, TTM_ADDTOOLW, 0, LPARAM(&t));
-    }
+    void tip(HWND child, const std::wstring& s) { addTip(host.tooltip, panel, UINT_PTR(child), s, TTF_IDISHWND); }
     void error(const std::wstring& s) {
         MessageBoxW(owner(), s.c_str(), L"MechControl — V/F Curve", MB_OK | MB_ICONERROR);
     }
@@ -308,8 +278,7 @@ struct VfTab::Impl {
         modeBox = make(panel, WC_COMBOBOXW, L"", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL);
         linesCheck = make(panel, L"BUTTON", L"Draw the lines behind the new curve", WS_TABSTOP | BS_AUTOCHECKBOX);
         referenceButton = make(panel, L"BUTTON", L"Reference CSV…", WS_TABSTOP | BS_PUSHBUTTON);
-        addTip(
-            referenceButton,
+        tip(referenceButton,
             L"A curve measured with another tool (a CSV with the columns domain, index and actual_<band>), shown as crosses. Once one is loaded, the plot can show the difference from it.");
         for (auto& row : shows)
             for (auto& box : row) box = make(panel, L"BUTTON", L"", WS_TABSTOP | BS_AUTOCHECKBOX);
@@ -328,7 +297,7 @@ struct VfTab::Impl {
             s.edit = make(panel, L"EDIT", L"", WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL | ES_RIGHT);
             styleFrame(s.edit);
             SetWindowSubclass(s.edit, editProcedure, 1, DWORD_PTR(this));
-            addTip(s.track, s.hint);
+            tip(s.track, s.hint);
             sliders.push_back(std::move(s));
         };
         int last = t.points() - 1;
@@ -349,16 +318,17 @@ struct VfTab::Impl {
                     hint};
             styleFrame(l.edit);
             SetWindowSubclass(l.edit, editProcedure, 1, DWORD_PTR(this));
-            addTip(l.edit, std::wstring(L"The ") + hint + L" the curve can give (equation " +
-                               std::to_wstring(t.meta.root) + L"); empty: no limit.");
+            tip(l.edit, std::wstring(L"The ") + hint + L" the curve can give (equation " +
+                            std::to_wstring(t.meta.root) + L"); empty: no limit.");
             limits.push_back(l);
         }
         for (auto& r : t.rules) {
             std::vector<std::wstring> equs;
             for (int i : r.equs) equs.push_back(std::to_wstring(i));
-            auto c = make(panel, L"BUTTON", L"Remove the correction (written with Apply)", WS_TABSTOP | BS_AUTOCHECKBOX);
-            addTip(c, std::wstring(L"Apply sets equation") + (equs.size() > 1 ? L"s " : L" ") + join(equs, L", ") +
-                          L" to 0.");
+            auto c =
+                make(panel, L"BUTTON", L"Remove the correction (written with Apply)", WS_TABSTOP | BS_AUTOCHECKBOX);
+            tip(c, std::wstring(L"Apply sets equation") + (equs.size() > 1 ? L"s " : L" ") + join(equs, L", ") +
+                       L" to 0.");
             ruleChecks.push_back(c);
         }
         for (auto& s : t.sections)
@@ -450,7 +420,8 @@ struct VfTab::Impl {
     // card changed its size.
     void shown(bool place = true) {
         layout(place);
-        bool same = frames == lastFrames && texts.size() == lastTexts.size();
+        auto& texts = page.texts;
+        bool same = page.frames == lastFrames && texts.size() == lastTexts.size();
         if (!same && !place) {
             same = slide();
             layout(true);
@@ -460,8 +431,8 @@ struct VfTab::Impl {
         else
             for (size_t i = 0; i < texts.size(); ++i)
                 if (texts[i] != lastTexts[i]) {
-                    InvalidateRect(panel, &lastTexts[i].r, FALSE);
-                    InvalidateRect(panel, &texts[i].r, FALSE);
+                    InvalidateRect(panel, &lastTexts[i].rect, FALSE);
+                    InvalidateRect(panel, &texts[i].rect, FALSE);
                 }
         plot();
         scheduleZones();
@@ -471,23 +442,25 @@ struct VfTab::Impl {
     // it, controls and pixels; that card and what is above it repaint, and below it the texts that changed. The
     // layout that follows places whatever is not where it belongs (a control below the window is not scrolled).
     bool slide() {
+        auto& frames = page.frames;
+        auto& texts = page.texts;
         if (frames.size() != lastFrames.size()) return false;
         size_t k = 0;
         while (k < frames.size() && frames[k] == lastFrames[k]) ++k;
         if (k == frames.size()) return false;
-        int below = lastFrames[k].r.bottom, by = frames[k].r.bottom - below;
+        int below = lastFrames[k].rect.bottom, by = frames[k].rect.bottom - below;
         auto moved = [&](auto was) {
-            OffsetRect(&was.r, 0, by);
+            OffsetRect(&was.rect, 0, by);
             return was;
         };
         auto card = lastFrames[k];
-        card.r.bottom += by;
+        card.rect.bottom += by;
         if (!by || frames[k] != card) return false;
         for (size_t j = k + 1; j < frames.size(); ++j)
-            if (lastFrames[j].r.top < below || frames[j] != moved(lastFrames[j])) return false;
+            if (lastFrames[j].rect.top < below || frames[j] != moved(lastFrames[j])) return false;
         // The texts below the card, which follow those in and above it.
-        auto under = [](const std::vector<Text>& list, int y) {
-            return std::ranges::find_if(list, [&](const Text& x) { return x.r.top >= y; });
+        auto under = [](const std::vector<PageText>& list, int y) {
+            return std::ranges::find_if(list, [&](const PageText& x) { return x.rect.top >= y; });
         };
         auto was = under(lastTexts, below);
         auto now = under(texts, below + by);
@@ -497,29 +470,14 @@ struct VfTab::Impl {
         RECT from{0, below, client.right, client.bottom + 100000},
             into{0, std::min(below, below + by), client.right, client.bottom},
             above{0, 0, client.right, std::max(below, below + by)};
-        scrollPanel(by, &from, &into);
+        page.shift(by, &from, &into);
         InvalidateRect(panel, &above, FALSE);
         for (; now != texts.end(); ++now, ++was)
             if (auto old = moved(*was); *now != old) {
-                InvalidateRect(panel, &old.r, FALSE);
-                InvalidateRect(panel, &now->r, FALSE);
+                InvalidateRect(panel, &old.rect, FALSE);
+                InvalidateRect(panel, &now->rect, FALSE);
             }
         return true;
-    }
-    // Moves the cards' pixels and controls up or down.
-    void scrollPanel(int by, const RECT* from = nullptr, const RECT* into = nullptr) {
-        RECT exposed{};
-        ScrollWindowEx(panel, 0, by, from, into, nullptr, &exposed, SW_SCROLLCHILDREN | SW_INVALIDATE);
-        // The scroll leaves the border of a number box it brings into view partly unpainted.
-        for (auto child = GetWindow(panel, GW_CHILD); child; child = GetWindow(child, GW_HWNDNEXT)) {
-            RECT r{};
-            GetWindowRect(child, &r);
-            MapWindowPoints(nullptr, panel, reinterpret_cast<POINT*>(&r), 2);
-            wchar_t type[8]{};
-            GetClassNameW(child, type, 8);
-            if (!_wcsicmp(type, L"Edit") && IsWindowVisible(child) && IntersectRect(&r, &r, &exposed))
-                RedrawWindow(child, nullptr, nullptr, RDW_FRAME | RDW_INVALIDATE);
-        }
     }
     void sync(Slider& s) {
         double v = s.value(tune);
@@ -1131,104 +1089,56 @@ struct VfTab::Impl {
         MoveWindow(panel, 0, below, rc.right, std::max(0, int(rc.bottom) - below), TRUE);
         InvalidateRect(root, nullptr, FALSE);
     }
-    // One pass over the scrolling cards: measures them and, with apply, also places the controls. y runs down the
-    // scrolled panel.
-    void layout(bool apply) {
+    // The scrolling cards: one pass that measures them and, with place, also places the controls. The pass before stays
+    // in lastFrames and lastTexts, so that only what changed repaints.
+    void layout(bool place) {
         RECT rc{};
         GetClientRect(panel, &rc);
         if (rc.right <= 0 || !fonts.font) return;
+        std::vector<std::pair<RECT, std::wstring>> tp;
+        int content = 0;
+        {
+            PageLayout s(page, fonts, rc.right, place);
+            cards.clear();
+            content = cardsPass(s, tp);
+            lastFrames = std::move(s.frames);
+            lastTexts = std::move(s.texts);
+        }
+        if (page.range(content)) {
+            layout(true);
+            InvalidateRect(panel, nullptr, FALSE);
+            return;
+        }
+        // Painted parts with a tooltip get one tool each, numbered from 1; their texts are asked for when shown.
+        bool sameTips = std::ranges::equal(tips, tp, [](auto& a, auto& b) { return EqualRect(&a.first, &b.first); });
+        tips = std::move(tp);
+        if (sameTips && tools == tips.size()) return;
+        for (size_t i = 0; i < tools; ++i) {
+            TOOLINFOW t{sizeof t, 0, panel, i + 1};
+            SendMessageW(host.tooltip, TTM_DELTOOLW, 0, LPARAM(&t));
+        }
+        for (size_t i = 0; i < tips.size(); ++i) {
+            TOOLINFOW t{sizeof t, TTF_SUBCLASS, panel, i + 1, tips[i].first};
+            t.lpszText = LPSTR_TEXTCALLBACKW;
+            SendMessageW(host.tooltip, TTM_ADDTOOLW, 0, LPARAM(&t));
+        }
+        tools = tips.size();
+    }
+    // Returns the content's height.
+    int cardsPass(PageLayout& s, std::vector<std::pair<RECT, std::wstring>>& tp) {
         auto& pal = palette();
-        auto dc = GetDC(panel);
-        auto height = [&](HFONT f) {
-            SelectObject(dc, f);
-            TEXTMETRICW m{};
-            GetTextMetricsW(dc, &m);
-            return int(m.tmHeight);
+        int x = s.x, right = s.right, left = s.left, end = s.end, line = s.line, box = s.box, row = s.button,
+            gap = ref(12);
+        s.y += ref(2); // the cards start ref(8) down and end at the last card's gap
+        auto say = [&](const std::wstring& t, int from, int to, COLORREF color, HFONT f = nullptr) {
+            if (!t.empty()) s.y = s.paragraph(t, from, s.y, to, color, f ? f : fonts.font);
         };
-        // A fixed text's size, on one line or wrapped to a width; measured once.
-        auto measure = [&](HFONT f, const std::wstring& s, int wrap = 0) {
-            auto [known, fresh] = measured.try_emplace({f, wrap, s});
-            if (fresh) {
-                SelectObject(dc, f);
-                RECT r{0, 0, wrap, 0};
-                if (wrap) {
-                    DrawTextW(dc, s.c_str(), -1, &r, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
-                    known->second = {r.right, r.bottom};
-                } else
-                    GetTextExtentPoint32W(dc, s.c_str(), int(s.size()), &known->second);
-            }
+        auto extent = [&](HFONT f, const std::wstring& t) {
+            auto [known, fresh] = widths.try_emplace({f, t});
+            if (fresh) known->second = s.extent(f, t);
             return known->second;
         };
-        auto extent = [&](HFONT f, const std::wstring& s) { return int(measure(f, s).cx); };
-        int line = height(fonts.font), titleHeight = height(fonts.title), box = line + ref(4), row = ref(32),
-            gap = ref(12);
-        std::vector<Frame> fr;
-        std::vector<Text> tx;
-        std::vector<std::pair<RECT, std::wstring>> tp;
-        int x = ref(16), right = rc.right - ref(16), y = ref(8) - scroll;
-        // `list`: the height of a drop-down list's list, which its window takes but does not keep.
-        auto put = [&](HWND child, int cx, int cy, int cw, int ch, bool show = true, int list = 0) {
-            if (!apply || !child) return;
-            if (!show) {
-                ShowWindow(child, SW_HIDE);
-                return;
-            }
-            RECT now{};
-            GetWindowRect(child, &now);
-            MapWindowPoints(nullptr, panel, reinterpret_cast<POINT*>(&now), 2);
-            // A moved control repaints: copying its old pixels can copy those of a control moved there before it.
-            if (now.left != cx || now.top != cy || now.right - now.left != cw || (!list && now.bottom - now.top != ch))
-                SetWindowPos(child, nullptr, cx, cy, std::max(0, cw), std::max(0, ch + list),
-                             SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOCOPYBITS);
-            if (!IsWindowVisible(child)) ShowWindow(child, SW_SHOW);
-        };
-        auto say = [&](const std::wstring& s, int from, int to, int& at, COLORREF color, HFONT f = nullptr) {
-            if (s.empty()) return RECT{from, at, from, at};
-            f = f ? f : fonts.font;
-            RECT r{from, at, to, at};
-            // Most texts are the same as in the last pass, which measured them already (the notes are long).
-            auto known = std::ranges::find_if(texts, [&](const Text& t) {
-                return t.font == f && t.r.right - t.r.left == to - from && t.format == (DT_WORDBREAK | DT_NOPREFIX) &&
-                       t.s == s;
-            });
-            if (known != texts.end())
-                r.bottom = at + known->r.bottom - known->r.top;
-            else {
-                SelectObject(dc, f);
-                DrawTextW(dc, s.c_str(), -1, &r, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
-            }
-            r.right = to;
-            tx.push_back({r, s, color, f});
-            at = r.bottom;
-            return r;
-        };
-        auto open = [&](const std::wstring& title, int from, int to, int& at) {
-            fr.push_back({{from, at, to, 0}, title, pal.card, pal.border});
-            at += ref(10) + titleHeight + ref(8);
-        };
-        auto close = [&](int& at, size_t frame) {
-            at += ref(14);
-            fr[frame].r.bottom = at;
-        };
-        auto check = [&](HWND c, int from, int& at) {
-            at += ref(6);
-            if (apply) put(c, from, at, extent(fonts.font, windowText(c)) + ref(40), box);
-            at += box;
-        };
-        // A link's size within a width; asked once per text and width.
-        auto ideal = [&](HWND l, int width) {
-            auto& known = linkSizes[l];
-            if (known.first != width || !known.second.cy) {
-                known.first = width;
-                SendMessageW(l, LM_GETIDEALSIZE, width, LPARAM(&known.second));
-            }
-            return known.second;
-        };
-        auto link = [&](HWND l, int from, int to, int& at) {
-            int height = ideal(l, std::max(0, to - from)).cy;
-            put(l, from, at, to - from, height);
-            at += height;
-        };
+        auto content = [&] { return s.finish() - ref(6); };
         // Banners: what keeps the tab from working as it should.
         std::vector<std::wstring> banners;
         if (!openError.empty()) banners.push_back(openError);
@@ -1243,32 +1153,26 @@ struct VfTab::Impl {
         if (!readError.empty()) banners.push_back(readError);
         if (!invalid.empty()) banners.push_back(L"These settings cannot be written: " + invalid);
         for (size_t i = 0; i < banners.size(); ++i) {
-            fr.push_back({{x, y, right, 0}, L"", mix(pal.card, pal.error, pal.dark ? 0.22 : 0.10), pal.error});
-            size_t frame = fr.size() - 1;
-            y += ref(10);
-            say(banners[i], x + ref(15), right - ref(15), y, pal.text);
-            if (i == 0 && issue) {
-                y += ref(4);
-                link(issueLink, x + ref(15), right - ref(15), y);
-            }
-            y += ref(10);
-            fr[frame].r.bottom = y;
-            y += gap;
+            s.frames.push_back({{x, s.y, right, 0}, L"", true});
+            size_t frame = s.frames.size() - 1;
+            s.y += ref(10);
+            say(banners[i], left, end, pal.text);
+            if (i == 0 && issue) s.link(issueLink, left, ref(4), end - left);
+            s.y += ref(10);
+            s.frames[frame].rect.bottom = s.y;
+            s.y += gap;
         }
-        if (!issue) put(issueLink, 0, 0, 0, 0, false);
+        if (!issue) s.put(issueLink, 0, 0, 0, 0, false);
         if (!tuner) {
-            size_t frame = fr.size();
-            open(L"V/F Curve", x, right, y);
+            s.open(L"V/F Curve");
             say(job == Job::opening
                     ? L"Opening the tuner: reading the driver's equations and finding its clock curve. The first time on a GPU this takes a few seconds."
                     : L"The tuner is not open. Read (above) tries again.",
-                x + ref(15), right - ref(15), y, pal.muted);
-            close(y, frame);
-            finish(fr, tx, tp, y, dc);
-            return;
+                left, end, pal.muted);
+            s.close();
+            return content();
         }
         auto& t = *tuner;
-        int left = x + ref(15), end = right - ref(15);
         // Current changes.
         {
             std::vector<std::wstring> ids, parts, removed;
@@ -1276,9 +1180,9 @@ struct VfTab::Impl {
                 if (equations[i] != t.m.E[i] && !t.switches.contains(i)) ids.push_back(std::to_wstring(i));
             for (auto& r : t.rules)
                 if (tune.rules.contains(r.id) && tune.rules.at(r.id)) {
-                    auto s = w(r.title.substr(0, r.title.find(',')));
-                    std::ranges::transform(s, s.begin(), towlower);
-                    removed.push_back(s + L" removed");
+                    auto n = w(r.title.substr(0, r.title.find(',')));
+                    std::ranges::transform(n, n.begin(), towlower);
+                    removed.push_back(n + L" removed");
                 }
             bool sw = !t.switches.empty();
             size_t moved = std::ranges::count_if(offsets, [](double o) { return o != 0; });
@@ -1288,44 +1192,39 @@ struct VfTab::Impl {
             auto summary = parts.empty() ? L"None" : join(parts, L" + ") + (sw && parts.size() == 1 ? L" only" : L"");
             if (!sw && !parts.empty()) summary[0] = towupper(summary[0]);
             if (!removed.empty()) summary += L" (" + join(removed, L", ") + L")";
-            size_t frame = fr.size();
-            open(L"Current Changes", x, right, y);
-            say(summary, left, end, y, pal.text);
+            s.open(L"Current Changes");
+            say(summary, left, end, pal.text);
             if (!ids.empty()) {
                 std::vector<std::wstring> sws;
                 for (auto& [i, fixed] : t.switches) sws.push_back(std::to_wstring(i));
                 say(L"Equations " + join(ids, L", ") +
                         (sw ? L", and " + join(sws, L", ") + L" to disable the slow curve" : L"") + L".",
-                    left, end, y, pal.muted);
+                    left, end, pal.muted);
             }
-            close(y, frame);
-            y += gap;
+            s.close();
         }
         if (readback) {
-            size_t frame = fr.size();
-            open(L"GPU Readback", x, right, y);
-            say(readback->what, left, end, y, pal.text, fonts.bold);
-            say(readback->verdict, left, end, y, readback->ok ? pal.ok : pal.error);
-            say(readback->offsets, left, end, y, pal.error);
-            if (!readback->more.empty()) y += ref(4);
-            say(readback->more, left, end, y, pal.muted);
-            close(y, frame);
-            y += gap;
+            s.open(L"GPU Readback");
+            say(readback->what, left, end, pal.text, fonts.bold);
+            say(readback->verdict, left, end, readback->ok ? pal.ok : pal.error);
+            say(readback->offsets, left, end, pal.error);
+            if (!readback->more.empty()) s.y += ref(4);
+            say(readback->more, left, end, pal.muted);
+            s.close();
         }
         // Plot: what the chart shows.
         {
-            size_t frame = fr.size();
-            open(L"Plot", x, right, y);
+            s.open(L"Plot");
             int widest = 0;
             for (auto m : modes) widest = std::max(widest, extent(fonts.font, m));
-            int at = left, top = y;
+            int at = left, top = s.y;
             // A drop-down list's window includes its list; it is centered by its closed height.
             auto flow = [&](HWND c, int width, int height, int list = 0) {
                 if (at > left && at + width > end) {
                     at = left;
                     top += row + ref(6);
                 }
-                put(c, at, top + (row - height) / 2, width, height, true, list);
+                s.put(c, at, top + (row - height) / 2, width, height + list, true, list != 0);
                 at += width + ref(16);
             };
             flow(modeBox, widest + ref(60), box, ref(200));
@@ -1337,47 +1236,54 @@ struct VfTab::Impl {
                 at = left;
                 top += row + ref(6);
             }
-            tx.push_back({{at, top, end, top + row},
-                          name,
-                          pal.muted,
-                          fonts.font,
-                          DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS});
-            y = top + row + ref(10);
+            s.texts.push_back({{at, top, end, top + row},
+                               name,
+                               pal.muted,
+                               fonts.font,
+                               DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS});
+            s.y = top + row + ref(10);
             // Show: per row and column. A click on a row's name turns the whole row on or off.
             bool band = std::ranges::any_of(std::array{0, 1, 2, 3, 4, 5, 6, 7}, [&](int c) { return have(c); });
             const std::wstring rows[]{L"○ Stock curve (NVIDIA's)", L"● New curve (slow curve disabled + your changes)",
                                       L"+ Reference curve (" + sheetName + L")"};
             int cell = std::max(extent(fonts.bold, L"80 °C") + ref(18), ref(60)), labels = 0;
-            for (auto& s : rows) labels = std::max(labels, extent(fonts.font, s) + ref(16));
+            for (auto& r : rows) labels = std::max(labels, extent(fonts.font, r) + ref(16));
             labels = std::min(labels, std::max(ref(150), end - left - 8 * cell));
-            tx.push_back(
-                {{left, y, left + labels, y + line}, L"Show", pal.text, fonts.bold, DT_SINGLELINE | DT_NOPREFIX});
+            s.texts.push_back(
+                {{left, s.y, left + labels, s.y + line}, L"Show", pal.text, fonts.bold, DT_SINGLELINE | DT_NOPREFIX});
             for (int c = 0; c < 8; ++c)
-                tx.push_back({{left + labels + c * cell, y, left + labels + (c + 1) * cell, y + line},
-                              std::to_wstring(columns[c].celsius) + L" °C",
-                              hue(c),
-                              fonts.bold,
-                              DT_SINGLELINE | DT_CENTER | DT_NOPREFIX});
-            y += line + ref(4);
+                s.texts.push_back({{left + labels + c * cell, s.y, left + labels + (c + 1) * cell, s.y + line},
+                                   std::to_wstring(columns[c].celsius) + L" °C",
+                                   hue(c),
+                                   fonts.bold,
+                                   DT_SINGLELINE | DT_CENTER | DT_NOPREFIX});
+            s.y += line + ref(4);
             for (int r = 0; r < 3; ++r) {
                 bool shownRow = r < 2 || band;
                 if (!shownRow) {
                     showLabels[r] = {};
-                    for (auto b : shows[r]) put(b, 0, 0, 0, 0, false);
+                    for (auto b : shows[r]) s.put(b, 0, 0, 0, 0, false);
                     continue;
                 }
-                RECT label{left, y, left + labels - ref(8), y};
-                int h = std::max(int(measure(fonts.font, rows[r], label.right - label.left).cy), box) + ref(6);
+                RECT label{left, s.y, left + labels - ref(8), s.y};
+                auto [known, fresh] = heights.try_emplace({rows[r], label.right - label.left});
+                if (fresh) {
+                    RECT measured{0, 0, label.right - label.left, 0};
+                    SelectObject(s.dc, fonts.font);
+                    DrawTextW(s.dc, rows[r].c_str(), -1, &measured, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
+                    known->second = measured.bottom;
+                }
+                int h = std::max(known->second, box) + ref(6);
                 label.bottom = label.top + h;
-                tx.push_back({label, rows[r], pal.text, fonts.font, DT_WORDBREAK | DT_NOPREFIX});
+                s.texts.push_back({label, rows[r], pal.text, fonts.font});
                 showLabels[r] = label;
                 tp.push_back({label, L"Click to turn the whole row on or off."});
                 for (int c = 0; c < 8; ++c) {
                     bool on = r < 2 || have(c);
                     int size = scale(18);
-                    put(shows[r][c], left + labels + c * cell + (cell - size) / 2, y, size, box, on);
+                    s.put(shows[r][c], left + labels + c * cell + (cell - size) / 2, s.y, size, box, on);
                 }
-                y += h;
+                s.y += h;
             }
             std::wstring note = L"Each column is one 10 °C temperature band.";
             for (auto& c : columns)
@@ -1389,130 +1295,122 @@ struct VfTab::Impl {
                                      : L".");
             note +=
                 L" Wheel zooms the chart (Shift: voltage only, Alt: clock only), dragging moves it, hovering shows a point. Click points to select them (Shift: a range, Ctrl: add one); the up and down arrows then move their offsets.";
-            y += ref(4);
-            say(note, left, end, y, pal.muted);
-            close(y, frame);
-            y += gap;
+            s.y += ref(4);
+            say(note, left, end, pal.muted);
+            s.close();
         }
         // The cards: as many columns as fit, at least about 400 pixels wide each.
         {
             int minimum = scale(400), count = std::max(1, (right - x + gap) / (minimum + gap)),
                 width = (right - x - (count - 1) * gap) / count;
-            struct Item {
-                std::function<void(int from, int to, int& at)> fill;
-            };
-            std::vector<Item> items;
-            auto sliderRows = [&](std::vector<Slider*> list, int from, int to, int& at) {
+            std::vector<std::function<void(int from, int to)>> items;
+            auto sliderRows = [&](std::vector<Slider*> list, int from, int to) {
                 int labelWidth = 0, unitWidth = 0;
-                for (auto s : list) {
-                    labelWidth = std::max(labelWidth, extent(fonts.bold, s->name) + ref(12));
-                    unitWidth = std::max(unitWidth, extent(fonts.font, s->unit) + ref(6));
+                for (auto sl : list) {
+                    labelWidth = std::max(labelWidth, extent(fonts.bold, sl->name) + ref(12));
+                    unitWidth = std::max(unitWidth, extent(fonts.font, sl->unit) + ref(6));
                 }
                 for (auto& l : limits) labelWidth = std::max(labelWidth, extent(fonts.bold, l.name) + ref(12));
                 int numberWidth = extent(fonts.font, L"-0000.00") + ref(20);
-                for (auto s : list) {
-                    double v = s->value(tune);
+                for (auto sl : list) {
+                    double v = sl->value(tune);
                     int trackLeft = from + labelWidth, trackRight = to - unitWidth - numberWidth - ref(16);
-                    s->label = {from, at, trackLeft, at + row};
-                    tx.push_back({s->label, s->name, v != 0 ? pal.accent : pal.text, fonts.bold,
-                                  DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS});
-                    tp.push_back({s->label, s->hint});
-                    put(s->track, trackLeft, at, trackRight - trackLeft, row);
-                    put(s->edit, trackRight + ref(8), at + (row - box) / 2, numberWidth, box);
-                    tx.push_back({{trackRight + ref(16) + numberWidth, at, to, at + row},
-                                  s->unit,
-                                  pal.muted,
-                                  fonts.font,
-                                  DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX});
-                    at += row;
-                    if (!s->card.empty()) {
+                    sl->label = {from, s.y, trackLeft, s.y + row};
+                    s.texts.push_back({sl->label, sl->name, v != 0 ? pal.accent : pal.text, fonts.bold,
+                                       DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS});
+                    tp.push_back({sl->label, sl->hint});
+                    s.put(sl->track, trackLeft, s.y, trackRight - trackLeft, row);
+                    s.put(sl->edit, trackRight + ref(8), s.y + (row - box) / 2, numberWidth, box);
+                    s.texts.push_back({{trackRight + ref(16) + numberWidth, s.y, to, s.y + row},
+                                       sl->unit,
+                                       pal.muted,
+                                       fonts.font,
+                                       DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX});
+                    s.y += row;
+                    if (!sl->card.empty()) {
                         // Under the track, from the thumb's leftmost to its rightmost center; asked of the track
                         // once it has the width.
-                        if (apply && s->barWidth != trackRight - trackLeft) {
+                        if (s.place && sl->barWidth != trackRight - trackLeft) {
                             RECT channel{}, thumb{};
-                            SendMessageW(s->track, TBM_GETCHANNELRECT, 0, LPARAM(&channel));
-                            SendMessageW(s->track, TBM_GETTHUMBRECT, 0, LPARAM(&thumb));
+                            SendMessageW(sl->track, TBM_GETCHANNELRECT, 0, LPARAM(&channel));
+                            SendMessageW(sl->track, TBM_GETTHUMBRECT, 0, LPARAM(&thumb));
                             int half = (thumb.right - thumb.left) / 2;
-                            s->barLeft = channel.left + half;
-                            s->barRight = channel.right - half;
-                            s->barWidth = trackRight - trackLeft;
+                            sl->barLeft = channel.left + half;
+                            sl->barRight = channel.right - half;
+                            sl->barWidth = trackRight - trackLeft;
                         }
-                        s->strip = {trackLeft + s->barLeft, at, trackLeft + s->barRight, at + scale(5)};
+                        sl->strip = {trackLeft + sl->barLeft, s.y, trackLeft + sl->barRight, s.y + scale(5)};
                         tp.push_back(
-                            {s->strip,
+                            {sl->strip,
                              L"Grey: moving the slider here changes nothing at the plotted temperatures (another line is lower, or the curve is at the floor, at the ceiling or held flat)."});
-                        at += scale(5);
+                        s.y += scale(5);
                     }
-                    at += ref(6);
+                    s.y += ref(6);
                 }
                 return std::pair(labelWidth, numberWidth + unitWidth);
             };
-            items.push_back({[&](int from, int to, int& at) {
-                size_t frame = fr.size();
-                open(L"Global Offset", from, to, at);
+            items.push_back([&](int from, int to) {
+                s.open(L"Global Offset", from, to);
                 int l = from + ref(15), r = to - ref(15);
-                auto [labelWidth, tail] = sliderRows({&sliders[0], &sliders[1]}, l, r, at);
+                auto [labelWidth, tail] = sliderRows({&sliders[0], &sliders[1]}, l, r);
                 int numberWidth = extent(fonts.font, L"-0000.00") + ref(20), unitWidth = tail - numberWidth;
                 for (auto& lim : limits) {
                     bool set = (tune.*lim.value).has_value();
                     int trackRight = r - unitWidth - numberWidth - ref(16);
-                    tx.push_back({{l, at, l + labelWidth, at + row},
-                                  lim.name,
-                                  set ? pal.accent : pal.text,
-                                  fonts.bold,
-                                  DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX});
-                    tx.push_back({{l + labelWidth, at, trackRight, at + row},
-                                  lim.hint,
-                                  pal.muted,
-                                  fonts.font,
-                                  DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX});
-                    put(lim.edit, trackRight + ref(8), at + (row - box) / 2, numberWidth, box);
-                    tx.push_back({{trackRight + ref(16) + numberWidth, at, r, at + row},
-                                  L"MHz",
-                                  pal.muted,
-                                  fonts.font,
-                                  DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX});
-                    at += row + ref(6);
+                    s.texts.push_back({{l, s.y, l + labelWidth, s.y + row},
+                                       lim.name,
+                                       set ? pal.accent : pal.text,
+                                       fonts.bold,
+                                       DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX});
+                    s.texts.push_back({{l + labelWidth, s.y, trackRight, s.y + row},
+                                       lim.hint,
+                                       pal.muted,
+                                       fonts.font,
+                                       DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX});
+                    s.put(lim.edit, trackRight + ref(8), s.y + (row - box) / 2, numberWidth, box);
+                    s.texts.push_back({{trackRight + ref(16) + numberWidth, s.y, r, s.y + row},
+                                       L"MHz",
+                                       pal.muted,
+                                       fonts.font,
+                                       DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX});
+                    s.y += row + ref(6);
                 }
-                at += ref(4);
-                say(w(t.switch_text), l, r, at, pal.muted);
-                close(at, frame);
-            }});
+                s.y += ref(4);
+                say(w(t.switch_text), l, r, pal.muted);
+                s.close();
+            });
             if (!t.rules.empty())
-                items.push_back({[&](int from, int to, int& at) {
-                    size_t frame = fr.size();
-                    open(L"NVIDIA's Temperature Corrections", from, to, at);
+                items.push_back([&](int from, int to) {
+                    s.open(L"NVIDIA's Temperature Corrections", from, to);
                     int l = from + ref(15), r = to - ref(15);
                     for (size_t i = 0; i < t.rules.size(); ++i) {
-                        if (i) at += ref(10);
-                        say(w(t.rules[i].title), l, r, at, pal.text, fonts.bold);
-                        at += ref(2);
-                        say(w(t.rules[i].text), l, r, at, pal.muted);
-                        check(ruleChecks[i], l, at);
+                        if (i) s.y += ref(10);
+                        say(w(t.rules[i].title), l, r, pal.text, fonts.bold);
+                        s.y += ref(2);
+                        say(w(t.rules[i].text), l, r, pal.muted);
+                        s.check(ruleChecks[i], l, true, fonts.font);
                     }
-                    close(at, frame);
-                }});
-            items.push_back({[&](int from, int to, int& at) {
-                size_t frame = fr.size();
-                open(L"The Lines, from Low to High Voltage", from, to, at);
+                    s.close();
+                });
+            items.push_back([&](int from, int to) {
+                s.open(L"The Lines, from Low to High Voltage", from, to);
                 say(L"The clock follows the lowest line (thin lines on the chart).\nGrey bar under a slider: moving it there changes nothing.\nTemp sliders: MHz per 10 °C warmer.",
-                    from + ref(15), to - ref(15), at, pal.muted);
-                close(at, frame);
-            }});
+                    from + ref(15), to - ref(15), pal.muted);
+                s.close();
+            });
             auto calc = shownNew();
             auto& win = tuned(calc[0]).win;
-            for (auto& s : t.sections)
-                items.push_back({[&, s = &s](int from, int to, int& at) {
-                    size_t frame = fr.size();
-                    int top = at;
-                    open(w(s->name), from, to, at);
-                    fr.back().card = s->id;
+            for (auto& section : t.sections)
+                items.push_back([&, sec = &section](int from, int to) {
+                    int top = s.y;
+                    s.open(w(sec->name), from, to);
+                    cards.push_back({s.frames.size() - 1, sec->id});
                     // Where its lines set the new curve now, at the first plotted temperature.
                     std::vector<int> mine;
                     std::vector<std::pair<std::wstring, std::vector<int>>> others;
                     for (int p = 0; p < t.points(); ++p) {
-                        if (t.mv(p) < s->lo || t.mv(p) > s->hi) continue;
-                        if (std::ranges::find(s->heads, win[p]) != s->heads.end()) {
+                        if (t.mv(p) < sec->lo || t.mv(p) > sec->hi) continue;
+                        if (std::ranges::find(sec->heads, win[p]) != sec->heads.end()) {
                             mine.push_back(p);
                             continue;
                         }
@@ -1528,47 +1426,49 @@ struct VfTab::Impl {
                     }
                     std::vector<std::wstring> by;
                     for (auto& [k, ps] : others) by.push_back(k + L": " + runs(ps));
-                    int titleRight = from + ref(29) + extent(fonts.title, w(s->name));
-                    RECT title{from + ref(15), top + ref(10), titleRight, top + ref(10) + titleHeight};
+                    int titleRight = from + ref(29) + extent(fonts.title, w(sec->name));
+                    RECT title{from + ref(15), top + ref(10), titleRight, top + ref(10) + s.titleHeight};
                     std::vector<std::wstring> heads;
-                    for (int h : s->heads) heads.push_back(std::to_wstring(h));
-                    tp.push_back({title, L"Left end " + number(s->lo) + L" mV, right end " + number(s->hi) +
+                    for (int h : sec->heads) heads.push_back(std::to_wstring(h));
+                    tp.push_back({title, L"Left end " + number(sec->lo) + L" mV, right end " + number(sec->hi) +
                                              L" mV. Equation" + (heads.size() > 1 ? L"s " : L" ") + join(heads, L", ") +
-                                             L". " + w(s->note)});
+                                             L". " + w(sec->note)});
                     RECT state{titleRight + ref(12), title.top, to - ref(15), title.bottom};
-                    tx.push_back({state, mine.empty() ? L"not active" : L"active at " + runs(mine),
-                                  mine.empty() ? pal.error : pal.muted, fonts.font,
-                                  DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS});
+                    s.texts.push_back({state, mine.empty() ? L"not active" : L"active at " + runs(mine),
+                                       mine.empty() ? pal.error : pal.muted, fonts.font,
+                                       DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS});
                     tp.push_back(
                         {state, L"At " + std::to_wstring(columns[calc[0]].celsius) + L" °C. " + join(by, L"; ")});
                     std::vector<Slider*> list;
                     for (auto& sl : sliders)
-                        if (sl.card == s->id) list.push_back(&sl);
-                    sliderRows(list, from + ref(15), to - ref(15), at);
-                    close(at, frame);
-                }});
-            int bottom = y;
+                        if (sl.card == sec->id) list.push_back(&sl);
+                    sliderRows(list, from + ref(15), to - ref(15));
+                    s.close();
+                });
+            // Each card closes with the gap below it; a row of cards ends at its lowest.
+            int bottom = s.y, top = s.y;
             for (size_t i = 0; i < items.size(); ++i) {
                 int column = int(i % count), from = x + column * (width + gap);
-                if (!column) y = bottom + (i ? gap : 0);
-                int at = y;
-                items[i].fill(from, from + width, at);
-                bottom = std::max(bottom, at);
+                if (!column) top = bottom + (i ? gap : 0);
+                s.y = top;
+                items[i](from, from + width);
+                bottom = std::max(bottom, s.y - gap);
             }
-            y = bottom + ref(8);
+            s.y = bottom + ref(8);
             say(L"Double-click a slider to set it to 0. Every number behind the sliders is in the tables below.", x,
-                right, y, pal.muted);
-            y += gap;
+                right, pal.muted);
+            s.y += gap;
         }
         // Every number, and how the lines are combined.
         for (auto [title, linkControl, table, isOpen] :
              {std::tuple(L"Every Number, by Line", numbersLink, numbers.get(), numbersOpen),
               {L"Structure: How the Lines Are Combined", structureLink, structure.get(), structureOpen}}) {
-            size_t frame = fr.size();
-            int top = y;
-            open(title, x, right, y);
-            SIZE size = ideal(linkControl, ref(200));
-            put(linkControl, right - ref(15) - size.cx, top + ref(10) + (titleHeight - size.cy) / 2, size.cx, size.cy);
+            int top = s.y;
+            s.open(title);
+            auto& size = linkSizes[linkControl];
+            if (!size.cy) SendMessageW(linkControl, LM_GETIDEALSIZE, ref(200), LPARAM(&size));
+            s.put(linkControl, right - ref(15) - size.cx, top + ref(10) + (s.titleHeight - size.cy) / 2, size.cx,
+                  size.cy);
             if (isOpen) {
                 say(table == numbers.get()
                         ? w(t.formnote) +
@@ -1577,65 +1477,25 @@ struct VfTab::Impl {
                               std::to_wstring(t.meta.root) +
                               L" is the result: its min and max are the lowest and highest clock the curve can give. " +
                               w(t.switch_detail),
-                    left, end, y, pal.muted);
-                y += ref(6);
+                    left, end, pal.muted);
+                s.y += ref(6);
                 int h = table->height(end - left);
-                put(table->window(), left, y, end - left, h);
-                y += h;
+                s.put(table->window(), left, s.y, end - left, h);
+                s.y += h;
             } else
-                put(table->window(), 0, 0, 0, 0, false);
-            close(y, frame);
-            y += gap;
+                s.put(table->window(), 0, 0, 0, 0, false);
+            s.close();
         }
-        finish(fr, tx, tp, y, dc);
-    }
-    void finish(std::vector<Frame>& fr, std::vector<Text>& tx, std::vector<std::pair<RECT, std::wstring>>& tp, int y,
-                HDC dc) {
-        ReleaseDC(panel, dc);
-        lastFrames = std::exchange(frames, std::move(fr));
-        lastTexts = std::exchange(texts, std::move(tx));
-        bool sameTips = std::ranges::equal(tips, tp, [](auto& a, auto& b) { return EqualRect(&a.first, &b.first); });
-        tips = std::move(tp);
-        RECT rc{};
-        GetClientRect(panel, &rc);
-        int content = y + scroll;
-        int top = std::max(0, content - int(rc.bottom));
-        if (scroll > top) {
-            scroll = top;
-            layout(true);
-            InvalidateRect(panel, nullptr, FALSE);
-            return;
-        }
-        SCROLLINFO si{sizeof si, SIF_RANGE | SIF_PAGE | SIF_POS, 0, std::max(0, content - 1), UINT(rc.bottom), scroll};
-        if (si.nMax != scrollShown.nMax || si.nPage != scrollShown.nPage || si.nPos != scrollShown.nPos)
-            SetScrollInfo(panel, SB_VERT, &si, TRUE);
-        scrollShown = si;
-        // Painted parts with a tooltip get one tool each, numbered from 1; their texts are asked for when shown.
-        if (sameTips && tools == tips.size()) return;
-        for (size_t i = 0; i < tools; ++i) {
-            TOOLINFOW t{sizeof t, 0, panel, i + 1};
-            SendMessageW(tooltip, TTM_DELTOOLW, 0, LPARAM(&t));
-        }
-        for (size_t i = 0; i < tips.size(); ++i) {
-            TOOLINFOW t{sizeof t, TTF_SUBCLASS, panel, i + 1, tips[i].first};
-            t.lpszText = LPSTR_TEXTCALLBACKW;
-            SendMessageW(tooltip, TTM_ADDTOOLW, 0, LPARAM(&t));
-        }
-        tools = tips.size();
+        return content();
     }
     void scrollTo(int target) {
-        SCROLLINFO si{sizeof si, SIF_RANGE | SIF_PAGE};
-        GetScrollInfo(panel, SB_VERT, &si);
-        target = std::clamp(target, 0, std::max(0, si.nMax + 1 - int(si.nPage)));
-        if (target == scroll) return;
-        scrollPanel(scroll - target);
-        scroll = target;
-        layout(false);
+        if (page.scrollTo(target)) layout(false);
     }
-    void style(const VfFonts& f) {
+    void style(const PageFonts& f) {
         fonts = f;
-        texts.clear(); // measured with the old fonts, whose handles may be reused
-        measured.clear();
+        page.texts.clear(); // measured with the old fonts, whose handles may be reused
+        widths.clear();
+        heights.clear();
         linkSizes.clear();
         for (auto& s : sliders) s.barWidth = -1;
         auto font = [](HWND child, LPARAM value) -> BOOL {
@@ -1646,8 +1506,6 @@ struct VfTab::Impl {
         if (numbers) numbers->style(fonts.font, fonts.bold, fonts.dpi);
         if (structure) structure->style(fonts.font, fonts.bold, fonts.dpi);
         chart->dpi(fonts.dpi);
-        SendMessageW(tooltip, TTM_SETMAXTIPWIDTH, 0, ref(600));
-        systemTheme(tooltip, L"DarkMode_Explorer");
         systemTheme(panel, L"DarkMode_Explorer");
         for (auto& n : {numbers.get(), structure.get()})
             if (n) systemTheme(n->window(), L"DarkMode_Explorer");
@@ -1664,47 +1522,11 @@ struct VfTab::Impl {
     }
 
     // ---- painting ----
-    COLORREF backdrop(POINT at) const {
-        for (auto& f : frames)
-            if (PtInRect(&f.r, at)) return f.fill;
-        return palette().window;
-    }
-    COLORREF backdrop(HWND child) const {
-        RECT r{};
-        GetWindowRect(child, &r);
-        MapWindowPoints(nullptr, panel, reinterpret_cast<POINT*>(&r), 2);
-        return backdrop(POINT{(r.left + r.right) / 2, (r.top + r.bottom) / 2});
-    }
     void paintPanel(HDC target, const RECT& area) {
-        if (IsRectEmpty(&area)) return;
         Buffer buffer(target, area);
         auto dc = buffer.dc;
         auto& p = palette();
-        FillRect(dc, &area, brush(p.window));
-        SelectObject(dc, fonts.title);
-        for (auto& f : frames) {
-            RECT visible{};
-            if (!IntersectRect(&visible, &f.r, &area)) continue;
-            roundRect(dc, f.r, ref(12), f.fill, f.edge);
-            if (f.title.empty()) continue;
-            // A card with a short accent mark before its bold title, as on the other tabs.
-            SIZE size{};
-            GetTextExtentPoint32W(dc, f.title.c_str(), int(f.title.size()), &size);
-            int top = f.r.top + ref(10);
-            RECT mark{f.r.left + ref(15), top + size.cy / 5, f.r.left + ref(20), top + size.cy - size.cy / 5};
-            roundRect(dc, mark, ref(3), p.accent, p.accent);
-            SetTextColor(dc, p.text);
-            SelectObject(dc, fonts.title);
-            TextOutW(dc, f.r.left + ref(29), top, f.title.c_str(), int(f.title.size()));
-        }
-        for (auto& t : texts) {
-            RECT visible{};
-            if (!IntersectRect(&visible, &t.r, &area)) continue;
-            SelectObject(dc, t.font);
-            SetTextColor(dc, t.color);
-            RECT r = t.r;
-            DrawTextW(dc, t.s.c_str(), -1, &r, t.format);
-        }
+        page.paint(dc, area, fonts);
         COLORREF moving = mix(p.card, p.accent, 0.7), idle = mix(p.card, p.border, 0.8);
         for (auto& s : sliders) {
             RECT visible{};
@@ -1778,12 +1600,7 @@ struct VfTab::Impl {
             auto& draw = *reinterpret_cast<NMCUSTOMDRAW*>(n);
             wchar_t name[32]{};
             GetClassNameW(n->hwndFrom, name, 32);
-            if (!wcscmp(name, WC_LINK)) {
-                if (draw.dwDrawStage == CDDS_PREPAINT) return CDRF_NOTIFYITEMDRAW;
-                if (draw.dwDrawStage == CDDS_ITEMPREPAINT)
-                    SetTextColor(draw.hdc, draw.dwItemSpec != UINT_PTR(-1) ? palette().link : palette().text);
-                return CDRF_DODEFAULT;
-            }
+            if (!wcscmp(name, WC_LINK)) return drawLink(draw, palette().text);
             if (!wcscmp(name, L"Button") || !wcscmp(name, TRACKBAR_CLASSW))
                 return drawControl(draw, n->hwndFrom == applyButton);
             return CDRF_DODEFAULT;
@@ -1803,23 +1620,13 @@ struct VfTab::Impl {
         }
         if (n->code == TTN_GETDISPINFOW) {
             auto& d = *reinterpret_cast<NMTTDISPINFOW*>(n);
-            if (d.uFlags & TTF_IDISHWND) {
-                auto it = controlTips.find(reinterpret_cast<HWND>(n->idFrom));
-                tipText = it != controlTips.end() ? it->second : L"";
-            } else
-                tipText = n->idFrom && n->idFrom <= tips.size() ? tips[n->idFrom - 1].second : L"";
+            tipText = n->idFrom && n->idFrom <= tips.size() ? tips[n->idFrom - 1].second : L"";
             d.lpszText = tipText.data();
         }
         return 0;
     }
     LRESULT colors(UINT message, HDC dc, HWND child) const {
-        auto& p = palette();
-        COLORREF back = message == WM_CTLCOLOREDIT || message == WM_CTLCOLORLISTBOX ? p.field
-                        : GetParent(child) == panel                                 ? backdrop(child)
-                                                                                    : p.window;
-        SetTextColor(dc, p.text);
-        SetBkColor(dc, back);
-        return reinterpret_cast<LRESULT>(brush(back));
+        return controlColors(message, dc, GetParent(child) == panel ? page.backdrop(child) : palette().window);
     }
     LRESULT rootMessage(UINT message, WPARAM wp, LPARAM lp) {
         switch (message) {
@@ -1850,40 +1657,15 @@ struct VfTab::Impl {
         switch (message) {
         case WM_ERASEBKGND: return 1;
         case WM_PAINT: {
-            // A slider step leaves a few small parts to repaint, often far apart (a text at the top, a label
-            // further down): each is painted by itself, not the whole area that holds them.
-            std::vector<RECT> parts;
-            auto region = CreateRectRgn(0, 0, 0, 0);
-            if (GetUpdateRgn(panel, region, FALSE) == COMPLEXREGION) {
-                std::vector<char> data(GetRegionData(region, 0, nullptr));
-                auto list = reinterpret_cast<RGNDATA*>(data.data());
-                if (!data.empty() && GetRegionData(region, DWORD(data.size()), list) && list->rdh.nCount <= 64)
-                    parts.assign(reinterpret_cast<RECT*>(list->Buffer),
-                                 reinterpret_cast<RECT*>(list->Buffer) + list->rdh.nCount);
-            }
-            DeleteObject(region);
-            PAINTSTRUCT ps{};
-            auto dc = BeginPaint(panel, &ps);
-            LONGLONG area = 0;
-            for (auto& r : parts) area += LONGLONG(r.right - r.left) * (r.bottom - r.top);
-            if (area * 2 > LONGLONG(ps.rcPaint.right - ps.rcPaint.left) * (ps.rcPaint.bottom - ps.rcPaint.top))
-                parts.clear();
-            if (parts.empty()) parts.push_back(ps.rcPaint);
-            for (auto& r : parts) paintPanel(dc, r);
-            EndPaint(panel, &ps);
+            // A slider step leaves a few small parts to repaint, often far apart.
+            paintParts(panel, [&](HDC dc, const RECT& area) { paintPanel(dc, area); });
             if (zones.pending && !zones.running) {
                 zones.running = true;
                 SetTimer(panel, zoneTimer, 250, nullptr);
             }
             return 0;
         }
-        case WM_PRINTCLIENT: {
-            auto dc = reinterpret_cast<HDC>(wp);
-            RECT r{};
-            GetClipBox(dc, &r);
-            FillRect(dc, &r, brush(backdrop(POINT{(r.left + r.right) / 2, (r.top + r.bottom) / 2})));
-            return 0;
-        }
+        case WM_PRINTCLIENT: page.printClient(reinterpret_cast<HDC>(wp)); return 0;
         case WM_SIZE:
             layout(true);
             InvalidateRect(panel, nullptr, FALSE);
@@ -1898,26 +1680,7 @@ struct VfTab::Impl {
                 }
             return 0;
         case WM_VSCROLL:
-        case WM_MOUSEWHEEL: {
-            int target = scroll;
-            if (message == WM_MOUSEWHEEL)
-                target -= GET_WHEEL_DELTA_WPARAM(wp) * scale(54) / WHEEL_DELTA;
-            else {
-                SCROLLINFO si{sizeof si, SIF_ALL};
-                GetScrollInfo(panel, SB_VERT, &si);
-                switch (LOWORD(wp)) {
-                case SB_LINEUP: target -= scale(28); break;
-                case SB_LINEDOWN: target += scale(28); break;
-                case SB_PAGEUP: target -= int(si.nPage); break;
-                case SB_PAGEDOWN: target += int(si.nPage); break;
-                case SB_THUMBTRACK: target = si.nTrackPos; break;
-                case SB_TOP: target = 0; break;
-                case SB_BOTTOM: target = si.nMax; break;
-                }
-            }
-            scrollTo(target);
-            return 0;
-        }
+        case WM_MOUSEWHEEL: scrollTo(page.target(message, wp, fonts.dpi)); return 0;
         case WM_TIMER:
             if (wp == zoneTimer) zoneTick();
             return 0;
@@ -1928,8 +1691,8 @@ struct VfTab::Impl {
             // The card under the mouse draws its lines on the chart in front.
             if (tuner) {
                 std::string card;
-                for (auto& f : frames)
-                    if (PtInRect(&f.r, at)) card = f.card;
+                for (auto& [frame, id] : cards)
+                    if (PtInRect(&page.frames[frame].rect, at)) card = id;
                 if (!card.empty() && card != hot) {
                     hot = card;
                     plot();
@@ -1960,6 +1723,7 @@ struct VfTab::Impl {
         if (message == WM_NCCREATE) {
             self = static_cast<Impl*>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams);
             (panelWindow ? self->panel : self->root) = window;
+            if (panelWindow) self->page.window = window;
             SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(self));
         }
         if (message == WM_NCDESTROY && self) {
@@ -2023,7 +1787,7 @@ VfTab::VfTab(HINSTANCE instance, HWND parent, VfHost host)
     : impl_(std::make_unique<Impl>(instance, parent, std::move(host))) {}
 VfTab::~VfTab() = default;
 HWND VfTab::window() const { return impl_->root; }
-void VfTab::style(const VfFonts& fonts) { impl_->style(fonts); }
+void VfTab::style(const PageFonts& fonts) { impl_->style(fonts); }
 void VfTab::read() {
     auto& i = *impl_;
     if (i.job != Impl::Job::none) return;
