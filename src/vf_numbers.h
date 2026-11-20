@@ -10,8 +10,8 @@ struct VfItem {
     std::wstring text;
     bool muted = false;   // secondary text
     bool line = false;    // starts a line and wraps within its column
-    bool value = false;   // a number, drawn in a box
-    bool changed = false; // a number that differs from stock
+    bool value = false;   // a number, in monospace
+    bool changed = false; // a number that differs from stock, highlighted
 };
 struct VfRow {
     std::vector<std::pair<int, std::vector<VfItem>>> spans; // the column each starts at, and what it shows

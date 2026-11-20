@@ -96,12 +96,13 @@ through the driver's own clock equations and per-point offsets.
 stock** puts NVIDIA's equations back. For a few seconds after each write the GPU runs a
 slower fallback curve, so apply at idle, not in a game, and not while MSI Afterburner or
 another tool changes the curve. **Import** and **Export** read and write the tune as a
-`vfe-tune.json` file.
+`vfe-tune.json` file; a tune from an older version of the VFCURVE page, with numbers typed
+into its tables, or made for other cards is refused. The tables at the bottom show every equation number and cannot be edited.
 
 The profile bar's **Save** stores the curve last applied (or restored to stock) with the
-tab's settings; without one applied since MechControl started, the profile keeps the curve
-it had. Loading the profile writes its curve without opening the tab, and the tab then shows
-its settings. A GPU or driver restart returns the curve to stock; MechControl writes the
+tab's settings, but not what the chart shows; without one applied since MechControl started,
+the profile keeps the curve it had. Loading the profile writes its curve without opening the
+tab, and the tab then shows its settings. A GPU or driver restart returns the curve to stock; MechControl writes the
 profile's curve again a few seconds after one it starts itself, after waking from sleep and
 after a power-source change. A curve made for another GPU, VBIOS or driver is skipped with a
 note in `mechcontrol.log` (make it again in the tab), and so is one whose offsets would have

@@ -124,6 +124,12 @@ void fixtures(const std::filesystem::path& root) {
               !changed_to("manual", {{"6.k0", 1}}).empty() && !changed_to("mdelta", {{"6.k0", 1}}).empty() &&
               changed_to("preview", {{"ch3", true}}).empty(),
           "a tune of another version, other cards or typed table numbers is refused");
+    // A profile slot as the tab's first version (8edcb5f) saved it: with what the chart showed, an empty preview and
+    // an empty mdelta.
+    auto first = config::parse(
+        R"({"global":30.0,"lines":true,"manual":{},"mdelta":{},"po":0.0,"pp":{"44":15.0},"preview":{},"ranges":{"foot":[498.75,648.75],"high":[903.75,1211.25],"low":[656.25,896.25]},"rules":{},"sec":{"foot":{"bend":0.0,"l":0.0,"r":0.0,"tbend":0.0,"tl":0.0,"tr":0.0},"high":{"bend":0.0,"l":0.0,"r":0.0,"tbend":0.0,"tl":0.0,"tr":0.0},"low":{"bend":0.0,"l":0.0,"r":0.0,"tbend":0.0,"tl":0.0,"tr":0.0}},"showBand":{"60":true},"showNew":{"60":true,"70":true},"showStock":{"60":true},"ver":2,"ymode":"abs"})");
+    check(refusal([&] { t.tune(first); }).empty() && t.tune(first).global == 30 && t.tune(first).pp.at(44) == 15,
+          "a tune stored in a profile slot by the tab's first version still loads");
 
     auto applied = apply(api, curve, store);
     check(applied.equations == 7 && applied.offsets == 96 && d.sets.size() == 7 && d.offset_sets == 1,

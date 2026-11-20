@@ -41,7 +41,7 @@ void VfNumbers::style(HFONT font, HFONT bold, UINT dpi) {
     bold_ = bold;
     dpi_ = dpi;
     if (mono_) DeleteObject(mono_);
-    mono_ = CreateFontW(-MulDiv(8, dpi, 72), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+    mono_ = CreateFontW(-MulDiv(9, dpi, 72), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
                         OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, FIXED_PITCH, L"Consolas");
     laid_ = -1;
     InvalidateRect(window_, nullptr, FALSE);
@@ -59,8 +59,10 @@ void VfNumbers::layout(int width) {
     shaded_.clear();
     headings_.clear();
     auto dc = GetDC(window_);
-    int pad = scale(4), line = extent(dc, font_, L"Ag").cy, field = extent(dc, mono_, L"0").cy + scale(6),
-        number = extent(dc, mono_, L"-0.000000000e-00").cx + scale(12);
+    // A number's width: its text and a little room for the highlight.
+    auto wide = [&](const VfItem& item) { return extent(dc, mono_, item.text).cx + 2 * scale(3); };
+    int pad = scale(4), line = extent(dc, font_, L"Ag").cy,
+        number = extent(dc, mono_, L"-0.000000000e-00").cx + scale(6) + 2 * pad;
     int y = 0;
     for (auto& t : tables_) {
         if (!t.heading.empty()) {
@@ -79,7 +81,7 @@ void VfNumbers::layout(int width) {
             for (auto& [column, items] : row.spans)
                 if (t.columns[column] == 's') {
                     int w = 2 * pad;
-                    for (auto& item : items) w += item.value ? number + pad : extent(dc, font_, item.text).cx;
+                    for (auto& item : items) w += item.value ? wide(item) : extent(dc, font_, item.text).cx;
                     widths[column] = std::max(widths[column], w);
                 }
         std::vector<int> left{0};
@@ -93,11 +95,10 @@ void VfNumbers::layout(int width) {
                 HFONT f = row.header ? bold_ : font_;
                 for (auto& item : items) {
                     if (item.value) {
-                        bool alone = items.size() == 1;
-                        int w = alone ? to - from - 2 * pad : number;
-                        boxes_.push_back({{x, top + (alone ? 0 : (line - field) / 2), x + w, top + field}, &item});
-                        x += w + pad;
-                        h = std::max(h, field);
+                        int w = wide(item);
+                        boxes_.push_back({{x, top, x + w, top + line}, &item});
+                        x += w;
+                        h = std::max(h, line);
                     } else if (item.line) {
                         if (x > from + pad || h) top += h, h = 0;
                         RECT r{from + pad, top, to - pad, top};
@@ -167,12 +168,11 @@ void VfNumbers::paint(HDC target) {
             DrawTextW(dc, item.text.c_str(), -1, &r, (item.line ? DT_WORDBREAK : DT_SINGLELINE) | DT_NOPREFIX);
             continue;
         }
-        FillRect(dc, &r, brush(item.changed ? mix(p.field, p.accent, p.dark ? 0.3 : 0.14) : p.field));
-        FrameRect(dc, &r, brush(item.changed ? p.accent : p.border));
+        if (item.changed) FillRect(dc, &r, brush(mix(p.card, p.accent, p.dark ? 0.35 : 0.2)));
         InflateRect(&r, -scale(3), 0);
         SelectObject(dc, mono_);
         SetTextColor(dc, p.text);
-        DrawTextW(dc, item.text.c_str(), -1, &r, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+        DrawTextW(dc, item.text.c_str(), -1, &r, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
     }
     SetViewportOrgEx(dc, -client.left, -client.top, nullptr);
 }
