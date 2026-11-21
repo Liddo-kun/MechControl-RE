@@ -507,7 +507,6 @@ std::vector<std::string> Controller::start() {
     }
     auto& ft = session_.profile.fan_table;
     int profile_active = ft.active;
-    bool profile_gpu = ft.has_gpu;
     session_.snapshot_fans();
     {
         const auto& s = session_.fans;
@@ -515,17 +514,20 @@ std::vector<std::string> Controller::start() {
             describe(s, "Fan Table Dump") + "\n  Custom curve mode: " + (s.custom_mode(latch_mask_) ? "on" : "off");
         if (!s.valid())
             log +=
-                "\n  Fan table detection skipped: snapshot is not a valid curve (cold boot or wiped EC); keeping profile defaults activeEntries=" +
-                std::to_string(ft.active) + ", hasGpuFan=" + (ft.has_gpu ? "true" : "false");
-        else {
+                "\n  Fan table detection skipped: snapshot is not a valid curve (cold boot or wiped EC); keeping profile default activeEntries=" +
+                std::to_string(ft.active);
+        else
             log += "\n  Active entries: " + std::to_string(ft.active) +
                    (ft.active == profile_active ? " (matches profile)"
                                                 : " (profile default was " + std::to_string(profile_active) + ")");
-            auto gpu = s.gpu_present();
-            log += "\n  GPU fan table: " + (gpu ? *gpu ? "present (has curve data)" : "not detected (all 0xFF)"
-                                                : std::string("ambiguous; keeping profile default hasGpuFan=") +
-                                                      (profile_gpu ? "true" : "false"));
-        }
+        // Both readings, so a report from an unknown model shows where they disagree.
+        auto fitted = session_.hardware.discrete_gpu();
+        auto rows = s.gpu_present();
+        log += std::string("\n  GPU fan curve: ") +
+               (!ft.has_gpu ? "none (no discrete GPU); its rows repeat the CPU curve"
+                : fitted    ? "own curve (discrete GPU fitted)"
+                            : "own curve (profile default; the EC does not say whether a GPU is fitted)") +
+               "; the EC's GPU rows hold " + (rows ? *rows ? "curve data" : "no curve, 0xFF only" : "zeros");
         if (ft.format != "RamFan1")
             log += "\n  Fan table format '" + ft.format + "' is not RamFan1; fan curve editing disabled";
         diagnostic_(log);
@@ -1012,6 +1014,7 @@ void Controller::fans(const FanSettings& f) {
     if (g) fan_intent_.gpu_curve = g;
     fan_review_required_ = false;
     fan_application_ = FanApplication::unapplied;
+    fan_intent_.curve = f.curve && p.fan_table.has_gpu; // As written: the bit stays clear without a GPU curve.
     // Source single-fan UI has no linked controller; a saved linked flag cannot create one.
     fan_intent_.linked = f.linked && p.fan_table.has_gpu && p.fan_table.entries >= 10;
     if (fan_intent_.linked) {
@@ -1739,7 +1742,7 @@ ControlResult Controller::run(const DefaultsApply& request) {
             fan = fan_intent_;
             fan->cpu_curve = c;
             if (g) fan->gpu_curve = g;
-            fan->curve = true;
+            fan->curve = p.fan_table.has_gpu;
             fan->linked = false;
             full_curves = !p.fan_table.has_gpu || g.has_value();
         }

@@ -70,9 +70,9 @@ uint32_t EcTransport::spec(int index) {
 // the charge hold.
 // A profile adds only the EC bypass register it declares.
 static std::set<int> writable(const config::MachineProfile& p) {
-    std::set<int> r = {0x706, 0x708, 0x709, 0x726, 0x727, 0x741, 0x748, 0x749, 0x74A, 0x74B, 0x7C5, 0x7C6,
-                       0x7C7, 0x743, 0x744, 0x745, 0x746, 0x751, 0x767, 0x769, 0x76A, 0x76B, 0x783, 0x784,
-                       0x785, 0x786, 0x787, 0x78C, 0x7A6, 0x7AB};
+    std::set<int> r = {0x706, 0x708, 0x709, 0x726, 0x727, 0x741, 0x748, 0x749, 0x74A, 0x74B,
+                       0x7C5, 0x7C6, 0x7C7, 0x743, 0x744, 0x745, 0x746, 0x751, 0x767, 0x769,
+                       0x76A, 0x76B, 0x783, 0x784, 0x785, 0x786, 0x787, 0x78C, 0x7A6, 0x7AB};
     r.insert({charge_hold::timer, charge_hold::timer + 1, charge_hold::target});
     for (int a = 0xF00; a <= 0xF5F; ++a) r.insert(a);
     if (p.ec_bypass && p.registers.contains("ecBypass")) r.insert(p.reg("ecBypass"));
@@ -201,9 +201,12 @@ std::vector<EcWrite> fan_curve_writes(const config::MachineProfile& p, const con
     if (ft.format != "RamFan1") throw std::runtime_error("Fan table format is not RamFan1");
     if (latch_mask != 4 && latch_mask != 255)
         throw std::runtime_error("Fan latch requires a qualified shared-bit or whole-byte mask");
+    // "fanCurveEnable" is the OEM's independent-fans bit. Without a GPU curve it stays clear: the XMG EVO's EC 2.16
+    // then stops the second fan, where clear makes that fan copy the first.
     auto enable_mask = p.bitfields.at("fanCurveEnable").get_mask();
-    std::vector<EcWrite> writes{{p.reg("fanCurveEnable"), static_cast<uint8_t>(enabled ? enable_mask : 0), enable_mask},
-                                {0x7C6, 0, latch_mask}};
+    std::vector<EcWrite> writes{
+        {p.reg("fanCurveEnable"), static_cast<uint8_t>(enabled && ft.has_gpu ? enable_mask : 0), enable_mask},
+        {0x7C6, 0, latch_mask}};
     auto curve = [&](const config::Curve& c, const std::string& up, const std::string& down, const std::string& duty) {
         auto n = c.temp_up.size();
         if (n == 0 || n > static_cast<size_t>(std::max(0, ft.entries)) || c.duty.size() != n)
@@ -230,7 +233,12 @@ std::vector<EcWrite> fan_curve_writes(const config::MachineProfile& p, const con
         for (int i = 1; i < ft.entries; ++i) append(duty, i, i < active ? std::max(2, c.duty[i] / 2 * 2) : last);
     };
     curve(cpu, ft.cpu_up, ft.cpu_down, ft.cpu_duty);
-    if (ft.has_gpu && gpu) curve(*gpu, ft.gpu_up, ft.gpu_down, ft.gpu_duty);
+    // Without a GPU curve the GPU rows repeat the CPU's. Firmware still reads them (for the shared duty, and that
+    // EC 2.16 for the second fan at the lowest level), so they must not keep another program's values or zeros.
+    if (!ft.has_gpu)
+        curve(cpu, ft.gpu_up, ft.gpu_down, ft.gpu_duty);
+    else if (gpu)
+        curve(*gpu, ft.gpu_up, ft.gpu_down, ft.gpu_duty);
     writes.push_back({0x7C6, 4, latch_mask});
     return writes;
 }

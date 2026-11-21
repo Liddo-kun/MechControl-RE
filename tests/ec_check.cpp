@@ -252,7 +252,8 @@ void snapshots_and_startup() {
         for (int i = 0; i < 10; ++i) y = filter.add(100, 0.1);
         require(y == 100, "input power filter holds a steady load");
         for (int i = 0; i < 10; ++i) y = filter.add(300, 0.1);
-        require(y > 250 && y < 300, "input power filter follows most of a load step within a second, without overshoot");
+        require(y > 250 && y < 300,
+                "input power filter follows most of a load step within a second, without overshoot");
         for (int i = 0; i < 20; ++i) y = filter.add(300, 0.1);
         require(y > 280 && y <= 300, "input power filter settles on the new load");
     }
@@ -278,8 +279,9 @@ void snapshots_and_startup() {
         require(session.profile.project_id == "IDY_7Y" && session.selection.method == "baseboard pattern",
                 "composed executable-relative startup selects by board before colliding EC ID");
         require(session.profile.pl4_doubled() && session.battery_bit3 == 8 && session.profile.fan_table.active == 3 &&
-                    !session.profile.fan_table.has_gpu,
-                "runtime flags and snapshot enrich effective model before guard");
+                    session.profile.fan_table.has_gpu,
+                "runtime flags and snapshot enrich effective model before guard; the GPU module ID gives the GPU fan "
+                "its curve although the GPU rows are unprogrammed");
         require(session.profile.limits.at("TGP").max == 150 && session.profile.limits.at("PL1").max == 200,
                 "real transport callbacks feed ECSpec enrichment");
         require(session.validation.gpu_power(), "GPU capability uses module ID 0x7D2, not LED-support byte");
@@ -447,10 +449,13 @@ void fan_batches() {
             "fan latch interpretation is never implicitly universal");
     auto cpu_only = p;
     cpu_only.fan_table.has_gpu = false;
-    g.apply(fan_curve_writes(cpu_only, cpu, bad, false, 4));
+    g.apply(fan_curve_writes(cpu_only, cpu, bad, true, 4));
     auto w = writes(*s);
-    require(w.size() == 50 && w.front() == std::pair<int32_t, int32_t>{0x7C5, 0x60},
-            "CPU-only fan batch skips GPU table and preserves master unrelated bits when disabled");
+    bool mirrored = true;
+    for (int i = 0; i < 48; ++i) mirrored &= s->bytes[0xF30 + i] == s->bytes[0xF00 + i];
+    require(w.size() == 97 && w.front() == std::pair<int32_t, int32_t>{0x7C5, 0x60} && mirrored,
+            "fan batch without a GPU curve ignores the one supplied, repeats the CPU curve in the GPU rows and never "
+            "sets the independent-fans bit, preserving its unrelated bits");
     s->calls.clear();
     s->fail_write = 0xF22;
     refuses([&] { g.apply(fan_curve_writes(p, cpu, gpu, true, 4)); },

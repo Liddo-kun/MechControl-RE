@@ -7,7 +7,7 @@
     "powerLimits": "All 0 = EC firmware uses its own internal defaults. Writing 0 hands control back to EC.",
     "gpuPower": "All 0 = GPU boost features disabled. EC firmware manages GPU power.",
     "fanTable": "OEM default fan curve from Frida capture of GCUService startup.",
-    "fanCurveEnable": "0x7C5 bit 7 clear = custom fan curve disabled, EC uses internal fan control.",
+    "fanCurveEnable": "0x7C5 bit 7 clear = the fans are not independent. It does not select the custom table; after a power cycle 0x7C6 bit 2 is clear as well, so the EC runs its built-in curve.",
     "batteryMode": "0x08 = High Capacity mode (performance, no charge limiting).",
     "logoLed": "Firmware defaults to blue=50 (0x32) on the logo."
   },

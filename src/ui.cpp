@@ -1107,11 +1107,14 @@ private:
         s.y = std::max(s.y, top + s.button);
         s.close();
         s.open(L"Custom Fan Curve");
+        // The switch is the EC's independent-fans bit, so a model whose second fan has no curve of its own gets
+        // neither it nor its row.
+        bool independent = hasGpu || !supported;
         int curve = check(curveId), link = check(linkId);
-        s.put(get(curveId), s.left, s.y + ref(4), curve, box);
+        s.put(get(curveId), s.left, s.y + ref(4), curve, box, independent);
         s.put(get(linkId), s.left + curve + ref(24), s.y + ref(4), link, box, linkable);
         if (linked) bar = {s.left + curve + link + ref(48), s.y + ref(2), s.end, s.y + ref(31)};
-        s.y += ref(39);
+        if (independent) s.y += ref(39);
         charts(cpuChartId, gpuChartId, s.left, s.end, supported);
         explain(fanSupportId, fans ? L"" : disabledReason(L"Fan controls", "fanControl"));
         if (supported)

@@ -844,7 +844,8 @@ void gpu_vf_curve(const std::filesystem::path& root) {
     check(c.execute(SlotLoad{2}).code == 0 && d.sets.empty() && d.offset_sets == 0,
           "a slot whose curve is already on the GPU writes nothing to it");
     check(c.execute(SlotLoad{3}).code == 0 && on_gpu(c2), "a slot without a V/F curve leaves the GPU's");
-    check(c.execute(SlotSave{3}).code == 0 && read_json(path / "userprofile_3.json")["gpu"]["vfCurve"] == slot_json(c2, 10),
+    check(c.execute(SlotSave{3}).code == 0 &&
+              read_json(path / "userprofile_3.json")["gpu"]["vfCurve"] == slot_json(c2, 10),
           "Save stores the curve on the GPU with its tune");
     check(c.execute(VfRead{}).vf->tune == Json{{"global", 10}}, "the tab reads the tune of the applied slot's curve");
     check(c.execute(GpuUnlock{false}).code == 0 && gpu->restarts == 1 && on_gpu(stock),
@@ -861,7 +862,8 @@ void gpu_vf_curve(const std::filesystem::path& root) {
     check(c.execute(SlotLoad{4}).code == 0 && !r.state->writes.empty() && on_gpu(c2) &&
               std::any_of(r.diagnostics.begin() + logged, r.diagnostics.end(),
                           [](auto& s) {
-                              return s.starts_with("Slot V/F curve not applied: This V/F curve was made for driver 620.00");
+                              return s.starts_with(
+                                  "Slot V/F curve not applied: This V/F curve was made for driver 620.00");
                           }),
           "a curve made for another driver is logged and skipped before any write, and the rest of the slot applies");
     check(c.execute(VfApply{std::nullopt, {{"global", 0}}}).code == 0 && on_gpu(stock) &&
@@ -1301,20 +1303,37 @@ void startup_and_eligibility(const std::filesystem::path& root) {
     check(cold.controller->execute(FanApply{reviewed}).code == 0 && !cold.controller->fan_review_required() &&
               cold.controller->execute(SlotSave{1}).saved,
           "explicit reviewed Apply makes fallback intent eligible for capture");
-    Rig single(root / "single", false);
-    s = single.state;
-    for (int i = 0; i < 16; ++i) s->bytes[0xF30 + i] = 255;
-    single.controller->start();
-    s->writes.clear();
+    // No discrete GPU (the XMG EVO report): the second fan has no curve of its own, whatever the GPU rows hold.
+    auto integrated = [](State& state) {
+        state.bytes[0x7D2] = 0;
+        state.bytes[0x456] = 0x08;
+    };
+    auto mirrored = [](State& state) {
+        for (int i = 0; i < 48; ++i)
+            if (state.bytes[0xF30 + i] != state.bytes[0xF00 + i]) return false;
+        return state.bytes[0xF51] != 0 && (state.bytes[0x7C5] & 128) == 0;
+    };
     auto p = profile();
-    p.fan->gpu_curve = Curve{};
-    p.fan->linked = true;
-    write_json(root / "single/userprofile_1.json", p, true);
-    check(single.controller->execute(SlotLoad{1}).code == 0 && !single.controller->linked() &&
-              std::none_of(s->writes.begin(), s->writes.end(),
-                           [](auto w) { return w.first >= 0xF30 && w.first < 0xF60; }),
-          "single-fan slot skips unused GPU curve validation/writes and unavailable linked mode");
-    check(single.controller->execute(SlotSave{1}).saved, "single-fan capture does not require an unused GPU curve");
+    {
+        Rig single(root / "single", true, {}, {}, {}, integrated);
+        s = single.state;
+        check(!single.session->profile.fan_table.has_gpu,
+              "a model without a discrete GPU has no GPU fan curve, although its GPU rows hold another program's");
+        p.fan->gpu_curve = Curve{};
+        p.fan->linked = true;
+        write_json(root / "single/userprofile_1.json", p, true);
+        check(
+            single.controller->execute(SlotLoad{1}).code == 0 && !single.controller->linked() && mirrored(*s) &&
+                !single.controller->fan_intent().curve,
+            "its slot needs no GPU curve or linked mode, repeats the CPU curve in the GPU rows and leaves the independent-fans bit clear");
+        check(single.controller->execute(SlotSave{1}).saved, "its capture does not require a GPU curve");
+    }
+    Rig reset(root / "single", true, {}, {}, {}, [&](State& state) {
+        integrated(state);
+        for (int a = 0xF00; a < 0xF60; ++a) state.bytes[a] = 0;
+    });
+    check(mirrored(*reset.state) && reset.controller->fan_application() == FanApplication::applied,
+          "that slot still applies at startup after the EC lost power and zeroed both tables");
     Rig unsupported(root / "unsupported", false);
     unsupported.session->profile.fan_table.format = "unsupported";
     unsupported.controller->start();

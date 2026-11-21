@@ -43,7 +43,7 @@ struct EcBypass {
 struct FanTable {
     std::string format = "RamFan1", cpu_up, cpu_down, cpu_duty, gpu_up, gpu_down, gpu_duty;
     int entries = 16, active = 10, padding_temp = 255;
-    bool has_gpu = true;
+    bool has_gpu = true; // The second fan has its own curve. Hardware::discrete_gpu() replaces this when it knows.
 };
 struct MachineProfile {
     std::string project_id, device_path = R"(\\.\ACPIDriver)";
@@ -138,6 +138,14 @@ struct Hardware {
         auto module = at(0x7D2);
         if (!module || *module == 255) return {};
         return *module != 0 || (before_gpu_module() && extract_limits().contains("TGP"));
+    }
+    // Whether a discrete GPU is fitted, with or without EC power control; empty when the EC does not say. It decides
+    // whether the second fan has a curve of its own. The fan table cannot: the last program to write it decides
+    // what it holds, and the EC zeroes it after losing power.
+    std::optional<bool> discrete_gpu() const {
+        auto module = at(0x7D2);
+        if (!module || *module == 255) return {};
+        return *module != 0 || before_gpu_module();
     }
     std::map<std::string, Limit> extract_limits() const;
     std::optional<std::map<std::string, Mode>> extract_modes(bool absolute) const;

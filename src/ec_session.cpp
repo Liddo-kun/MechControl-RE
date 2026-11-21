@@ -147,6 +147,7 @@ EcSession::EcSession(
         ec_ = std::make_unique<EcTransport>(factory(config::wide(profile.device_path)), diagnostic);
     // Includes the original 0x727 flag before any possible activation operation.
     hardware = config::collect_hardware(read, [&](int index) { return ec_->spec(index); });
+    if (auto fitted = hardware.discrete_gpu()) profile.fan_table.has_gpu = *fitted;
     bool profile_modes = profile.modes.has_value();
     auto enrichment = config::enrich(profile, hardware);
     validation = config::validate_startup(profile, read, hardware.gpu(), enrichment, identity.cpu_vendor);
@@ -344,10 +345,7 @@ void EcSession::describe(const std::function<void(const std::string&)>& log, con
 }
 void EcSession::snapshot_fans() {
     fans = read_fans(*ec_, profile.fan_table);
-    if (fans.valid()) {
-        profile.fan_table.active = fans.active_entries();
-        if (auto present = fans.gpu_present()) profile.fan_table.has_gpu = *present;
-    }
+    if (fans.valid()) profile.fan_table.active = fans.active_entries();
 }
 std::vector<std::string> EcSession::ram_dump() {
     std::vector<std::string> rows;

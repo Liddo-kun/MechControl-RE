@@ -254,17 +254,20 @@ int main(int argc, char** argv) try {
     Hardware module;
     module.bytes[0x7D2] = 0;
     module.bytes[0x456] = 0x48;
-    require(module.gpu() == false, "No GPU module ID and no system ID flag is no GPU");
+    require(module.gpu() == false && module.discrete_gpu() == false,
+            "No GPU module ID and no system ID flag is no GPU");
     module.bytes[0x456] = 0xC8; // GM5TG0O, EC 79.0: the firmware has no module ID register.
     require(module.gpu() == false, "Without a default TGP in the EC's table, registers 0x743-0x747 may be a fan curve");
+    require(module.discrete_gpu() == true, "The GPU is fitted all the same, so its fan keeps its own curve");
     module.bytes[0x727] = 0x40;
     module.ecspec = std::array<uint32_t, 12>{0x78, 0x78, 0xC8, 5, 0, 0x0F, 0x57, 0x73, 0x23, 0xBB, 0xBB, 0xBB};
     require(module.gpu() == true && validate_startup(p, read, module.gpu(), {}, "intel").gpu_power(),
             "System ID bit 7 reports the GPU on firmware without the module ID whose table names a default TGP");
     module.bytes.erase(0x7D2);
-    require(!module.gpu() && validate_startup(p, read, module.gpu(), {}, "intel").gpu_power() &&
+    require(!module.gpu() && !module.discrete_gpu() &&
+                validate_startup(p, read, module.gpu(), {}, "intel").gpu_power() &&
                 !gpu_recovery_unavailable(p, module.gpu()).empty(),
-            "An unread module ID neither disables GPU power nor allows GPU recovery");
+            "An unread module ID neither disables GPU power nor allows GPU recovery, and leaves the fan default");
     auto sentinel = [](int) -> uint8_t { return 0; };
     require(!validate_startup(p, sentinel, true, {}, "intel").cpu_power(), "Register sanity gate");
     Enrichment ec;
