@@ -198,6 +198,27 @@ std::vector<std::filesystem::path> manual_profiles(const std::filesystem::path& 
     std::sort(r.begin(), r.end());
     return r;
 }
+// Whether text holds token as a whole word: no letter or digit before or after it. Both in lower case.
+static bool has_word(const std::wstring& text, const std::wstring& token) {
+    for (size_t pos = 0; !token.empty() && (pos = text.find(token, pos)) != text.npos; ++pos) {
+        auto end = pos + token.size();
+        if ((pos == 0 || !letter_or_digit(text[pos - 1])) && (end == text.size() || !letter_or_digit(text[end])))
+            return true;
+    }
+    return false;
+}
+bool board_listed(const std::filesystem::path& file, const char* feature, const std::string& baseboard) {
+    auto root = read_json(file);
+    object(root);
+    std::vector<std::string> names;
+    if (auto f = root.find(feature); f != root.end()) {
+        object(*f);
+        field(*f, "baseboards", names);
+    }
+    auto board = lower_invariant(wide(baseboard));
+    return std::ranges::any_of(names,
+                               [&](const std::string& name) { return has_word(board, lower_invariant(wide(name))); });
+}
 Selection select_profile(
     const std::filesystem::path& dir, const Identity& id,
     const std::function<std::optional<std::filesystem::path>(const std::vector<std::filesystem::path>&)>& manual,
@@ -266,20 +287,12 @@ Selection select_profile(
     std::vector<std::filesystem::path> matches;
     for (const auto& c : candidates) {
         auto token = lower_invariant(c.path.stem().wstring());
-        size_t pos = 0;
-        while (!token.empty() && (pos = board.find(token, pos)) != std::string::npos) {
-            auto end = pos + token.size();
-            if ((pos == 0 || !letter_or_digit(board[pos - 1])) &&
-                (end == board.size() || !letter_or_digit(board[end]))) {
-                matches.push_back(c.path);
-                if (token.size() > length || (token.size() == length && token < best_token)) {
-                    best = {c.path, "baseboard filename"};
-                    length = token.size();
-                    best_token = token;
-                }
-                break;
-            }
-            ++pos;
+        if (!has_word(board, token)) continue;
+        matches.push_back(c.path);
+        if (token.size() > length || (token.size() == length && token < best_token)) {
+            best = {c.path, "baseboard filename"};
+            length = token.size();
+            best_token = token;
         }
     }
     if (matches.size() > 1)

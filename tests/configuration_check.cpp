@@ -92,6 +92,15 @@ int main(int argc, char** argv) try {
     });
     require(manual.method == "manual selection", "Manual selection");
     require(select_profile(profiles, unknown).path.empty(), "Cancel manual selection");
+    // The shipped board list. GMxZGxx is absent on purpose: its EC never references 0x726.
+    auto boards = profiles.parent_path() / "boards.json";
+    auto listed = [&](const char* board) { return board_listed(boards, "acAutoBoot", board); };
+    require(listed("YAOSHI Series-X6AR55xY") && listed("gxxhrxx") && listed("X6AR5xxY_mLED") && listed("X6FR57TY"),
+            "Listed boards match as whole words in any case, inside a longer baseboard name");
+    require(!listed("GMxZGxx") && !listed("Avell A70 MOB") && !listed("XX6AR55xY") && !listed("X6AR55xY2") &&
+                !listed("") && !board_listed(boards, "noSuchFeature", "GXxHRXx"),
+            "Unlisted boards, names inside longer words and unknown features do not match");
+    fails([&] { board_listed(scratch / "missing.json", "acAutoBoot", "GXxHRXx"); });
     auto matching = area("matching");
     auto machine = read_json(profiles / "IDY_7Y.json");
     machine["cpuVendor"] = "intel";
@@ -327,6 +336,9 @@ int main(int argc, char** argv) try {
     require(!store.settings().gpu_keep_awake, "GPU keep-awake off by default");
     store.set_gpu_keep_awake(true);
     require(ProfileStore(persistence).settings().gpu_keep_awake, "GPU keep-awake persistence");
+    require(!store.settings().ac_auto_boot, "AC auto boot off by default");
+    store.set_ac_auto_boot(true);
+    require(ProfileStore(persistence).settings().ac_auto_boot, "AC auto boot persistence");
     store.rename(5, "Keep name");
     auto before = read_json(persistence / "settings.json");
     {

@@ -77,6 +77,7 @@ public:
     config::Hardware hardware;
     config::Validation validation;
     std::optional<uint8_t> battery_bit3; // Unknown only when battery control is disabled.
+    bool ac_auto_boot = false;           // The baseboard is listed for it in Profiles/boards.json.
     FanSnapshot fans;
     std::unique_ptr<WriteGuard> guard;
 };

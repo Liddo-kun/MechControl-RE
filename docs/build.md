@@ -31,7 +31,7 @@ style is `.clang-format`. Wrap comments by hand, because it leaves them as writt
 Each output directory must be new. The script builds and checks the Release, then
 writes `MechControl-win-x64[-cli].zip`, a separate symbols ZIP and `artifacts.json`
 with every file's hash. CMake install rules choose the shipped files: the executables,
-`Profiles/MECHREVO`, the counter manifest, `counters.ps1`, the notices and
+`Profiles/MECHREVO`, `Profiles/boards.json`, the counter manifest, `counters.ps1`, the notices and
 `docs/release.md` as `README.md`. Set the version in `CMakeLists.txt` and
 `resources/app.rc` before packaging.
 

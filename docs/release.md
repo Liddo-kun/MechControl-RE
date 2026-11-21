@@ -53,6 +53,17 @@ because nothing is running to stop it. One plugged in while asleep may do the sa
 **Off** before you remove MechControl; otherwise charging stays blocked until that week
 runs out.
 
+## AC auto boot
+
+**Battery > AC Auto Boot** makes the laptop start when the adapter is connected, or mains
+power returns, while it is shut down. The section appears only on boards known to have this
+EC function, listed in `Profiles/boards.json`. A USB-C charger must supply enough power for
+the EC to count it, and the function is reported not to work together with USB PowerShare
+(USB charging while the laptop is off). The check box shows the EC's current state, so it is
+ticked if the OEM Control Center or Linux turned the function on. While it is on,
+MechControl sets it again at startup if the EC has lost it. It is a setting of the machine,
+not of a profile.
+
 ## GPU temperature target
 
 **Power > GPU Temp Target** sets the temperature at which the NVIDIA driver starts lowering

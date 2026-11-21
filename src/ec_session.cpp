@@ -143,6 +143,15 @@ EcSession::EcSession(
         diagnostic("[Profile] Selected " + profile.project_id + " by " + selection.method + " from " +
                    selection.path.string() + " (projectIdValue " + std::to_string(profile.project_id_value) + ")");
     config::apply_universal_defaults(profile);
+    // boards.json sits beside the model directory. Without it the features it lists are not offered.
+    std::string listed = "not offered, baseboard not listed";
+    try {
+        ac_auto_boot = config::board_listed(directory.parent_path() / "boards.json", "acAutoBoot", identity.baseboard);
+        if (ac_auto_boot) listed = "offered, baseboard listed";
+    } catch (const std::exception& ex) {
+        listed = std::string("not offered, Profiles/boards.json not read: ") + ex.what();
+    }
+    if (diagnostic) diagnostic("[Boards] AC auto boot: " + listed);
     if (profile.device_path != R"(\\.\ACPIDriver)")
         ec_ = std::make_unique<EcTransport>(factory(config::wide(profile.device_path)), diagnostic);
     // Includes the original 0x727 flag before any possible activation operation.
@@ -406,6 +415,7 @@ config::Json EcSession::diagnostic_report() {
         {"disabled", validation.disabled},
         {"pl4Doubled", profile.pl4_doubled()},
         {"batteryBit3", nullable(battery_bit3)},
+        {"acAutoBootOffered", ac_auto_boot},
         {"fans",
          {{"cpu", fans.cpu},
           {"gpu", fans.gpu},

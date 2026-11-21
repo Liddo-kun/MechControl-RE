@@ -112,6 +112,7 @@ enum Id {
     chargeLimitId,
     chargeApplyId,
     chargeSupportId,
+    autoBootId,
     logoSupportId,
     zoneBaseId = 600,
     idleId = 660,
@@ -751,6 +752,7 @@ private:
                              reinterpret_cast<LPARAM>((std::to_wstring(limit) + L"%").c_str()));
         button(3, chargeApplyId, L"Apply", true);
         support(3, chargeSupportId, L"Battery charge limit");
+        check(3, autoBootId, L"Turn the laptop on when power is connected");
         row(3, batteryTextId, L"Battery telemetry is read every two seconds only while this page is visible.", L"EDIT",
             ES_MULTILINE | ES_READONLY);
         support(4, logoSupportId, L"Logo LED control");
@@ -1266,6 +1268,15 @@ private:
         } else {
             for (int id : {chargeLimitId, chargeApplyId}) s.put(get(id), 0, 0, 0, 0, false);
             s.supportNote(chargeSupportId, false, palette().error, 0, 0, 0);
+        }
+        // Only boards listed for the EC's power-on bit get the section.
+        if (autoBootOffered_) s.open(L"AC Auto Boot");
+        s.check(autoBootId, autoBootOffered_, font_, s.end - s.left);
+        if (autoBootOffered_) {
+            s.y = s.paragraph(
+                L"While the laptop is shut down, it starts when the adapter is connected or mains power returns. A USB-C charger must supply enough power for this. Not supported together with USB PowerShare (USB charging while off). This is a setting of the machine, not of a profile.",
+                s.left + s.pad, s.y + ref(6), s.end - s.pad, palette().muted, font_);
+            s.close();
         }
         s.open(L"Battery Telemetry");
         bool telemetry = support_.at(batterySupportId).reason.empty();
@@ -2254,6 +2265,7 @@ private:
         case dlppcId: request(DlppcApply{checked(id)}); break;
         case bypassId:
         case coolerFlagId:
+        case autoBootId:
         case keepAwakeId: {
             bool on = checked(id);
             updating_ = true;
@@ -2261,6 +2273,8 @@ private:
             updating_ = false; // The result rebinds it.
             if (id == coolerFlagId)
                 request(CoolerFlag{on});
+            else if (id == autoBootId)
+                request(AcAutoBootApply{on});
             else if (id == keepAwakeId)
                 request(GpuKeepAwakeApply{on});
             else if (
@@ -2651,12 +2665,19 @@ private:
                 explain(chargeSupportId, L"");
             }
             auto reason = battery ? std::wstring() : disabledReason(L"Battery charge mode and telemetry", "battery");
-            bool offered = state_.value("chargeLimitOffered", true);
-            if (reason != support_.at(batterySupportId).reason || offered != chargeOffered_) {
+            bool offered = state_.value("chargeLimitOffered", true),
+                 autoBoot = state_.value("acAutoBootOffered", false);
+            if (reason != support_.at(batterySupportId).reason || offered != chargeOffered_ ||
+                autoBoot != autoBootOffered_) {
                 explain(batterySupportId, reason);
                 chargeOffered_ = offered;
+                autoBootOffered_ = autoBoot;
                 layoutPage(pages_[3]);
             }
+            // The EC's bit as last read; greyed when that read failed.
+            auto bit = state_.value("acAutoBoot", Json());
+            enable(autoBootId, bit.is_boolean());
+            if (bit.is_boolean()) checked(autoBootId, bit.get<bool>());
             if (state_.contains("batteryMode") && !edited_.contains(batteryModeId))
                 SendMessageW(get(batteryModeId), CB_SETCURSEL, state_["batteryMode"].get<int>(), 0);
         }
@@ -3561,9 +3582,10 @@ private:
     std::wstring coolerStatus_ = L"Disconnected", coolerFirmware_;
     std::array<RECT, 9> infoCells_{};
     std::array<std::wstring, 9> infoText_;
-    int batteryLines_ = 10;     // Lines of battery telemetry.
-    bool chargeOffered_ = true; // The Battery page has its Charge Limit section.
-    std::wstring modeNote_;     // What the battery modes do on this firmware; empty where that is not known.
+    int batteryLines_ = 10;        // Lines of battery telemetry.
+    bool chargeOffered_ = true;    // The Battery page has its Charge Limit section.
+    bool autoBootOffered_ = false; // The Battery page has its AC Auto Boot section.
+    std::wstring modeNote_;        // What the battery modes do on this firmware; empty where that is not known.
     std::map<int, int> detectedMa_;
     std::wstring cpuNote_, cpuPreset_, powerHint_, liveReason_, powerKey_, dlppcTip_, bypassText_, voltageText_;
     bool bypassError_ = false; // The bypass status reports a failure to clear.
@@ -3615,7 +3637,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     std::filesystem::path checks;
     // A failed or stopped check ends the run with its reason in the report and exit code 1, never a message box.
     auto fail = [&](const std::wstring& text) {
-        if (!checks.empty()) std::ofstream(checks / L"pages-check.txt", std::ios::app) << "STOPPED " << mech::config::utf8(text) << '\n';
+        if (!checks.empty())
+            std::ofstream(checks / L"pages-check.txt", std::ios::app) << "STOPPED " << mech::config::utf8(text) << '\n';
         return 1;
     };
 #else

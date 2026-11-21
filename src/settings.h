@@ -103,6 +103,7 @@ struct Settings {
     bool disable_dlppc = false;
     bool gpu_keep_awake = false; // See GpuKeepAwake in gpu_keepawake.cpp.
     int charge_limit = 100;      // Percent at which charging stops; 100 is no limit.
+    bool ac_auto_boot = false;   // Keeps the EC's AC auto boot bit set; see Controller::ensure_auto_boot.
     ThermalState thermal;
 };
 #define MECH_JSON(Type)                 \
@@ -139,6 +140,7 @@ public:
     void set_disable_dlppc(bool disabled);
     void set_gpu_keep_awake(bool enabled);
     void set_charge_limit(int percent);
+    void set_ac_auto_boot(bool enabled);
     void rename(int slot, const std::string& name);
     void clear(int slot);
     bool exists(int slot) const;

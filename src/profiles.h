@@ -101,6 +101,9 @@ struct Selection {
     std::filesystem::path path;
     std::string method;
 };
+// Features that no EC byte announces are offered by baseboard name. Profiles/boards.json lists the names per
+// feature; one matches a baseboard that contains it as a whole word, in any case. Throws if the file is unreadable.
+bool board_listed(const std::filesystem::path& file, const char* feature, const std::string& baseboard);
 std::vector<std::filesystem::path> manual_profiles(const std::filesystem::path& directory);
 Selection select_profile(
     const std::filesystem::path&, const Identity&,

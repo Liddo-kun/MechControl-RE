@@ -113,6 +113,13 @@ is greyed with its reason. Where those variables are recognized, the Battery pag
 shows them and says what the battery modes do to the charge voltage. System Info shows the
 EC's record of the last power-off.
 
+AC auto boot (`0x726` bit 3: the EC powers the machine on when a power source is attached) is
+an application setting too. No EC byte announces it, so `EcSession` offers it only on
+baseboards that `Profiles/boards.json` lists, which are the Linux drivers' board lists plus
+firmware read for this project. Other boards get no section on the Battery page and no write.
+The bit is written masked and read back. The check box shows the EC's bit; the saved setting
+only sets a lost bit again at startup and after EC re-activation, and never clears one.
+
 The CPU core voltage offset is neither an EC register nor a saved setting: the BIOS copies
 it at boot from the OEM UEFI variable, which is its only record (`VoltageOffset` in
 `peripherals.*`, which also describes the fields and what qualifies a BIOS).

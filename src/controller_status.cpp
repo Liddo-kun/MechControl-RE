@@ -50,6 +50,8 @@ Json Controller::presentation(bool read, bool gpu_live, int page) {
         if (features_.battery()) j["batteryRegister"] = p.reg("batteryMode");
         // Firmware known to have no charge hold gets no Charge Limit section, not a greyed one.
         j["chargeLimitOffered"] = !session_.hardware.before_gpu_module();
+        // The same for AC auto boot on a board not listed for it.
+        j["acAutoBootOffered"] = session_.ac_auto_boot;
         // The same for the NVIDIA unlock, DLPPC, current limits and driver readings on a GPU they cannot work on.
         j["nvidiaOffered"] = nvidia_offered_;
         j["vfCurve"] = vf_available_; // The V/F Curve tab.
@@ -100,6 +102,12 @@ Json Controller::presentation(bool read, bool gpu_live, int page) {
             j["batteryMode"] = encoding::decode_battery(this->read("batteryMode"));
         } catch (const std::exception& e) {
             j["batteryError"] = e.what();
+        }
+    // The check box shows the EC's bit, whoever set it. Null greys it until a read succeeds.
+    if (read && page == 3 && session_.ac_auto_boot) try {
+            j["acAutoBoot"] = (session_.transport().read(ac_auto_boot::address) & ac_auto_boot::bit) != 0;
+        } catch (const std::exception&) {
+            j["acAutoBoot"] = nullptr;
         }
     if (gpu_live && page == 0) j["gpuLive"] = gpu_telemetry();
     if (page == 6 && visible_ && (read || GetTickCount64() >= budget_at_)) {

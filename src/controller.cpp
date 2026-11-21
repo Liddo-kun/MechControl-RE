@@ -468,6 +468,7 @@ bool Controller::recover(const char* reason) {
     clear_bypass("EC reinitialization");
     std::vector<std::string> errors;
     if (!initialize(errors)) throw std::runtime_error(errors.back());
+    ensure_auto_boot("EC re-activation");
     reapply_ = true;
     watchdog_ = GetTickCount64() + 30000;
     return true;
@@ -486,6 +487,7 @@ std::vector<std::string> Controller::start() {
         initialize(init_errors);
     }
     watchdog_ = GetTickCount64() + 30000;
+    ensure_auto_boot("startup");
     try {
         auto& ec = session_.transport();
         power_off_ = power_off_cause(ec);
@@ -994,6 +996,31 @@ void Controller::ensure_cooler_flag(const char* when) {
         cooler_flag(true);
     } catch (const std::exception& ex) {
         diagnostic_(std::string("Liquid cooler flag not reapplied: ") + ex.what());
+    }
+}
+// AC auto boot: with 0x726 bit 3 set, the EC powers the machine on when a power source is attached. No EC byte
+// announces it, so it is offered by baseboard name (EcSession::ac_auto_boot). The bit is plain state on the firmware
+// read, so it is read back here; the guard cannot verify this byte, whose other bits the EC changes.
+void Controller::auto_boot(bool enabled) {
+    using namespace ac_auto_boot;
+    if (!session_.ac_auto_boot) throw std::runtime_error("AC auto boot is not known to work on this board");
+    batch({{address, uint8_t(enabled ? bit : 0), bit}});
+    if (((session_.transport().read(address) & bit) != 0) != enabled)
+        throw std::runtime_error("AC auto boot readback mismatch (0x726 bit 3)");
+    diagnostic_(std::string("[AC auto boot] 0x726 bit 3 ") + (enabled ? "set" : "cleared"));
+}
+// The setting keeps the bit set. Firmware stores the bit itself, but Intel EC 77.0 only when it shuts the machine off
+// on battery, so an EC that lost all power can start without it. A bit set elsewhere is never cleared here.
+void Controller::ensure_auto_boot(const char* when) {
+    if (!session_.ac_auto_boot) return;
+    try {
+        bool set = (session_.transport().read(ac_auto_boot::address) & ac_auto_boot::bit) != 0,
+             wanted = store_.settings().ac_auto_boot;
+        diagnostic_(std::string("[AC auto boot] At ") + when + ": 0x726 bit 3 " + (set ? "set" : "clear") +
+                    ", setting " + (wanted ? "on" : "off"));
+        if (wanted && !set) auto_boot(true);
+    } catch (const std::exception& ex) {
+        diagnostic_(std::string("[AC auto boot] Not checked at ") + when + ": " + ex.what());
     }
 }
 void Controller::fans(const FanSettings& f) {
@@ -1568,6 +1595,13 @@ ControlResult Controller::run(const ChargeLimitApply& c) {
     if (charge_unavailable().empty() && read_hold(session_.transport()).ours()) batch(charge_hold_writes(0));
     if (!charge_note_.empty()) diagnostic_("[Charge limit] " + (charge_note_ = "Off"));
     return {.text = "Charge limit off", .applied = true};
+}
+ControlResult Controller::run(const AcAutoBootApply& c) {
+    auto_boot(c.enabled); // The EC first: the setting never claims a bit the EC refused.
+    store_.set_ac_auto_boot(c.enabled);
+    return {.text = c.enabled ? "The laptop turns on when power is connected"
+                              : "The laptop stays off when power is connected",
+            .applied = true};
 }
 ControlResult Controller::run(const GpuKeepAwakeApply& c) {
     store_.set_gpu_keep_awake(c.enabled); // The UI runs it; see GpuKeepAwake.

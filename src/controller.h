@@ -51,6 +51,10 @@ struct BatteryApply {
 struct ChargeLimitApply {
     int percent;
 };
+// Power on when a power source is attached (EC 0x726 bit 3). Written now and kept with the application settings.
+struct AcAutoBootApply {
+    bool enabled;
+};
 // Application setting; the UI owns the keep-awake itself (GpuKeepAwake).
 struct GpuKeepAwakeApply {
     bool enabled;
@@ -158,8 +162,8 @@ using ControlCommand =
                  SlotRename, SlotClear, DefaultsApply, ThermalReset, ThermalTest, Visibility, Resume, AcEvent,
                  GpuUnlock, DlppcApply, CliCommand, LightingApply, LightingIdle, DimmingApply, PeripheralRead,
                  CoolerRequest, BatteryPage, UiRead, UiPage, UiPreflight, FanMaster, FanEdit, FanRead, PowerTransition,
-                 EcBypassApply, CoolerFlag, ChargeLimitApply, GpuKeepAwakeApply, VoltageOffsetApply, VfRead, VfApply,
-                 VfForget>;
+                 EcBypassApply, CoolerFlag, ChargeLimitApply, AcAutoBootApply, GpuKeepAwakeApply, VoltageOffsetApply,
+                 VfRead, VfApply, VfForget>;
 // How the worker treats each command. Every command needs an entry: command_traits() fails to compile without one.
 struct CommandTraits {
     bool notification = false; // Lifecycle event, run even during the wait for a blocking device operation.
@@ -190,6 +194,7 @@ inline CommandTraits traits(const FanRead&) { return {.fresh = tab::fans}; }
 inline CommandTraits traits(const ProtectionApply&) { return {.stale = tab::failsafe}; }
 inline CommandTraits traits(const BatteryApply&) { return {.stale = tab::battery}; }
 inline CommandTraits traits(const ChargeLimitApply&) { return {.stale = tab::battery}; }
+inline CommandTraits traits(const AcAutoBootApply&) { return {.stale = tab::battery}; }
 inline CommandTraits traits(const GpuKeepAwakeApply&) { return {.present = true}; }
 inline CommandTraits traits(const VoltageOffsetApply&) { return {.present = true}; }
 inline CommandTraits traits(const LightingApply&) { return {.stale = tab::lighting}; }
@@ -321,6 +326,8 @@ private:
     void boost(bool);
     void battery(int);
     void charge_limit(ULONGLONG now);
+    void auto_boot(bool);
+    void ensure_auto_boot(const char* when);
     std::string charge_unavailable();
     config::Json battery_status();
     void speed(bool, int);
@@ -334,8 +341,8 @@ private:
         run(const CoolerRequest&), run(const BatteryPage&), run(const UiRead&), run(const UiPage&),
         run(const UiPreflight&), run(const FanMaster&), run(const FanEdit&), run(const FanRead&),
         run(const PowerTransition&), run(const EcBypassApply&), run(const CoolerFlag&), run(const ChargeLimitApply&),
-        run(const GpuKeepAwakeApply&), run(const VoltageOffsetApply&), run(const VfRead&), run(const VfApply&),
-        run(const VfForget&);
+        run(const AcAutoBootApply&), run(const GpuKeepAwakeApply&), run(const VoltageOffsetApply&), run(const VfRead&),
+        run(const VfApply&), run(const VfForget&);
     cli::Reply cli(const std::vector<std::string>&);
     config::Json status();
     config::Json cpu_status(), gpu_status(bool presentation = false), fans_status(), gpu_telemetry(), gpu_budget();
@@ -381,8 +388,8 @@ private:
          on_ac_ = false;
     // The temperature target works on any NVIDIA GPU whose driver has a client thermal policy.
     bool temp_target_available_ = false;
-    bool vf_available_ = false;                 // Any NVIDIA GPU; the driver decides on first use.
-    std::filesystem::path vf_directory_;        // Stock V/F records; empty: vf::store_directory().
+    bool vf_available_ = false;          // Any NVIDIA GPU; the driver decides on first use.
+    std::filesystem::path vf_directory_; // Stock V/F records; empty: vf::store_directory().
     // The V/F curve this run last wrote, from the tab or a slot (stock is a curve without records), and its tune. A
     // slot Save stores them; the delayed GPU check writes the curve again after a GPU restart, which clears it.
     std::optional<nv::vf::Curve> vf_curve_;

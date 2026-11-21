@@ -56,7 +56,9 @@ target_link_options(MechControl PRIVATE /DELAYLOAD:gdiplus.dll /DELAYLOAD:d3d11.
   /MANIFESTINPUT:${CMAKE_CURRENT_SOURCE_DIR}/resources/app.manifest)
 # The checks find the profiles beside their executables, so they depend on this copy rather than on MechControl.
 add_custom_target(profiles COMMAND ${CMAKE_COMMAND} -E copy_directory
-  "${CMAKE_CURRENT_SOURCE_DIR}/Profiles/MECHREVO" "$<TARGET_FILE_DIR:MechControl>/Profiles/MECHREVO")
+  "${CMAKE_CURRENT_SOURCE_DIR}/Profiles/MECHREVO" "$<TARGET_FILE_DIR:MechControl>/Profiles/MECHREVO"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+  "${CMAKE_CURRENT_SOURCE_DIR}/Profiles/boards.json" "$<TARGET_FILE_DIR:MechControl>/Profiles/boards.json")
 add_dependencies(MechControl profiles)
 
 # Registration is explicit and temporary. Nothing registers counters at application startup.
@@ -122,6 +124,7 @@ if(MECHCONTROL_WITH_CLI)
   install(FILES "$<TARGET_PDB_FILE:mcctl>" DESTINATION . COMPONENT DeveloperSymbols CONFIGURATIONS Release)
 endif()
 install(DIRECTORY Profiles/MECHREVO DESTINATION Profiles COMPONENT Runtime FILES_MATCHING PATTERN "*.json")
+install(FILES Profiles/boards.json DESTINATION Profiles COMPONENT Runtime)
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/MechControl-counters.man"
   THIRD_PARTY_NOTICES.md tools/counters.ps1 DESTINATION . COMPONENT Runtime)
 install(FILES docs/release.md DESTINATION . RENAME README.md COMPONENT Runtime)

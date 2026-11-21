@@ -1522,6 +1522,60 @@ void charge_limit(const std::filesystem::path& root) {
     check(hold(*stuck.state) == std::pair(0, 0) && stuck.controller->execute(ChargeLimitApply{70}).code == 1,
           "an EC that does not count the hold down gets its registers back and no further holds");
 }
+// AC auto boot (0x726 bit 3), offered by baseboard name. The rigs' board, X6AR55xY, is listed; bits 0 and 2 stand
+// for the rest of the byte, which only EC init (bit 7) may change.
+void auto_boot(const std::filesystem::path& root) {
+    auto other_bits = [](State& s) { s.bytes[0x726] = 5; };
+    auto writes = [](State& s) { return std::ranges::count_if(s.writes, [](auto w) { return w.first == 0x726; }); };
+    auto shown = [](Controller& c) { return c.presentation(true, false, 3)["acAutoBoot"]; };
+    auto path = root / "auto-boot";
+    Rig r(path, true, {}, {}, {}, other_bits);
+    auto& c = *r.controller;
+    auto& s = *r.state;
+    check(s.bytes[0x726] == 0x85 && c.presentation(true, false, -2)["acAutoBootOffered"] == true && shown(c) == false,
+          "a listed board is offered AC auto boot, and startup leaves a clear bit clear");
+    check(c.execute(AcAutoBootApply{true}).code == 0 && s.bytes[0x726] == 0x8D && writes(s) == 1 &&
+              read_json(path / "settings.json")["acAutoBoot"] == true && shown(c) == true,
+          "turning it on sets bit 3 alone and saves the setting");
+    check(c.execute(AcAutoBootApply{false}).code == 0 && s.bytes[0x726] == 0x85 &&
+              read_json(path / "settings.json")["acAutoBoot"] == false,
+          "turning it off clears bit 3 alone and saves the setting");
+    s.ignore = 0x726;
+    check(c.execute(AcAutoBootApply{true}).code == 1 && read_json(path / "settings.json")["acAutoBoot"] == false,
+          "a bit the EC does not keep is an error and is not saved");
+    s.ignore.reset();
+    c.execute(AcAutoBootApply{true});
+    s.bytes[0x741] = 0; // The EC lost power: activation and the bit are gone.
+    s.bytes[0x726] = 5;
+    c.tick(GetTickCount64() + 31000);
+    check(s.bytes[0x726] == 0x8D, "EC re-activation sets the bit again while the setting is on");
+
+    for (bool setting : {true, false}) {
+        auto dir = root / (setting ? "auto-boot-restored" : "auto-boot-foreign");
+        std::filesystem::create_directories(dir);
+        write_json(dir / "settings.json", Json{{"acAutoBoot", setting}}, false);
+        Rig restarted(dir, true, {}, {}, {}, [&](State& state) { state.bytes[0x726] = setting ? 5 : 0x0D; });
+        check(restarted.state->bytes[0x726] == 0x8D,
+              setting ? "startup sets the bit again while the setting is on"
+                      : "startup leaves a bit another program set, with the setting off");
+    }
+
+    // An unlisted board gets no write, whatever the settings file says.
+    auto dir = root / "auto-boot-unlisted";
+    std::filesystem::create_directories(dir);
+    write_json(dir / "settings.json", Json{{"acAutoBoot", true}}, false);
+    auto u = std::make_shared<State>();
+    other_bits(*u);
+    EcSession session([&](const std::wstring&) { return std::make_unique<Fake>(u); }, [](const std::string&) {}, false,
+                      [](unsigned) {}, profiles_directory(), Identity{"X9ZZ99xY", "fixture", "intel", uint8_t{26}});
+    Controller unlisted(session, dir, [](const std::string&) {}, [](unsigned) {}, {}, false, {}, false);
+    unlisted.start();
+    u->writes.clear();
+    check(u->bytes[0x726] == 0x85 && unlisted.execute(AcAutoBootApply{true}).code == 1 && u->writes.empty() &&
+              unlisted.presentation(true, false, -2)["acAutoBootOffered"] == false &&
+              !unlisted.presentation(true, false, 3).contains("acAutoBoot"),
+          "a board that is not listed is not offered AC auto boot and never has the bit written");
+}
 void ec_bypass(const std::filesystem::path& root) {
     std::vector<std::string> logs;
     auto fresh = [](const std::function<void(State&)>& extra) {
@@ -2380,6 +2434,7 @@ int main(int argc, char** argv) {
         peripheral_regressions(root);
         ec_bypass(root);
         charge_limit(root);
+        auto_boot(root);
         monitor(root);
         x6fr(root);
         waits(root);

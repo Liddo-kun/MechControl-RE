@@ -81,6 +81,12 @@ namespace charge_hold {
 inline constexpr int timer = 0x7F4, target = 0x7F6; // Minutes left: high byte, then low. The EC counts them down.
 }
 std::vector<EcWrite> charge_hold_writes(int minutes); // 0 ends the hold.
+// AC auto boot (re/register_reference.md 11.6.2): with the bit set, the EC powers the machine on when a power source
+// is attached. The rest of the byte is EC init's and the EC's own, so only this bit is ever written.
+namespace ac_auto_boot {
+inline constexpr int address = 0x726;
+inline constexpr uint8_t bit = 8;
+}
 // The single-zone RGB keyboard the EC drives (re/register_reference.md 6.1). Where there is a logo instead, these
 // same addresses are the profile's logo registers.
 namespace ec_keyboard {
