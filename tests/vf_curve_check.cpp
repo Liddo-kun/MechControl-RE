@@ -95,6 +95,7 @@ void fixtures(const std::filesystem::path& root) {
     tune.ceiling = 2900;
     tune.po = 15;
     tune.pp[10] = 7.5;
+    tune.mem = 500;
     auto curve = t.compile(tune, g);
     auto k0 = [&](int i) {
         float f;
@@ -109,10 +110,11 @@ void fixtures(const std::filesystem::path& root) {
     check(
         changed == std::vector({0, 1, 4, 6, 7, 8, 15}) && k0(6) == 310 && k0(8) == 375 && k0(7) == 780 &&
             k0(4) == -17970 && hi == 2900 && lo15 == 0 && curve.offsets_khz[10] == 22500 &&
-            curve.offsets_khz[11] == 15000,
-        "a tune compiles to the changed records (sliders, a typed limit, a removed correction, the switch) and offsets");
+            curve.offsets_khz[11] == 15000 && curve.memory_khz == 500000,
+        "a tune compiles to the changed records (sliders, a typed limit, a removed correction, the switch), offsets and "
+        "the memory offset");
     auto saved = t.state(tune);
-    check(t.tune(saved).cards.at("low").l == -20 && t.compile(t.tune(saved), g) == curve &&
+    check(t.tune(saved).cards.at("low").l == -20 && saved["mem"] == 500 && t.compile(t.tune(saved), g) == curve &&
               curve_from_json(config::parse(to_json(curve).dump())) == curve,
           "a tune and a compiled curve survive their JSON");
     auto changed_to = [&](const char* key, config::Json value) {
@@ -130,10 +132,14 @@ void fixtures(const std::filesystem::path& root) {
         R"({"global":30.0,"lines":true,"manual":{},"mdelta":{},"po":0.0,"pp":{"44":15.0},"preview":{},"ranges":{"foot":[498.75,648.75],"high":[903.75,1211.25],"low":[656.25,896.25]},"rules":{},"sec":{"foot":{"bend":0.0,"l":0.0,"r":0.0,"tbend":0.0,"tl":0.0,"tr":0.0},"high":{"bend":0.0,"l":0.0,"r":0.0,"tbend":0.0,"tl":0.0,"tr":0.0},"low":{"bend":0.0,"l":0.0,"r":0.0,"tbend":0.0,"tl":0.0,"tr":0.0}},"showBand":{"60":true},"showNew":{"60":true,"70":true},"showStock":{"60":true},"ver":2,"ymode":"abs"})");
     check(refusal([&] { t.tune(first); }).empty() && t.tune(first).global == 30 && t.tune(first).pp.at(44) == 15,
           "a tune stored in a profile slot by the tab's first version still loads");
+    auto before_memory = saved;
+    before_memory.erase("mem");
+    check(refusal([&] { t.tune(before_memory); }).empty() && t.tune(before_memory).mem == 0,
+          "a tune saved before Memory OC loads with the memory offset 0");
 
     auto applied = apply(api, curve, store);
-    check(applied.equations == 7 && applied.offsets == 96 && d.sets.size() == 7 && d.offset_sets == 1,
-          "apply writes each changed equation alone, then the offsets");
+    check(applied.equations == 7 && applied.offsets == 96 && applied.memory && d.sets.size() == 7 && d.offset_sets == 1,
+          "apply writes each changed equation alone, then the graphics and memory offsets in one call");
     bool same = true;
     for (int i = 0; i < s.equations; ++i) {
         auto it = curve.records.find(i);
@@ -141,7 +147,14 @@ void fixtures(const std::filesystem::path& root) {
                std::ranges::equal(record(d.live, i), it != curve.records.end() ? std::span<const uint8_t>(it->second)
                                                                                : record(s.records, i));
     }
-    check(same && d.offsets[10] == 22500 && d.offsets[96] == 0, "the driver then has the curve");
+    check(same && d.offsets[10] == 22500 && d.offsets[96] == 0 && d.offsets[97] == 0 && d.offsets[98] == 0 &&
+              d.offsets[99] == 500000 && d.offsets[100] == 500000,
+          "the driver then has the curve, and the memory offset on its programmable memory points only");
+    check(current(api, store) == curve, "the curve on the GPU reads back as the one applied");
+    auto read = points(api);
+    check(read.memory.size() == 5 && read.memory_min_khz == -1000000 && read.memory_max_khz == 3000000 &&
+              read.memory[4].offset_khz == 500000 && !read.memory[2].programmable && read.memory[3].programmable,
+          "the memory points, their limits and offsets are read from the driver");
     auto now = t.live(records(api, info));
     check(now.E == t.equations(tune) && now.changed == changed && now.undescribed.empty(),
           "the equations read back from the driver are the tune's");
@@ -152,8 +165,12 @@ void fixtures(const std::filesystem::path& root) {
     check(t.fit(now.E, points(api)).equal == 96 && calc.win[0] == Calc::floor && calc.win[40] == 6 &&
               calc.lines.at(8)[40].has_value() && !calc.lines.at(7)[40].has_value(),
           "the readback equals the calculation, and the chart's calculation says what sets each point");
-    check(restore(api, store).equations == 7 && std::ranges::equal(d.live, s.records) && d.offsets[10] == 0,
-          "restore writes the stock records and zero offsets");
+    auto restored = restore(api, store);
+    check(restored.equations == 7 && restored.offsets == 96 && restored.memory &&
+              std::ranges::equal(d.live, s.records) && d.offsets[10] == 0 && d.offsets[99] == 0 &&
+              d.offsets[100] == 0 && d.offset_sets == 3,
+          "restore writes the stock records and zero offsets, memory included; the offsets that go down have a write "
+          "of their own, before the equations");
 
     auto other = curve;
     other.gpu.driver = "625.10";
@@ -170,12 +187,43 @@ void fixtures(const std::filesystem::path& root) {
           "a curve is refused where the GPU's stock records were never recorded");
     other = curve;
     other.offsets_khz[3] = 2000000;
-    check(!refusal([&] { apply(api, other, store); }).empty() && d.sets.empty() && d.offset_sets == 2,
+    check(!refusal([&] { apply(api, other, store); }).empty() && d.sets.empty() && d.offset_sets == 3,
           "an offset outside the driver's limits is refused before the equations are written");
     d.refuse_records = true;
     check(refusal([&] { apply(api, curve, store); }).find("621.24") != std::string::npos && d.sets.empty(),
           "a driver that refuses the packets is reported, and nothing is written");
     d.refuse_records = false;
+
+    auto offset_sets = d.offset_sets;
+    other = curve;
+    other.memory_khz = 3001000;
+    auto high = refusal([&] { apply(api, other, store); });
+    other.memory_khz = -1001000;
+    check(high.find("memory offset") != std::string::npos && !refusal([&] { apply(api, other, store); }).empty() &&
+              d.sets.empty() && d.offset_sets == offset_sets,
+          "a memory offset outside the driver's limits is refused before any write");
+    d.offsets[99] = d.offsets[100] = 250000;
+    other = curve;
+    other.memory_khz.reset();
+    auto kept = apply(api, other, store);
+    check(!kept.memory && kept.offsets == 96 && d.offsets[10] == 22500 && d.offsets[99] == 250000 &&
+              d.offsets[100] == 250000,
+          "a curve without a memory offset leaves the GPU's memory offset as it is");
+    auto null_memory = to_json(curve);
+    null_memory["memoryOffsetKhz"] = nullptr;
+    check(!to_json(other).contains("memoryOffsetKhz") &&
+              curve_from_json(config::parse(to_json(other).dump())) == other &&
+              !curve_from_json(null_memory).memory_khz,
+          "a curve without a memory offset survives its JSON, and a null memory offset reads as none");
+    d.memory = false;
+    d.sets.clear();
+    offset_sets = d.offset_sets;
+    auto none = refusal([&] { apply(api, curve, store); });
+    other.memory_khz = 0;
+    check(points(api).memory.empty() && none.find("no programmable memory") != std::string::npos && d.sets.empty() &&
+              d.offset_sets == offset_sets && refusal([&] { apply(api, other, store); }).empty(),
+          "without a programmable memory clock a memory offset is refused before any write, and 0 is not");
+    d.memory = true;
 
     auto bad = s;
     put(bad.info, 1092 + 9 * 76, 7);

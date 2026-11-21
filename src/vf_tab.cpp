@@ -115,6 +115,7 @@ struct VfTab::Impl {
         double lo = 0, hi = 0, step = 2.5;
         std::function<double&(Tune&)> value;
         bool doubleStep = false; // Afterburner Style OC: kept on two clock steps
+        bool whole = false;      // Memory OC: whole MHz within the driver's limits
         std::string card;        // whose lines it moves (its zone); empty: no zone
         int p0 = 0, p1 = 0;      // the points it can move
         std::vector<char> zone;  // per segment: moving the slider there changes the curve
@@ -137,6 +138,7 @@ struct VfTab::Impl {
     struct Readback {
         std::wstring what, verdict, offsets, more;
         bool ok = true;
+        std::wstring memory; // the memory offset read back
     };
     // One driver command at a time, the one of `sequence`. A write that changed equations waits 5 s for the driver's
     // fallback curve to pass, then reads back.
@@ -148,9 +150,9 @@ struct VfTab::Impl {
     HWND root = nullptr, panel = nullptr;
     Page page; // the scrolling cards in panel
     HWND applyButton = nullptr, restoreButton = nullptr, resetButton = nullptr, importButton = nullptr,
-         exportButton = nullptr;
+         exportButton = nullptr, forgetButton = nullptr;
     HWND issueLink = nullptr, modeBox = nullptr, linesCheck = nullptr, referenceButton = nullptr, numbersLink = nullptr,
-         structureLink = nullptr;
+         structureLink = nullptr, slowCheck = nullptr;
     std::unique_ptr<VfChart> chart;
     std::unique_ptr<VfNumbers> numbers, structure;
 
@@ -166,7 +168,12 @@ struct VfTab::Impl {
     std::wstring sheetName;
     std::optional<Live> onGpu;    // the equations on the GPU, from the last read
     std::vector<int> liveOffsets; // kHz
-    std::string hot;              // the card the user works on
+    std::vector<int> liveMemory;  // kHz, of the programmable memory points
+    int memoryPoints = 0;         // programmable memory points when the tuner opened; none: no Memory OC slider
+    // The tune is that of a curve another tool left on the GPU, which a profile Save stores: the chart says so until
+    // a Save, an Apply or a Restore.
+    bool found = false, foundSaved = false;
+    std::string hot; // the card the user works on
 
     Job job = Job::opening;
     std::uint64_t sequence = 0;
@@ -199,6 +206,7 @@ struct VfTab::Impl {
     RECT statusRect{};
     std::wstring statusText;
     COLORREF statusColor = 0;
+    std::wstring changesText; // Current Changes' summary, for the UI checks
 
     struct {
         std::vector<size_t> order;
@@ -267,7 +275,7 @@ struct VfTab::Impl {
     }
 
     // ---- the tuner's controls, made once it is open ----
-    void build() {
+    void build(const Points& read) {
         auto& t = *tuner;
         tune = {};
         view = {};
@@ -277,6 +285,7 @@ struct VfTab::Impl {
         view.stock[sixty] = view.fresh[sixty] = view.band[sixty] = true;
         modeBox = make(panel, WC_COMBOBOXW, L"", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL);
         linesCheck = make(root, L"BUTTON", L"Draw Equation Guidelines", WS_TABSTOP | BS_AUTOCHECKBOX);
+        forgetButton = make(panel, L"BUTTON", L"Remove from profile", WS_TABSTOP | BS_PUSHBUTTON);
         referenceButton = make(panel, L"BUTTON", L"Reference CSV…", WS_TABSTOP | BS_PUSHBUTTON);
         tip(referenceButton,
             L"A curve measured with another tool (a CSV with the columns domain, index and actual_<band>), shown as crosses. Once one is loaded, the plot can show the difference from it.");
@@ -312,6 +321,20 @@ struct VfTab::Impl {
                 number(step) + L" MHz each).",
             "", 0, 0);
         sliders.back().doubleStep = true;
+        // The memory offset, where the driver lists programmable memory points; its range is the driver's limits.
+        memoryPoints = int(std::ranges::count_if(read.memory, &Point::programmable));
+        if (memoryPoints) {
+            double lo = read.memory_min_khz / 1000.0, hi = read.memory_max_khz / 1000.0;
+            slider(
+                L"Memory OC", L"MHz", lo, hi, 10, [](Tune& x) -> double& { return x.mem; },
+                L"Offsets the memory clock. Apply writes it to the " +
+                    plural(memoryPoints, L"programmable memory point") + L" (of " +
+                    std::to_wstring(read.memory.size()) +
+                    L" the driver lists), in the same write as the Afterburner Style OC offsets. The driver takes " +
+                    sign(lo) + L" to " + sign(hi) + L" MHz; typed numbers become whole MHz.",
+                "", 0, 0);
+            sliders.back().whole = true;
+        }
         for (auto [value, stock, name, hint] : {std::tuple(&Tune::floor, &Equation::lo, L"Floor", L"lowest clock"),
                                                 {&Tune::ceiling, &Equation::hi, L"Ceiling", L"highest clock"}}) {
             Limit l{make(panel, L"EDIT", L"", WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL | ES_RIGHT), value, stock, name,
@@ -322,6 +345,8 @@ struct VfTab::Impl {
                             std::to_wstring(t.meta.root) + L"); empty: no limit.");
             limits.push_back(l);
         }
+        if (!t.switches.empty())
+            slowCheck = make(panel, L"BUTTON", L"Disable slow curve (written with Apply)", WS_TABSTOP | BS_AUTOCHECKBOX);
         for (auto& r : t.rules) {
             std::vector<std::wstring> equs;
             for (int i : r.equs) equs.push_back(std::to_wstring(i));
@@ -375,6 +400,11 @@ struct VfTab::Impl {
     void recalc() {
         try {
             equations = tuner->equations(tune);
+            // The slow curve stays on only under offsets: a changed equation disables it again.
+            if (tune.keep_slow && equations != tuner->m.E) {
+                tune.keep_slow = false;
+                equations = tuner->equations(tune);
+            }
             invalid.clear();
         } catch (const std::exception& e) {
             invalid = w(e.what());
@@ -511,6 +541,10 @@ struct VfTab::Impl {
             check(shows[2][c], view.band[c]);
         }
         check(linesCheck, view.lines);
+        if (slowCheck) {
+            check(slowCheck, !tune.keep_slow);
+            EnableWindow(slowCheck, equations == (tune.keep_slow ? tuner->m.E : tuner->fast));
+        }
         modeItems();
     }
     // The difference from the reference curve is offered once one is loaded.
@@ -521,7 +555,9 @@ struct VfTab::Impl {
         if (SendMessageW(modeBox, CB_GETCURSEL, 0, 0) != view.mode) SendMessageW(modeBox, CB_SETCURSEL, view.mode, 0);
     }
     void touch(Slider& s, double v) {
-        s.value(tune) = s.doubleStep ? std::round(v / (2 * tuner->meta.step)) * 2 * tuner->meta.step : v;
+        s.value(tune) = s.doubleStep ? std::round(v / (2 * tuner->meta.step)) * 2 * tuner->meta.step
+                        : s.whole    ? std::clamp(std::round(v), std::ceil(s.lo), std::floor(s.hi))
+                                     : v;
         if (!s.card.empty()) hot = s.card;
         stepped(s);
     }
@@ -564,6 +600,10 @@ struct VfTab::Impl {
         if (reading && int(reading->points.graphics.size()) == n)
             for (auto& g : reading->points.graphics) p.listed.push_back(g.uv / 1000.0);
         p.offsets = offsets;
+        p.memory = tune.mem;
+        if (found)
+            p.notice =
+                L"Another tool's offsets are on the GPU and shown here. Save (above) stores them in the profile exactly as they are.";
         p.step = t.meta.step;
         auto base = [&](int c) -> std::optional<std::vector<double>> {
             if (view.mode == 1) return stock(c).clock;
@@ -788,6 +828,7 @@ struct VfTab::Impl {
         sequence = 0;
         auto done = std::exchange(job, Job::none);
         bool failed = r.code || !r.vf;
+        if (!failed) found = r.vf->found && !foundSaved;
         auto message = w(r.text);
         if (done == Job::opening) {
             if (failed)
@@ -795,9 +836,9 @@ struct VfTab::Impl {
             else {
                 openError.clear();
                 tuner = r.vf->tuner;
-                build();
+                build(r.vf->points);
                 layoutRoot(); // for the guidelines check box
-                appliedTune(r.vf->tune);
+                appliedTune(*r.vf);
                 read(r.vf, L"");
             }
         } else if (done == Job::writing || done == Job::restoring) {
@@ -807,16 +848,17 @@ struct VfTab::Impl {
             } else {
                 auto what =
                     done == Job::restoring
-                        ? L"Stock restored (" + plural(r.vf->equations, L"equation") + L")."
+                        ? L"Stock restored (" + plural(r.vf->equations, L"equation") +
+                              (r.vf->memory ? L", Memory OC set to 0" : L"") + L")."
                         : L"Applied (" + plural(r.vf->equations, L"equation") +
                               (r.vf->offsets ? L", " + plural(r.vf->offsets, L"Afterburner Style OC offset") : L"") +
-                              L").";
+                              (r.vf->memory ? L", Memory OC" : L"") + L").";
                 readBack(r.vf, r.vf->equations, what);
             }
         } else if (failed)
             readError = L"Could not read the driver: " + message;
         else if (done == Job::loading) {
-            appliedTune(r.vf->tune);
+            appliedTune(*r.vf);
             readBack(r.vf, !reading || reading->records != r.vf->records, L"");
         } else
             read(r.vf, done == Job::verifying ? waitWhat : L"");
@@ -842,11 +884,18 @@ struct VfTab::Impl {
         loaded = false;
         submit(VfRead{}, Job::loading);
     }
-    // The tune of the curve this run last wrote, from a profile or this tab. What is shown stays as it is.
-    void appliedTune(const config::Json& state) {
-        if (!state.is_object()) return;
+    // The tune of the curve this run last wrote, from a profile or this tab, or of the curve found on the GPU. What is
+    // shown stays as it is. A tune from before Memory OC came with a curve that leaves the memory offset as it is, so
+    // the tab shows the GPU's.
+    void appliedTune(const VfReading& r) {
+        if (!r.tune.is_object()) return;
         try {
-            take(tuner->tune(state));
+            auto t = tuner->tune(r.tune);
+            if (!r.tune.contains("mem")) {
+                auto p = std::ranges::find_if(r.points.memory, &Point::programmable);
+                t.mem = p != r.points.memory.end() ? p->offset_khz / 1000.0 : 0;
+            }
+            take(t);
         } catch (const std::exception& e) {
             error(L"The profile's V/F curve settings cannot be shown: " + w(e.what()));
         }
@@ -857,6 +906,9 @@ struct VfTab::Impl {
             onGpu = tuner->live(r->records);
             liveOffsets.clear();
             for (auto& p : r->points.graphics) liveOffsets.push_back(p.offset_khz);
+            liveMemory.clear();
+            for (auto& p : r->points.memory)
+                if (p.programmable) liveMemory.push_back(p.offset_khz);
             readError.clear();
             return true;
         } catch (const std::exception& e) {
@@ -891,7 +943,19 @@ struct VfTab::Impl {
             b.verdict = w(e.what());
             b.ok = false;
         }
+        // A write whose memory offset does not read back as written stops with an error (vf::apply).
+        if (memoryPoints) {
+            std::vector<std::wstring> gpu;
+            for (int o : liveMemory)
+                if (auto s = sign(o / 1000.0); std::ranges::find(gpu, s) == gpu.end()) gpu.push_back(s);
+            b.memory = L"Memory OC on the GPU: " + join(gpu, L" / ") + L" MHz.";
+        }
         readback = std::move(b);
+    }
+
+    // Every programmable memory point has this tab's memory offset.
+    bool memorySame() const {
+        return std::ranges::all_of(liveMemory, [&](int o) { return o == std::lround(tune.mem * 1000); });
     }
 
     // ---- the buttons ----
@@ -900,6 +964,19 @@ struct VfTab::Impl {
         EnableWindow(applyButton, idle && tuner->refusal.empty() && invalid.empty());
         EnableWindow(restoreButton, idle);
         for (auto b : {resetButton, importButton, exportButton}) EnableWindow(b, tuner != nullptr);
+    }
+    // The loaded profile loses its V/F curve. The GPU and this tab's settings stay as they are; the window's status
+    // bar has the result.
+    void forget() {
+        if (confirm(L"Remove the V/F curve from the loaded profile?\n\nLoading the profile then leaves the GPU's curve "
+                    L"as it is. Nothing is written to the GPU now; Restore stock does that.") &&
+            host.submit(VfForget{}, true))
+            stored();
+    }
+    // The curve found on the GPU is in a profile, or no longer offered to one: the chart's notice goes.
+    void stored() {
+        foundSaved = true;
+        if (std::exchange(found, false)) plot();
     }
     void apply() {
         Curve curve;
@@ -914,16 +991,23 @@ struct VfTab::Impl {
         size_t moved = 0;
         for (size_t p = 0; p < curve.offsets_khz.size(); ++p)
             moved += curve.offsets_khz[p] != (p < liveOffsets.size() ? liveOffsets[p] : 0);
+        std::vector<std::wstring> also;
+        if (moved) also.push_back(plural(moved, L"Afterburner Style OC offset"));
+        if (!memorySame()) also.push_back(L"the Memory OC offset (" + sign(tune.mem) + L" MHz)");
         if (!confirm(
                 L"Write up to " + plural(ids.size(), L"equation") + L" to the GPU (" + join(ids, L", ") + L")" +
-                (moved ? L" and " + plural(moved, L"Afterburner Style OC offset") : L"") +
+                (also.size() == 2   ? L", " + also[0] + L" and " + also[1]
+                 : also.size() == 1 ? L" and " + also[0]
+                                    : L"") +
                 L"?\n\nThe GPU drops to a slower fallback curve for a few seconds after each write. Do this at idle, not in a game."))
             return;
         submitWrite(std::move(curve));
     }
     void restore() {
         if (!confirm(
-                L"Write NVIDIA's stock equations back and set the Afterburner Style OC offsets to 0 (slow curve on again, none of your changes)?\n\nThe settings on this tab stay as they are."))
+                L"Write NVIDIA's stock equations back and set the Afterburner Style OC" +
+                std::wstring(memoryPoints ? L" and Memory OC" : L"") +
+                L" offsets to 0 (slow curve on again, none of your changes)?\n\nThe settings on this tab stay as they are."))
             return;
         submitWrite({});
     }
@@ -936,7 +1020,8 @@ struct VfTab::Impl {
     }
     void reset() {
         if (!confirm(
-                L"Set every slider and Afterburner Style OC offset to 0, clear Floor and Ceiling and untick the corrections? (Nothing is written to the GPU.)"))
+                L"Set every slider" + std::wstring(memoryPoints ? L" (Memory OC too)" : L"") +
+                L" and Afterburner Style OC offset to 0, clear Floor and Ceiling and untick the corrections? (Nothing is written to the GPU.)"))
             return;
         take({});
     }
@@ -1055,7 +1140,9 @@ struct VfTab::Impl {
             bool same = invalid.empty() && equations == onGpu->E && onGpu->undescribed.empty() &&
                         offsets.size() == liveOffsets.size();
             for (size_t i = 0; same && i < offsets.size(); ++i) same = std::lround(offsets[i] * 1000) == liveOffsets[i];
-            bool stockNow = onGpu->changed.empty() && std::ranges::all_of(liveOffsets, [](int o) { return o == 0; });
+            same = same && memorySame();
+            bool stockNow = onGpu->changed.empty() && std::ranges::all_of(liveOffsets, [](int o) { return o == 0; }) &&
+                            std::ranges::all_of(liveMemory, [](int o) { return o == 0; });
             statusText = same ? L"Applied to the GPU" : stockNow ? L"Unapplied (currently stock)" : L"Unapplied";
             statusColor = same ? p.ok : p.warn;
         }
@@ -1193,14 +1280,16 @@ struct VfTab::Impl {
                     std::ranges::transform(n, n.begin(), towlower);
                     removed.push_back(n + L" removed");
                 }
-            bool sw = !t.switches.empty();
+            bool sw = !t.switches.empty() && !tune.keep_slow;
             size_t moved = std::ranges::count_if(offsets, [](double o) { return o != 0; });
             if (sw) parts.push_back(L"Slow curve disabled");
             if (!ids.empty()) parts.push_back(plural(ids.size(), L"equation") + L" changed");
             if (moved) parts.push_back(L"Afterburner Style OC at " + plural(moved, L"point"));
+            if (tune.mem) parts.push_back(L"Memory OC " + sign(tune.mem) + L" MHz");
             auto summary = parts.empty() ? L"None" : join(parts, L" + ") + (sw && parts.size() == 1 ? L" only" : L"");
             if (!sw && !parts.empty()) summary[0] = towupper(summary[0]);
             if (!removed.empty()) summary += L" (" + join(removed, L", ") + L")";
+            changesText = summary;
             // Side by side with GPU Readback, both as high as the higher one.
             int top = s.y, mid = readback ? (x + right) / 2 : right + gap / 2, l = left, e = mid - gap / 2 - ref(15);
             s.open(L"Current Changes", x, mid - gap / 2);
@@ -1212,6 +1301,9 @@ struct VfTab::Impl {
                         (sw ? L", and " + join(sws, L", ") + L" to disable the slow curve" : L"") + L".",
                     l, e, pal.muted);
             }
+            s.y += ref(6);
+            s.put(forgetButton, l, s.y, extent(fonts.font, windowText(forgetButton)) + ref(30), row);
+            s.y += row;
             s.close();
             if (readback) {
                 int bottom = s.y;
@@ -1221,6 +1313,7 @@ struct VfTab::Impl {
                 say(readback->what, l, end, pal.text, fonts.bold);
                 say(readback->verdict, l, end, readback->ok ? pal.ok : pal.error);
                 say(readback->offsets, l, end, pal.error);
+                say(readback->memory, l, end, pal.text);
                 say(readback->more, l, end, pal.muted);
                 s.close();
                 s.y = std::max(s.y, bottom);
@@ -1258,7 +1351,9 @@ struct VfTab::Impl {
             s.y = top + row + ref(10);
             // Show: per row and column. A click on a row's name turns the whole row on or off.
             bool band = std::ranges::any_of(std::array{0, 1, 2, 3, 4, 5, 6, 7}, [&](int c) { return have(c); });
-            const std::wstring rows[]{L"○ Stock curve (NVIDIA's)", L"● New curve (slow curve disabled + your changes)",
+            const std::wstring rows[]{L"○ Stock curve (NVIDIA's)",
+                                      tune.keep_slow ? L"● New curve (your changes)"
+                                                     : L"● New curve (slow curve disabled + your changes)",
                                       L"+ Reference curve (" + sheetName + L")"};
             int cell = std::max(extent(fonts.bold, L"80 °C") + ref(18), ref(60)), labels = 0;
             for (auto& r : rows) labels = std::max(labels, extent(fonts.font, r) + ref(16));
@@ -1366,7 +1461,9 @@ struct VfTab::Impl {
             items.push_back([&](int from, int to) {
                 s.open(L"Global Offset", from, to);
                 int l = from + ref(15), r = to - ref(15);
-                auto [labelWidth, tail] = sliderRows({&sliders[0], &sliders[1]}, l, r);
+                std::vector<Slider*> global{&sliders[0], &sliders[1]};
+                if (memoryPoints) global.push_back(&sliders[2]);
+                auto [labelWidth, tail] = sliderRows(global, l, r);
                 int numberWidth = extent(fonts.font, L"-0000.00") + ref(20), unitWidth = tail - numberWidth;
                 for (auto& lim : limits) {
                     bool set = (tune.*lim.value).has_value();
@@ -1391,6 +1488,7 @@ struct VfTab::Impl {
                 }
                 s.y += ref(4);
                 say(w(t.switch_text), l, r, pal.muted);
+                if (slowCheck) s.check(slowCheck, l, true, fonts.font);
                 s.close();
             });
             if (!t.rules.empty())
@@ -1572,6 +1670,7 @@ struct VfTab::Impl {
         if (from == resetButton && code == BN_CLICKED) reset();
         if (from == importButton && code == BN_CLICKED) importTune();
         if (from == exportButton && code == BN_CLICKED) exportTune();
+        if (from == forgetButton && code == BN_CLICKED) forget();
         if (!tuner) return 0;
         if (from == referenceButton && code == BN_CLICKED) reference();
         if (from == modeBox && code == CBN_SELCHANGE) {
@@ -1585,6 +1684,10 @@ struct VfTab::Impl {
         if (from == linesCheck) {
             view.lines = on;
             plot();
+        }
+        if (from == slowCheck) {
+            tune.keep_slow = !on;
+            changed();
         }
         for (size_t i = 0; i < ruleChecks.size(); ++i)
             if (from == ruleChecks[i]) {
@@ -1821,8 +1924,11 @@ void VfTab::loaded() {
     impl_->status();
 }
 void VfTab::delivered(std::uint64_t sequence, const ControlResult& result) { impl_->delivered(sequence, result); }
+void VfTab::saved() { impl_->stored(); }
 std::wstring VfTab::text() const {
     auto& r = impl_->readback;
-    return impl_->statusText + (r ? L"\n" + r->what + L"\n" + r->verdict + L"\n" + r->offsets : L"");
+    return impl_->statusText +
+           (r ? L"\n" + r->what + L"\n" + r->verdict + L"\n" + r->offsets + L"\n" + r->memory : L"") +
+           (impl_->found ? L"\nExisting overclock detected" : L"") + L"\nCurrent Changes: " + impl_->changesText;
 }
 }

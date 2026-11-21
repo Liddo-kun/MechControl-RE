@@ -26,6 +26,8 @@ struct VfPlot {
     std::vector<double> mv;      // the point voltages
     std::vector<double> listed;  // the voltages the driver lists, when read
     std::vector<double> offsets; // MHz per point
+    double memory = 0;           // the memory offset (MHz)
+    std::wstring notice;         // over the top left of the plot: an existing overclock was found
     double step = 7.5;           // the clock step
     std::vector<VfLine> lines;
     std::vector<VfSeries> series;

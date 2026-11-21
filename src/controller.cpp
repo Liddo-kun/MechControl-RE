@@ -1082,8 +1082,10 @@ UserProfile Controller::capture(int slot) {
     }
     // The target as last read or written; never read, it is saved as null and loading leaves the driver's.
     if (profile.gpu && temp_target_) profile.gpu->temp_target = temp_target_->current;
-    // The V/F curve this run last wrote; with none, the slot keeps its own (below).
-    if (profile.gpu && vf_curve_) profile.gpu->vf_curve = {{"curve", nv::vf::to_json(*vf_curve_)}, {"tune", vf_tune_}};
+    // The V/F curve this run last wrote, or else the one found on the GPU; with neither, the slot keeps its own
+    // (below).
+    if (auto& vf = vf_curve_ ? vf_curve_ : vf_found_; profile.gpu && vf)
+        profile.gpu->vf_curve = {{"curve", nv::vf::to_json(*vf)}, {"tune", vf_tune_}};
     profile.protection = thermal_->settings();
     profile.fan.reset();
     if (features_.fan_control()) {
@@ -1114,7 +1116,7 @@ UserProfile Controller::capture(int slot) {
     if (auto previous = store_.load(slot)) {
         profile.lighting = previous->lighting;
         profile.cooler = previous->cooler;
-        if (profile.gpu && !vf_curve_ && previous->gpu) profile.gpu->vf_curve = previous->gpu->vf_curve;
+        if (profile.gpu && !vf_curve_ && !vf_found_ && previous->gpu) profile.gpu->vf_curve = previous->gpu->vf_curve;
     } else {
         auto lighting = store_.load_lighting();
         if (!lighting.logo || !lighting.keyboard || !lighting.light_bar)

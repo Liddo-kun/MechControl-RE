@@ -99,14 +99,33 @@ another tool changes the curve. **Import** and **Export** read and write the tun
 `vfe-tune.json` file; a tune from an older version of the VFCURVE page, with numbers typed
 into its tables, or made for other cards is refused. The tables at the bottom show every equation number and cannot be edited.
 
+The **Memory OC** slider, below Afterburner Style OC, sets the memory clock offset within the
+driver's limits; Apply writes it with the point offsets, and Restore stock sets it to 0. It is
+not shown when the driver lists no programmable memory point. A profile saved before Memory OC
+leaves the GPU's memory offset as it is.
+
 The profile bar's **Save** stores the curve last applied (or restored to stock) with the
 tab's settings, but not what the chart shows; without one applied since MechControl started,
 the profile keeps the curve it had. Loading the profile writes its curve without opening the
 tab, and the tab then shows its settings. A GPU or driver restart returns the curve to stock; MechControl writes the
 profile's curve again a few seconds after one it starts itself, after waking from sleep and
 after a power-source change. A curve made for another GPU, VBIOS or driver is skipped with a
-note in `mechcontrol.log` (make it again in the tab), and so is one whose offsets would have
-to be written while MSI Afterburner runs. Profiles saved without a curve leave the GPU's as it is.
+note in `mechcontrol.log` (make it again in the tab). Profiles saved without a curve leave
+the GPU's as it is. **Remove from profile** takes the curve out of the loaded profile; it
+writes nothing to the GPU.
+
+An overclock another tool left on the GPU (MSI Afterburner's offsets, for example) is
+mentioned in amber in the status bar when MechControl first reads the GPU. Opened before any
+curve was written, the tab shows those offsets and says so over the chart; **Save** then stores
+that curve in the profile exactly as it is on the GPU, without Apply. A profile that has a
+curve replaces another tool's offsets with its own and warns in the status bar: don't use
+another overclocking tool with such a profile, because each writes over the other.
+
+**Apply to GPU** also disables the slow curve, the lower curve NVIDIA switches to at low
+voltages. **Disable slow curve** is unticked only for an overclock found on the GPU, which
+keeps it as the other tool left it; changing an equation ticks it again. Offsets that go
+down are written before the equations and those that go up after them, so the curve never
+runs above both the old and the new one during a write.
 
 ## Command line
 

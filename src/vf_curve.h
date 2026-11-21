@@ -15,12 +15,13 @@ struct Gpu {
     uint64_t equations = 0; // Hash of the driver's equation list (its info records)
     bool operator==(const Gpu&) const = default;
 };
-// A curve ready to apply: the control records that differ from stock, by equation, and one offset per graphics
-// point from the lowest.
+// A curve ready to apply: the control records that differ from stock, by equation, one offset per graphics point
+// from the lowest, and the offset of every programmable memory point; without it the memory offset stays as it is.
 struct Curve {
     Gpu gpu;
     std::map<int, Bytes> records;
     std::vector<int> offsets_khz;
+    std::optional<int> memory_khz;
     bool operator==(const Curve&) const = default;
 };
 config::Json to_json(const Curve&);
@@ -44,23 +45,31 @@ struct Point {
     int32_t offset_khz = 0;
     bool programmable = false; // takes an offset
 };
-// The graphics points of the driver's client curve, from the lowest voltage.
+// The graphics and memory points of the driver's client curve, from the lowest; a GPU without a programmable memory
+// clock has no memory points.
 struct Points {
     std::vector<Point> graphics;
     int32_t offset_min_khz = 0, offset_max_khz = 0;
+    std::vector<Point> memory;
+    int32_t memory_min_khz = 0, memory_max_khz = 0;
 };
 Points points(Api&);
 
 struct Applied {
     int equations = 0, offsets = 0; // how many were written
+    bool memory = false;            // the memory offset was written
+    bool replaced = false;          // an offset that was not 0 before was changed
 };
-// Makes the driver's equations equal its stock records with the curve's records, then its offsets equal the curve's,
-// and reads both back. The stock records come from `directory` (store_directory()). Refuses a curve made for another
-// GPU, VBIOS, driver or equation list, one without recorded stock, and offsets while MSI Afterburner runs (it writes
-// its own copy of them), before any write.
+// Makes the driver's equations equal its stock records with the curve's records and its offsets equal the curve's
+// (those that go down before the equations, the others and the memory offset after), and reads both back. The stock
+// records come from `directory` (store_directory()). Refuses a curve made for another GPU, VBIOS, driver or equation
+// list, one without recorded stock, before any write.
 Applied apply(Api&, const Curve&, const std::filesystem::path& directory);
-// Stock equations and every offset 0.
+// Stock equations and every offset 0, memory included.
 Applied restore(Api&, const std::filesystem::path& directory);
+// The curve on the GPU now, as apply() would write it: the records that differ from stock, every offset and the memory
+// offset. Needs the recorded stock.
+Curve current(Api&, const std::filesystem::path& directory);
 
 // Stock records per GPU, at %ProgramData%/MechControl/VfCurve beside NvidiaOverrides. The tuner records them on its
 // first use on a GPU; profiles only read them.

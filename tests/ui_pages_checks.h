@@ -66,6 +66,8 @@ void Application::checkPages(const std::filesystem::path& directory, const std::
     applyTheme(false); // Whatever Windows' app mode; the dark pages are captured at the end.
     show();
     wait([&] { return state_.contains("cpu"); });
+    check(vfNoticed_ && statusNotice_ && status_.starts_with(L"Another tool's GPU overclock is active"),
+          "the first GPU status finds offsets MechControl did not write and says so in the status bar");
     CHANGEFILTERSTRUCT filter{sizeof filter};
     check(ChangeWindowMessageFilterEx(window_, taskbarMessage_, MSGFLT_ALLOW, &filter) &&
               filter.ExtStatus == MSGFLTINFO_ALREADYALLOWED_FORWND,
@@ -280,8 +282,8 @@ void Application::checkPages(const std::filesystem::path& directory, const std::
     read();
     wait([&] { return !busy_ && infoText_[7] == L"250 W" && infoText_[8] == L"350 W"; });
     capture(L"system-info");
-    // The V/F Curve tab on the fake driver: made when first shown and opened on the worker; then a slider and a point
-    // offset, Apply with the readback once the driver settles, every number, and Restore.
+    // The V/F Curve tab on the fake driver: made when first shown and opened on the worker; then a slider, the memory
+    // offset and a point offset, Apply with the readback once the driver settles, every number, Restore and Load.
     check(vfOffered_ && TabCtrl_GetItemCount(tabs_) == vfPage + 1 && !vf_,
           "an NVIDIA GPU offers the V/F Curve tab, which is made only when shown");
     page(vfPage);
@@ -295,7 +297,7 @@ void Application::checkPages(const std::filesystem::path& directory, const std::
         if (!done()) report << "V/F Curve tab shows: " << utf8(vfText()) << std::endl;
         check(done(), "the V/F Curve tab reaches the expected state");
     };
-    vfWait(L"Unapplied (currently stock)\nGPU now: stock equations.\nReadback matches this tab");
+    vfWait(L"Applied to the GPU\nGPU now: stock equations.\nReadback matches this tab");
     auto vfRoot = vf_->window(), vfPanel = FindWindowExW(vfRoot, nullptr, L"MechControl.Native.VfPanel", nullptr),
          vfChart = FindWindowExW(vfRoot, nullptr, L"MechControl.Native.VfChart", nullptr);
     auto chartShape = [&] {
@@ -317,9 +319,75 @@ void Application::checkPages(const std::filesystem::path& directory, const std::
         });
     };
     auto vfButton = [&](const wchar_t* title) { return FindWindowExW(vfRoot, nullptr, L"Button", title); };
+    auto afterburner = FindWindowExW(vfPanel, nullptr, TRACKBAR_CLASSW, L"Afterburner Style OC"),
+         memory = FindWindowExW(vfPanel, nullptr, TRACKBAR_CLASSW, L"Memory OC");
+    auto slowCheck = FindWindowExW(vfPanel, nullptr, L"Button", L"Disable slow curve (written with Apply)");
+    // Opened with no curve written this run, the tab takes the offsets another tool left on the GPU (the fixture's
+    // +30 MHz at every point, +45 at one, +250 MHz memory), the chart says so, and Save stores them as they are.
+    // Restore stock and Reset all then start from stock.
+    check(SendMessageW(afterburner, TBM_GETPOS, 0, 0) == 1 && SendMessageW(memory, TBM_GETPOS, 0, 0) == 25 &&
+              vfText().ends_with(L"\nExisting overclock detected\nCurrent Changes: Afterburner Style OC at 96 points + "
+                                 L"Memory OC +250 MHz") &&
+              slowCheck && Button_GetCheck(slowCheck) == BST_UNCHECKED,
+          "the tab opens with the GPU's point and memory offsets, the slow curve left on and the chart's notice");
+    capture(L"vf-curve-found");
+    target_ = 3;
+    command(saveId, BN_CLICKED);
+    wait([&] { return !busy_ && std::filesystem::exists(directory / L"userprofile_3.json"); });
+    auto found = read_json(directory / L"userprofile_3.json")["gpu"]["vfCurve"];
+    std::vector<int> foundOffsets(96, 30000);
+    foundOffsets[90] = 45000;
+    check(found["curve"]["records"].empty() && found["curve"]["offsetsKhz"] == foundOffsets &&
+              found["curve"]["memoryOffsetKhz"] == 250000 && found["tune"]["po"] == 30 &&
+              found["tune"]["pp"] == mech::config::Json{{"90", 15.0}} && found["tune"]["mem"] == 250 &&
+              found["tune"]["keepSlow"] == true && vfText().find(L"Existing overclock detected") == std::wstring::npos,
+          "Save stores the curve found on the GPU as it is, with its tune, and the notice goes");
+    yes();
+    SendMessageW(vfPanel, WM_COMMAND, MAKEWPARAM(0, BN_CLICKED),
+                 reinterpret_cast<LPARAM>(FindWindowExW(vfPanel, nullptr, L"Button", L"Remove from profile")));
+    wait([&] { return !busy_; });
+    check(read_json(directory / L"userprofile_3.json")["gpu"]["vfCurve"].is_null() &&
+              status_.starts_with(L"V/F curve removed from the profile"),
+          "Remove from profile takes the V/F curve out of the loaded profile");
+    yes();
+    SendMessageW(vfRoot, WM_COMMAND, MAKEWPARAM(0, BN_CLICKED), reinterpret_cast<LPARAM>(vfButton(L"Restore stock")));
+    vfWait(L"Unapplied (currently stock)\nStock restored (");
+    yes();
+    SendMessageW(vfRoot, WM_COMMAND, MAKEWPARAM(0, BN_CLICKED), reinterpret_cast<LPARAM>(vfButton(L"Reset all")));
+    check(SendMessageW(afterburner, TBM_GETPOS, 0, 0) == 0 && SendMessageW(memory, TBM_GETPOS, 0, 0) == 0 &&
+              vfText().ends_with(L"\nCurrent Changes: Slow curve disabled only"),
+          "Restore stock and Reset all leave stock on the GPU and in the tab");
     auto track = FindWindowExW(vfPanel, nullptr, TRACKBAR_CLASSW, L"Native VF Curve");
     SendMessageW(track, TBM_SETPOS, TRUE, 12);
     SendMessageW(vfPanel, WM_HSCROLL, MAKEWPARAM(TB_THUMBPOSITION, 12), reinterpret_cast<LPARAM>(track));
+    // Memory OC: right below Afterburner Style OC, 10 MHz per track step.
+    auto place = [&](HWND w) {
+        RECT r{};
+        GetWindowRect(w, &r);
+        return r;
+    };
+    auto below = [&] {
+        RECT a = place(afterburner), m = place(memory);
+        bool between = false;
+        for (HWND t = nullptr; (t = FindWindowExW(vfPanel, t, TRACKBAR_CLASSW, nullptr));) {
+            RECT r = place(t);
+            between = between || (t != afterburner && t != memory && r.top >= a.top && r.top <= m.top);
+        }
+        return m.left == a.left && m.top >= a.bottom && m.top - a.bottom <= scale(20) && !between;
+    };
+    check(afterburner && memory && below() && SendMessageW(memory, TBM_GETRANGEMIN, 0, 0) == -100 &&
+              SendMessageW(memory, TBM_GETRANGEMAX, 0, 0) == 300,
+          "the Memory OC slider sits right below Afterburner Style OC with the driver's limits");
+    auto memoryTo = [&](int position) {
+        SendMessageW(memory, TBM_SETPOS, TRUE, position);
+        SendMessageW(vfPanel, WM_HSCROLL, MAKEWPARAM(TB_THUMBPOSITION, position), reinterpret_cast<LPARAM>(memory));
+    };
+    memoryTo(50);
+    check(vfText().ends_with(L" + Memory OC +500 MHz"), "a moved Memory OC slider shows in Current Changes");
+    for (int i = 0; i < 400 && place(memory).top > place(vfPanel).top + scale(150); ++i)
+        SendMessageW(vfPanel, WM_VSCROLL, SB_LINEDOWN, 0);
+    capture(L"vf-curve-memory");
+    SendMessageW(vfPanel, WM_VSCROLL, SB_TOP, 0);
     RECT plot{};
     GetClientRect(vfChart, &plot);
     auto middle = MAKELPARAM(plot.right / 2, plot.bottom / 2);
@@ -337,15 +405,29 @@ void Application::checkPages(const std::filesystem::path& directory, const std::
     yes();
     SendMessageW(vfRoot, WM_COMMAND, MAKEWPARAM(0, BN_CLICKED), reinterpret_cast<LPARAM>(vfButton(L"Apply to GPU")));
     vfWait(L"Applied to the GPU\nApplied (");
-    check(vfText().find(L"1 Afterburner Style OC offset).\nReadback matches this tab") != std::wstring::npos,
-          "after Apply and the driver's settling, the readback matches the calculation and the offset");
+    check(vfText().find(L"1 Afterburner Style OC offset, Memory OC).\nReadback matches this tab") != std::wstring::npos &&
+              vfText().find(L"\nMemory OC on the GPU: +500 MHz.") != std::wstring::npos,
+          "after Apply and the driver's settling, the readback matches the calculation, the offset and Memory OC");
     target_ = 4;
     command(saveId, BN_CLICKED);
     wait([&] { return !busy_ && std::filesystem::exists(directory / L"userprofile_4.json"); });
     auto vfSaved = read_json(directory / L"userprofile_4.json")["gpu"]["vfCurve"];
     check(vfSaved["tune"]["global"] == 30 && vfSaved["tune"]["pp"].size() == 1 && !vfSaved["tune"].contains("showNew") &&
-              !vfSaved["curve"]["records"].empty(),
+              !vfSaved["curve"]["records"].empty() && vfSaved["tune"]["mem"] == 500 &&
+              vfSaved["curve"]["memoryOffsetKhz"] == 500000,
           "the profile bar's Save stores the applied V/F curve with the tune, without what the chart shows");
+    // A profile from before Memory OC leaves the GPU's memory offset alone, and the tab shows the GPU's in place of
+    // the unapplied one.
+    auto old = read_json(directory / L"userprofile_4.json");
+    old["gpu"]["vfCurve"]["curve"].erase("memoryOffsetKhz");
+    old["gpu"]["vfCurve"]["tune"].erase("mem");
+    mech::config::write_json(directory / L"userprofile_5.json", old, true);
+    memoryTo(20);
+    request(SlotLoad{5});
+    vfWait(L"Applied to the GPU\nGPU now: ");
+    check(SendMessageW(memory, TBM_GETPOS, 0, 0) == 50 &&
+              vfText().find(L"\nMemory OC on the GPU: +500 MHz.") != std::wstring::npos,
+          "a profile without Memory OC leaves the memory offset alone and the tab shows the GPU's");
     // Both tables: every number by line, then the structure. The links follow the issue link.
     auto numbersLink = FindWindowExW(vfPanel, FindWindowExW(vfPanel, nullptr, WC_LINK, nullptr), WC_LINK, nullptr);
     auto structureLink = FindWindowExW(vfPanel, numbersLink, WC_LINK, nullptr);
@@ -377,14 +459,18 @@ void Application::checkPages(const std::filesystem::path& directory, const std::
     yes();
     SendMessageW(vfRoot, WM_COMMAND, MAKEWPARAM(0, BN_CLICKED), reinterpret_cast<LPARAM>(vfButton(L"Restore stock")));
     vfWait(L"Unapplied (currently stock)\nStock restored (");
-    check(vfText().find(L"Readback matches this tab") != std::wstring::npos, "Restore puts the stock curve back");
+    check(vfText().find(L", Memory OC set to 0).\nReadback matches this tab") != std::wstring::npos &&
+              vfText().find(L"\nMemory OC on the GPU: 0 MHz.") != std::wstring::npos,
+          "Restore puts the stock curve back, Memory OC 0 included");
     // Loading the profile writes its curve and shows its settings in place of the unapplied ones.
     SendMessageW(track, TBM_SETPOS, TRUE, 8);
     SendMessageW(vfPanel, WM_HSCROLL, MAKEWPARAM(TB_THUMBPOSITION, 8), reinterpret_cast<LPARAM>(track));
     request(SlotLoad{4});
     vfWait(L"Applied to the GPU\nGPU now: ");
-    check(SendMessageW(track, TBM_GETPOS, 0, 0) == 12 && vfText().find(L"Readback matches this tab") != std::wstring::npos,
-          "loading a profile writes its V/F curve and the tab shows the profile's settings and readback");
+    check(SendMessageW(track, TBM_GETPOS, 0, 0) == 12 && vfText().find(L"Readback matches this tab") != std::wstring::npos &&
+              SendMessageW(memory, TBM_GETPOS, 0, 0) == 50 &&
+              vfText().find(L"\nMemory OC on the GPU: +500 MHz.") != std::wstring::npos,
+          "loading a profile writes its V/F curve with Memory OC and the tab shows the profile's settings and readback");
     // Closed to the tray just after a change, while the slider bars are still being worked out: once the bars' timer
     // has seen the hidden window, nothing of the tab runs.
     SendMessageW(track, TBM_SETPOS, TRUE, 4);

@@ -111,17 +111,19 @@ struct Synthetic {
 };
 
 // The driver as the V/F packets see it: the synthetic equations and a client curve of 96 graphics points (grid 498.75
-// mV + 7.5 mV, listed rounded up to 5 mV, clock step 15 MHz, at 45 C) plus four memory points.
+// mV + 7.5 mV, listed rounded up to 5 mV, clock step 15 MHz, at 45 C) plus five memory points, the top two of them
+// programmable, with offset limits -1000 to +3000 MHz.
 struct Driver {
     Synthetic s;
     Bytes live = s.records;
     std::vector<uint32_t> base_khz, uv;
     std::vector<double> grid;
-    std::array<int32_t, 100> offsets{};
+    std::array<int32_t, 101> offsets{};
     std::vector<int> sets; // equation SetControl calls: the equation each wrote
     int offset_sets = 0;
     bool refuse_records = false;
     bool follow = false; // the curve follows written equations; otherwise it stays stock
+    bool memory = true;  // the driver lists the memory clock domain
     Driver() {
         for (int p = 0; p < 96; ++p) {
             grid.push_back(498750 + 7500.0 * p);
@@ -164,21 +166,22 @@ struct Driver {
         }
         case 0xb9da41d6: b = s.variable_info; break;
         case 0x5d387298: b = s.variable_records; break;
-        case 0x64b43a6a: { // clock domains: graphics points 0-95, memory 96-99
-            put(b, 4, 3);
+        case 0x64b43a6a: { // clock domains: graphics points 0-95, memory 96-100
+            put(b, 4, memory ? 3 : 1);
             put(b, 0x28 + 0x28, uint32_t(1000000));
             put(b, 0x28 + 0x2c, uint32_t(-1000000));
             b[0x28 + 0x30] = 0;
             b[0x28 + 0x31] = 95;
             put(b, 0x28 + 0x48 + 4, 4);
+            put(b, 0x28 + 0x48 + 0x28, uint32_t(3000000));
+            put(b, 0x28 + 0x48 + 0x2c, uint32_t(-1000000));
             b[0x28 + 0x48 + 0x30] = 96;
-            b[0x28 + 0x48 + 0x31] = 99;
+            b[0x28 + 0x48 + 0x31] = 100;
             break;
         }
         case 0x507b4b59:
-            for (int i = 0; i < 100; ++i) b[4 + i / 8] |= uint8_t(1u << (i % 8));
-            put(b, 0x44 + 96 * 0x18, 1); // fixed memory points
-            put(b, 0x44 + 97 * 0x18, 1);
+            for (int i = 0; i < 101; ++i) b[4 + i / 8] |= uint8_t(1u << (i % 8));
+            for (int i = 96; i < 99; ++i) put(b, 0x44 + i * 0x18, 1); // fixed memory points
             break;
         case 0x21537ad4:
             if (u32(b, 0) >> 16 != 3) throw std::runtime_error("NVIDIA packet call failed (-9)");
@@ -192,11 +195,11 @@ struct Driver {
             }
             break;
         case 0x23f1b133:
-            for (int i = 0; i < 100; ++i) put(b, 0x44 + i * 0x24 + 0x14, uint32_t(offsets[i]));
+            for (int i = 0; i < 101; ++i) put(b, 0x44 + i * 0x24 + 0x14, uint32_t(offsets[i]));
             break;
         case 0x0733e009:
             ++offset_sets;
-            for (int i = 0; i < 100; ++i) offsets[i] = int32_t(u32(b, 0x44 + i * 0x24 + 0x14));
+            for (int i = 0; i < 101; ++i) offsets[i] = int32_t(u32(b, 0x44 + i * 0x24 + 0x14));
             break;
         default: throw std::runtime_error("fixture: unexpected NVAPI call");
         }

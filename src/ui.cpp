@@ -1757,7 +1757,7 @@ private:
             put(monitor_[i], true, palette().text, ref(2));
             if (i + 1 < monitor_.size() || !status_.empty()) put(L"|", true, gray, 0);
         }
-        if (!status_.empty()) put(status_, false, gray, ref(2));
+        if (!status_.empty()) put(status_, statusNotice_, statusNotice_ ? palette().warn : gray, ref(2));
         SelectObject(dc, previous);
         ReleaseDC(window_, dc);
         bar_ = {0, bottom - lowest - ref(5), width, bottom};
@@ -1999,8 +1999,9 @@ private:
         setStatus(L"Working… device operations may take a few seconds.");
         worker_->request(std::move(command), busySequence_);
     }
-    void setStatus(const std::wstring& value) {
+    void setStatus(const std::wstring& value, bool notice = false) { // a notice is bold and amber
         status_ = value;
+        statusNotice_ = notice;
         updateBar();
     }
     bool confirm(const wchar_t* message, const wchar_t* title = L"MechControl") {
@@ -2690,6 +2691,20 @@ private:
             busy(false);
             setStatus(L"Controller ready.");
         }
+        // Once: offsets on the GPU that MechControl did not write (another tool's overclock).
+        if (j.value("vfOverclock", false) && !vfNoticed_) {
+            vfNoticed_ = true;
+            setStatus(L"Another tool's GPU overclock is active and is not in this profile. To keep it, open the V/F "
+                      L"Curve tab and click Save.",
+                      true);
+        }
+        // Once: this profile's V/F curve replaced offsets another tool had set.
+        if (j.value("vfForeign", false) && !vfWarned_) {
+            vfWarned_ = true;
+            setStatus(L"This profile's V/F curve replaced another tool's GPU overclock. Don't use another overclocking "
+                      L"tool (MSI Afterburner, for example) with it: each writes over the other.",
+                      true);
+        }
         if (j.contains("identity")) {
             identity_ = j["identity"];
             SetWindowTextW(window_, (L"MechControl — " + w(state_.value("model", std::string{}))).c_str());
@@ -3139,6 +3154,7 @@ private:
                             configurationWarning_.clear();
                     }
                     if (vf_ && operation_ && std::holds_alternative<SlotLoad>(*operation_)) vf_->loaded();
+                    if (vf_ && !r.code && operation_ && std::holds_alternative<SlotSave>(*operation_)) vf_->saved();
                     if (!r.code && operation_ && std::holds_alternative<ProtectionApply>(*operation_))
                         eraseEdits(protectionId, showWindowId);
                     // A refused offset stays in the slider as an edit; a stored one is the BIOS's value again.
@@ -3584,7 +3600,7 @@ private:
 #endif
     // The V/F Curve tab (vfPage): offered on an NVIDIA GPU, made the first time it is shown.
     std::unique_ptr<VfTab> vf_;
-    bool vfOffered_ = false;
+    bool vfOffered_ = false, vfNoticed_ = false, vfWarned_ = false, statusNotice_ = false;
 };
 #ifdef MECHCONTROL_PAGE_CHECK
 #include "../tests/ui_pages_checks.h"
@@ -3592,6 +3608,19 @@ private:
 }
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
+#ifdef MECHCONTROL_PAGE_CHECK
+    std::filesystem::path checks;
+    // A failed or stopped check ends the run with its reason in the report and exit code 1, never a message box.
+    auto fail = [&](const std::wstring& text) {
+        if (!checks.empty()) std::ofstream(checks / L"pages-check.txt", std::ios::app) << "STOPPED " << mech::config::utf8(text) << '\n';
+        return 1;
+    };
+#else
+    auto fail = [](const std::wstring& text) {
+        MessageBoxW(nullptr, text.c_str(), L"MechControl", MB_OK | MB_ICONERROR);
+        return 1;
+    };
+#endif
     try {
         int argc = 0;
         auto argv = CommandLineToArgvW(GetCommandLineW(), &argc);
@@ -3601,7 +3630,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
             LocalFree(argv);
             return 2;
         }
-        std::filesystem::path checks = argv[2];
+        checks = argv[2];
         LocalFree(argv);
         auto fixture = std::make_shared<UiPageState>();
 #else
@@ -3668,10 +3697,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         return result == -1 ? 1 : int(message.wParam);
 #endif
     } catch (const winrt::hresult_error& e) {
-        MessageBoxW(nullptr, e.message().c_str(), L"MechControl", MB_OK | MB_ICONERROR);
-        return 1;
+        return fail(std::wstring(e.message()));
     } catch (const std::exception& e) {
-        MessageBoxW(nullptr, w(e.what()).c_str(), L"MechControl", MB_OK | MB_ICONERROR);
-        return 1;
+        return fail(w(e.what()));
     }
 }

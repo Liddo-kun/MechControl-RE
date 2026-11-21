@@ -85,6 +85,8 @@ Json Controller::presentation(bool read, bool gpu_live, int page) {
         } catch (const std::exception& e) {
             j["gpuError"] = e.what();
         }
+        j["vfOverclock"] = vf_overclock();
+        j["vfForeign"] = vf_foreign_;
     }
     if (read && page == 1 && features_.fan_control()) try {
             j["boost"] = (this->read("fanControlMode") & p.bitfields.at("fanBoost").get_mask()) != 0;

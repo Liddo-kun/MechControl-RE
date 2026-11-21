@@ -373,6 +373,7 @@ void VfChart::draw(HDC dc, const RECT& client) {
     };
     // Over the bottom right of the plot, where a rising curve leaves room, from the right: Reset view while the view is
     // zoomed or moved, then the selection with its up, down and clear buttons.
+    COLORREF amber = c.dark ? RGB(92, 74, 20) : RGB(255, 244, 200), amberEdge = RGB(217, 184, 74);
     for (auto& b : buttons_) b = {};
     float strip = B - px(30);
     auto button = [&](int i, const std::wstring& s, float right, const gp::Font& f) {
@@ -386,7 +387,6 @@ void VfChart::draw(HDC dc, const RECT& client) {
     };
     float x = view_ ? button(1, L"Reset view", R - px(6), font) - px(10) : R - px(6);
     if (!selected_.empty()) {
-        COLORREF amber = c.dark ? RGB(92, 74, 20) : RGB(255, 244, 200), amberEdge = RGB(217, 184, 74);
         float buttons = px(9);
         for (auto s : {L"✕", L"▼", L"▲"}) buttons += measure(s, symbol).Width + px(12);
         auto s = selection_text();
@@ -398,6 +398,19 @@ void VfChart::draw(HDC dc, const RECT& client) {
         float bx = button(4, L"✕", x - px(3), symbol) - px(3);
         bx = button(3, L"▼", bx, symbol) - px(3);
         button(2, L"▲", bx, symbol);
+    }
+    // Over the top left of the plot, where a rising curve leaves room: an existing overclock was found.
+    if (!plot_.notice.empty()) {
+        const wchar_t* head = L"Existing overclock detected";
+        float width = std::min(R - L - px(16), px(320)), inner = width - px(16);
+        gp::RectF layout(0, 0, inner, 1e4f), top, body;
+        g.MeasureString(head, -1, &bold, layout, &top);
+        g.MeasureString(plot_.notice.c_str(), -1, &font, layout, &body);
+        gp::RectF b(L + px(8), T + px(8), width, top.Height + body.Height + px(12));
+        box(b, amber, amberEdge);
+        g.DrawString(head, -1, &bold, gp::RectF(b.X + px(8), b.Y + px(6), inner, top.Height), nullptr, &ink);
+        g.DrawString(plot_.notice.c_str(), -1, &font,
+                     gp::RectF(b.X + px(8), b.Y + px(6) + top.Height, inner, body.Height + px(2)), nullptr, &ink);
     }
     if (hover_ >= 0 && hover_ < n) {
         struct Line {
@@ -415,6 +428,7 @@ void VfChart::draw(HDC dc, const RECT& client) {
         float w = measure(head, bold).Width + measure(rest, font).Width, h = 0, line = measure(L"0", font).Height;
         h += line;
         if (o) lines.push_back({L"Afterburner Style OC: " + sign(o) + L" MHz", false, {}});
+        if (plot_.memory) lines.push_back({L"Memory OC: " + sign(plot_.memory) + L" MHz", false, {}});
         for (auto& s : plot_.series)
             if (hover_ < int(s.y.size()) && s.y[hover_])
                 lines.push_back(

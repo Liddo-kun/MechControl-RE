@@ -117,10 +117,12 @@ struct Card {
 };
 struct Tune {
     double global = 0, po = 0;            // whole curve; offset at every point
+    double mem = 0;                       // memory offset (MHz) at every programmable memory point
     std::map<int, double> pp;             // offset added at single points
     std::map<std::string, Card> cards;    // by card id
     std::optional<double> floor, ceiling; // the clock equation's limits, where set
     std::map<std::string, bool> rules;    // corrections removed
+    bool keep_slow = false;               // the slow curve stays on: offsets alone, as another tool leaves the GPU
 };
 // One row of a line's table or of the structure table (vfe-ui.py chain_rows).
 struct Row {
@@ -222,6 +224,10 @@ public:
     // A tune saved by state(): version 2 on this GPU's cards and their ranges. Refuses anything else.
     Tune tune(const config::Json& state) const;
     config::Json state(const Tune&) const;
+    // The tune of the offsets on the GPU (another tool's, such as MSI Afterburner's): Afterburner Style OC is the most
+    // common point offset, toward 0 to its steps of two clock steps, the single points have the rest, and the memory
+    // offset is the first programmable memory point's.
+    Tune adopt(const Points&) const;
     // A reference CSV (columns domain, index, actual_<band>): per band the clock per point, NaN where it has none.
     std::map<std::string, std::vector<double>> reference(const std::filesystem::path&) const;
 

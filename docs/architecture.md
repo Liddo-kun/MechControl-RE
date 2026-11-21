@@ -138,7 +138,8 @@ and the target need only NVAPI, so without `nv::Power` (an older GPU or unsuppor
 limits) the controller uses a plain `nv::Api`; `nv::Power` replaces it when it opens.
 Status reads the target only while it is unknown, and never from a sleeping GPU.
 `vf_curve.*` (in `ec`) applies a V/F curve: the VFE equation control records that differ from
-stock and one client offset per graphics point, with every check before the first write. The
+stock, one client offset per graphics point and, where the curve has one, the memory offset on
+every programmable memory point (in the same offsets write), with every check before the first write. The
 stock records are kept per GPU, VBIOS, driver and equation list at
 `%ProgramData%/MechControl/VfCurve`. A GPU restart puts the driver's equations back to stock and
 every offset to 0 (measured), so a curve must be applied again after one. The tuner
@@ -146,7 +147,9 @@ every offset to 0 (measured), so a curve must be applied again after one. The tu
 equation, its lines, corrections and slow-curve switch on the running chip and turns a tune into
 such a curve. The worker runs it through two commands: `VfRead` reads the driver's equations and
 curve (and with `open` builds the tuner), and `VfApply` writes a curve, or stock without one,
-then reads back. The V/F Curve tab is offered on any NVIDIA GPU and is created on its first
+then reads back. Before any curve is written in a run, the first GPU status reads the offsets
+once (the status bar's notice), and an opening `VfRead` keeps the curve it finds on the GPU
+(`vf::current`, with a tune from its offsets) for a slot Save, which nothing writes. The V/F Curve tab is offered on any NVIDIA GPU and is created on its first
 selection (`vf_tab.*` on the shared page code, with `vf_chart.*` drawing the curve in GDI+ and
 `vf_numbers.*` painting the read-only tables of every equation number), so nothing of it runs before then.
 Like the other tabs, it follows the window's size only while it is shown. It reads the driver

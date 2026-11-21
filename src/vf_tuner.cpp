@@ -69,8 +69,9 @@ Tuner::Tuner(Model model, Meta mt) : m(std::move(model)), meta(std::move(mt)) {
         switch_text = "No slow curve was found on this GPU; the curve is edited as it is.";
     else {
         switch_text =
-            std::string("Apply always disables the slow curve, the lower curve NVIDIA switches to below the kink") +
-            (tested ? "." : " (by a kind of write that is untested).");
+            std::string("Apply disables the slow curve, the lower curve NVIDIA switches to below the kink") +
+            (tested ? "." : " (by a kind of write that is untested).") +
+            " Untick to leave it on under an overclock found on the GPU; changing an equation ticks it again.";
         switch_detail = "The slow curve is disabled like this: " + join(how, "; ") + ".";
     }
     fast = m.E;
@@ -703,7 +704,7 @@ Equations Tuner::equations(const Tune& t) const {
     for (auto& r : rules)
         if (auto it = t.rules.find(r.id); it != t.rules.end() && it->second)
             for (int i : r.equs) E[i].lo = E[i].hi = 0;
-    switch_off(E);
+    if (!t.keep_slow) switch_off(E);
     return E;
 }
 std::vector<double> Tuner::offsets(const Tune& t) const {
@@ -721,6 +722,7 @@ Curve Tuner::compile(const Tune& t, const Gpu& gpu) const {
     for (int i = 0; i < int(E.size()); ++i)
         if (auto r = m.record(i, E[i]); !std::ranges::equal(r, record(m.stock, i))) c.records.emplace(i, std::move(r));
     for (double o : offsets(t)) c.offsets_khz.push_back(int(std::lround(o * 1000)));
+    c.memory_khz = int(std::lround(t.mem * 1000));
     return c;
 }
 config::Json Tuner::fields(const Equations& E) const {
@@ -802,6 +804,8 @@ Tune Tuner::tune(const config::Json& j) const {
     Tune t;
     config::field(j, "global", t.global);
     config::field(j, "po", t.po);
+    config::field(j, "mem", t.mem);
+    config::field(j, "keepSlow", t.keep_slow);
     for (auto& [k, v] : part("pp").items()) {
         if (k.empty() || k.size() > 5 || k.find_first_not_of("0123456789") != std::string::npos ||
             std::stoi(k) >= points())
@@ -828,8 +832,24 @@ Tune Tuner::tune(const config::Json& j) const {
     }
     return t;
 }
+Tune Tuner::adopt(const Points& read) const {
+    Tune t;
+    t.keep_slow = true;
+    std::map<int, int> count;
+    for (auto& g : read.graphics) ++count[g.offset_khz];
+    double grid = 2 * meta.step;
+    if (!count.empty()) {
+        double common = std::ranges::max_element(count, {}, [](auto& c) { return c.second; })->first / 1000.0;
+        t.po = std::trunc(common / grid) * grid;
+    }
+    for (int p = 0; p < int(read.graphics.size()) && p < points(); ++p)
+        if (double rest = read.graphics[p].offset_khz / 1000.0 - t.po) t.pp[p] = rest;
+    if (auto m = std::ranges::find_if(read.memory, &Point::programmable); m != read.memory.end())
+        t.mem = m->offset_khz / 1000.0;
+    return t;
+}
 config::Json Tuner::state(const Tune& t) const {
-    config::Json j{{"ver", 2}, {"global", t.global}, {"po", t.po}, {"pp", config::Json::object()},
+    config::Json j{{"ver", 2}, {"global", t.global}, {"po", t.po}, {"mem", t.mem}, {"pp", config::Json::object()},
                    {"sec", config::Json::object()}, {"ranges", config::Json::object()},
                    {"manual", config::Json::object()}, {"rules", t.rules}};
     for (auto [p, v] : t.pp) j["pp"][text(p)] = v;
@@ -841,6 +861,7 @@ config::Json Tuner::state(const Tune& t) const {
     }
     if (t.floor) j["manual"][text(meta.root) + ".lo"] = *t.floor;
     if (t.ceiling) j["manual"][text(meta.root) + ".hi"] = *t.ceiling;
+    if (t.keep_slow) j["keepSlow"] = true;
     return j;
 }
 

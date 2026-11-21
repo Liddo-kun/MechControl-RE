@@ -2,7 +2,6 @@
 #include <algorithm>
 #include <shlobj.h>
 #include <knownfolders.h>
-#include <tlhelp32.h>
 
 namespace mech::nv::vf {
 namespace {
@@ -58,20 +57,23 @@ std::string list(const std::vector<size_t>& v) {
     return s;
 }
 
-// The graphics points with the offsets packet that a write sends back.
+// The graphics and memory points with the offsets packet that a write sends back.
 struct Clock {
     Points points;
     std::vector<int> index; // the driver's point index of each graphics point
     Bytes control;
+    std::vector<int> memory_index; // and of each memory point
 };
 Clock read_clock(Api& api) {
     auto domains = packet(0x928, version(0x928, 1));
     call(api, domains_call, domains, "Reading the clock domains failed");
-    std::optional<size_t> graphics;
+    std::optional<size_t> graphics, memory;
     for (int i = 0; i < 32; ++i) {
         size_t p = 0x28 + i * 0x48;
-        // Type 0 is programmable; clock 0 is graphics.
-        if ((u32(domains, 4) & (1u << i)) && u32(domains, p) == 0 && u32(domains, p + 4) == 0) graphics = p;
+        // Type 0 is programmable; clock 0 is graphics, clock 4 memory.
+        if (!(u32(domains, 4) & (1u << i)) || u32(domains, p) != 0) continue;
+        if (u32(domains, p + 4) == 0) graphics = p;
+        if (u32(domains, p + 4) == 4) memory = p;
     }
     if (!graphics) throw std::runtime_error("The driver lists no programmable graphics clock");
     auto info = packet(0x182c, version(0x182c, 1));
@@ -83,14 +85,22 @@ Clock read_clock(Api& api) {
     if (!status[0x24]) throw std::runtime_error("The driver does not report the stock clock of its curve points");
     call(api, offsets_get_call, control, "Reading the curve offsets failed");
     Clock c{{{}, int32_t(u32(domains, *graphics + 0x2c)), int32_t(u32(domains, *graphics + 0x28))}, {}, std::move(control)};
-    for (int i = domains[*graphics + 0x30]; i <= domains[*graphics + 0x31] && i < 255; ++i) {
-        if (!(u32(info, 4 + i / 32 * 4) & (1u << (i % 32)))) continue;
-        size_t s = 0x68 + i * 0x15c;
-        c.points.graphics.push_back({u32(status, s + 8), u32(status, s + 0xc), u32(status, s + 4),
-                                     int32_t(u32(c.control, 0x44 + i * 0x24 + 0x14)), u32(info, 0x44 + i * 0x18) == 0});
-        c.index.push_back(i);
-    }
+    auto read = [&](size_t domain, std::vector<Point>& points, std::vector<int>& index) {
+        for (int i = domains[domain + 0x30]; i <= domains[domain + 0x31] && i < 255; ++i) {
+            if (!(u32(info, 4 + i / 32 * 4) & (1u << (i % 32)))) continue;
+            size_t s = 0x68 + i * 0x15c;
+            points.push_back({u32(status, s + 8), u32(status, s + 0xc), u32(status, s + 4),
+                              int32_t(u32(c.control, 0x44 + i * 0x24 + 0x14)), u32(info, 0x44 + i * 0x18) == 0});
+            index.push_back(i);
+        }
+    };
+    read(*graphics, c.points.graphics, c.index);
     if (c.points.graphics.empty()) throw std::runtime_error("The driver lists no graphics curve points");
+    if (memory) {
+        c.points.memory_min_khz = int32_t(u32(domains, *memory + 0x2c));
+        c.points.memory_max_khz = int32_t(u32(domains, *memory + 0x28));
+        read(*memory, c.points.memory, c.memory_index);
+    }
     return c;
 }
 // The points whose offset changes; refuses offsets the driver does not take.
@@ -112,26 +122,31 @@ std::vector<size_t> changes(const Clock& c, const std::vector<int>& khz) {
     }
     return out;
 }
-void refuse_afterburner() {
-    HANDLE s = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (s == INVALID_HANDLE_VALUE) return;
-    PROCESSENTRY32W e{sizeof e};
-    bool found = false;
-    for (BOOL ok = Process32FirstW(s, &e); ok && !found; ok = Process32NextW(s, &e))
-        found = !_wcsicmp(e.szExeFile, L"MSIAfterburner.exe");
-    CloseHandle(s);
-    if (found)
-        throw std::runtime_error(
-            "MSI Afterburner is running and keeps its own copy of the curve offsets. Close it first; nothing was written.");
+// The programmable memory points whose offset changes; none without `khz`. Refuses an offset the driver does not take.
+std::vector<size_t> memory_changes(const Clock& c, std::optional<int> khz) {
+    std::vector<size_t> out;
+    if (!khz) return out;
+    auto& m = c.points.memory;
+    if (*khz && std::ranges::none_of(m, &Point::programmable))
+        throw std::runtime_error("The driver lists no programmable memory clock point, so the memory offset must be 0");
+    if (*khz < c.points.memory_min_khz || *khz > c.points.memory_max_khz)
+        throw std::runtime_error("The memory offset of " + std::to_string(*khz) +
+                                 " kHz is outside the driver's limits");
+    for (size_t k = 0; k < m.size(); ++k)
+        if (m[k].programmable && m[k].offset_khz != *khz) out.push_back(k);
+    return out;
 }
-// Makes the graphics offsets equal `khz` on the offsets packet of `c` and reads them back. Returns how many changed.
-int write_offsets(Api& api, const Clock& c, const std::vector<int>& khz) {
+// Makes the graphics offsets equal `khz` and the programmable memory points' offset `memory_khz` (where given) on the
+// offsets packet of `c`, in one write, and reads them back. Returns how many graphics offsets changed and whether the
+// memory offset did.
+Applied write_offsets(Api& api, const Clock& c, const std::vector<int>& khz, std::optional<int> memory_khz) {
     auto changed = changes(c, khz);
-    if (changed.empty()) return 0;
-    refuse_afterburner();
+    auto memory = memory_changes(c, memory_khz);
+    if (changed.empty() && memory.empty()) return {};
     auto b = c.control;
     put(b, 0, version(b.size(), 2));
     for (auto k : changed) put(b, 0x44 + c.index[k] * 0x24 + 0x14, uint32_t(khz[k]));
+    for (auto k : memory) put(b, 0x44 + c.memory_index[k] * 0x24 + 0x14, uint32_t(*memory_khz));
     call(api, offsets_set_call, b, "Writing the curve offsets failed");
     Sleep(300);
     auto after = read_clock(api);
@@ -139,12 +154,17 @@ int write_offsets(Api& api, const Clock& c, const std::vector<int>& khz) {
     for (size_t k = 0; k < khz.size(); ++k)
         if (after.points.graphics[k].offset_khz != khz[k]) bad.push_back(k);
     if (!bad.empty()) throw std::runtime_error("The offsets of points " + list(bad) + " did not read back as written");
-    for (int i = 0; i < 255; ++i)
-        if (std::ranges::find(c.index, i) == c.index.end() &&
-            u32(after.control, 0x44 + i * 0x24 + 0x14) != u32(c.control, 0x44 + i * 0x24 + 0x14))
-            throw std::runtime_error("Writing the graphics offsets changed the offset of curve point " +
+    for (auto k : memory)
+        if (after.points.memory[k].offset_khz != *memory_khz)
+            throw std::runtime_error("The memory offset did not read back as written");
+    for (int i = 0; i < 255; ++i) {
+        bool written = std::ranges::find(c.index, i) != c.index.end() ||
+                       std::ranges::any_of(memory, [&](size_t k) { return c.memory_index[k] == i; });
+        if (!written && u32(after.control, 0x44 + i * 0x24 + 0x14) != u32(c.control, 0x44 + i * 0x24 + 0x14))
+            throw std::runtime_error("Writing the curve offsets changed the offset of curve point " +
                                      std::to_string(i));
-    return int(changed.size());
+    }
+    return {0, int(changed.size()), !memory.empty()};
 }
 // One SetControl per equation, each on a read of that equation alone (the only form tested), then a full read back.
 void write_equations(Api& api, const Bytes& info, const Bytes& live, const std::map<size_t, Bytes>& want) {
@@ -152,7 +172,7 @@ void write_equations(Api& api, const Bytes& info, const Bytes& live, const std::
     auto stopped = [&] {
         return done
                    ? "; the equations written before it stay written, and Restore stock in the V/F curve tab undoes them"
-                   : "; nothing was written";
+                   : "; no equation was written";
     };
     for (auto& [i, r] : want) {
         auto one = packet(equation_records_bytes, equation_records_version);
@@ -179,16 +199,20 @@ void write_equations(Api& api, const Bytes& info, const Bytes& live, const std::
     }
     if (!bad.empty()) throw std::runtime_error("V/F equations " + list(bad) + " did not read back as written");
 }
-// Without `offsets_khz` every offset becomes 0.
+// Without `offsets_khz` every graphics offset becomes 0.
 Applied write(Api& api, const Bytes& info, const Bytes& stock, const std::map<int, Bytes>& records,
-              const std::vector<int>* offsets_khz) {
+              const std::vector<int>* offsets_khz, std::optional<int> memory_khz) {
     auto n = equation_count(info);
     for (auto& [i, r] : records)
         if (i < 0 || size_t(i) >= n || r.size() != record_size) throw std::runtime_error("Malformed V/F curve record");
     // Every check before the first write.
     auto clock = read_clock(api);
     auto khz = offsets_khz ? *offsets_khz : std::vector<int>(clock.points.graphics.size(), 0);
-    if (!changes(clock, khz).empty()) refuse_afterburner();
+    // These refuse offsets outside the driver's limits.
+    auto moved = changes(clock, khz), memory_moved = memory_changes(clock, memory_khz);
+    bool replaced =
+        std::ranges::any_of(moved, [&](size_t k) { return clock.points.graphics[k].offset_khz != 0; }) ||
+        std::ranges::any_of(memory_moved, [&](size_t k) { return clock.points.memory[k].offset_khz != 0; });
     auto live = vf::records(api, info);
     std::map<size_t, Bytes> want;
     for (size_t i = 0; i < n; ++i) {
@@ -196,9 +220,21 @@ Applied write(Api& api, const Bytes& info, const Bytes& stock, const std::map<in
         auto w = r != records.end() ? std::span<const uint8_t>(r->second) : record(stock, i);
         if (!std::ranges::equal(record(live, i), w)) want.emplace(i, Bytes(w.begin(), w.end()));
     }
+    // Offsets that go down are written before the equations and those that go up after them, so that no point runs
+    // above both the old curve and the new one in between (another tool's offsets on equations of this tab, say).
+    int lowered = 0;
+    if (!want.empty()) {
+        auto low = khz;
+        for (size_t k = 0; k < low.size(); ++k) low[k] = std::min(low[k], clock.points.graphics[k].offset_khz);
+        lowered = write_offsets(api, clock, low, {}).offsets;
+    }
     write_equations(api, info, live, want);
     if (!want.empty()) clock = read_clock(api); // the offsets packet as it is after the equation writes
-    return {int(want.size()), write_offsets(api, clock, khz)};
+    auto done = write_offsets(api, clock, khz, memory_khz);
+    done.equations = int(want.size());
+    done.offsets += lowered;
+    done.replaced = replaced;
+    return done;
 }
 Bytes stock(const std::filesystem::path& directory, const Gpu& g, const Bytes& info) {
     auto s = load_stock(directory, g, info);
@@ -215,9 +251,12 @@ config::Json to_json(const Curve& c) {
     sprintf_s(equations, "%016llX", static_cast<unsigned long long>(c.gpu.equations));
     auto records = config::Json::object();
     for (auto& [i, r] : c.records) records[std::to_string(i)] = hex(r);
-    return {{"gpu", {{"device", device}, {"vbios", c.gpu.vbios}, {"driver", c.gpu.driver}, {"equations", equations}}},
-            {"records", std::move(records)},
-            {"offsetsKhz", c.offsets_khz}};
+    config::Json j{
+        {"gpu", {{"device", device}, {"vbios", c.gpu.vbios}, {"driver", c.gpu.driver}, {"equations", equations}}},
+        {"records", std::move(records)},
+        {"offsetsKhz", c.offsets_khz}};
+    if (c.memory_khz) j["memoryOffsetKhz"] = *c.memory_khz;
+    return j;
 }
 Curve curve_from_json(const config::Json& j) {
     Curve c;
@@ -240,6 +279,7 @@ Curve curve_from_json(const config::Json& j) {
         c.records.emplace(std::stoi(key), std::move(r));
     }
     config::decode(j.at("offsetsKhz"), c.offsets_khz);
+    config::field(j, "memoryOffsetKhz", c.memory_khz);
     return c;
 }
 
@@ -301,11 +341,24 @@ Applied apply(Api& api, const Curve& c, const std::filesystem::path& directory) 
     if (!why.empty())
         throw std::runtime_error("This V/F curve was made for " + why +
                                  ". Nothing was written; make the curve again in the V/F curve tab.");
-    return write(api, info, stock(directory, now, info), c.records, &c.offsets_khz);
+    return write(api, info, stock(directory, now, info), c.records, &c.offsets_khz, c.memory_khz);
+}
+Curve current(Api& api, const std::filesystem::path& directory) {
+    auto info = equation_info(api);
+    Curve c{gpu(api.identity, info)};
+    auto s = stock(directory, c.gpu, info), live = records(api, info);
+    for (size_t i = 0; i < equation_count(info); ++i)
+        if (auto r = record(live, i); !std::ranges::equal(r, record(s, i)))
+            c.records.emplace(int(i), Bytes(r.begin(), r.end()));
+    auto p = points(api);
+    for (auto& g : p.graphics) c.offsets_khz.push_back(g.offset_khz);
+    if (auto m = std::ranges::find_if(p.memory, &Point::programmable); m != p.memory.end())
+        c.memory_khz = m->offset_khz;
+    return c;
 }
 Applied restore(Api& api, const std::filesystem::path& directory) {
     auto info = equation_info(api);
-    return write(api, info, stock(directory, gpu(api.identity, info), info), {}, nullptr);
+    return write(api, info, stock(directory, gpu(api.identity, info), info), {}, nullptr, 0);
 }
 
 std::filesystem::path store_directory() {

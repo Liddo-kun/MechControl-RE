@@ -801,14 +801,15 @@ void gpu_vf_curve(const std::filesystem::path& root) {
         c.offsets_khz[90] = offset;
         return c;
     };
-    auto stock = nv::vf::Curve{identity, {}, std::vector<int>(96, 0)};
+    auto stock = nv::vf::Curve{identity, {}, std::vector<int>(96, 0), 0};
     auto on_gpu = [&](const nv::vf::Curve& c) {
         for (int i = 0; i < d.s.equations; ++i)
             if (!std::ranges::equal(nv::vf::record(d.live, i), c.records.contains(i)
                                                                    ? std::span<const uint8_t>(c.records.at(i))
                                                                    : nv::vf::record(d.s.records, i)))
                 return false;
-        return std::equal(c.offsets_khz.begin(), c.offsets_khz.end(), d.offsets.begin());
+        return std::equal(c.offsets_khz.begin(), c.offsets_khz.end(), d.offsets.begin()) &&
+               (!c.memory_khz || (d.offsets[99] == *c.memory_khz && d.offsets[100] == *c.memory_khz));
     };
     auto slot_json = [&](const nv::vf::Curve& c, int global) {
         return Json{{"curve", nv::vf::to_json(c)}, {"tune", {{"global", global}}}};
@@ -819,6 +820,7 @@ void gpu_vf_curve(const std::filesystem::path& root) {
         write_json(path / ("userprofile_" + std::to_string(n) + ".json"), p, true);
     };
     auto c1 = curve(320, 15000), c2 = curve(340, 30000), other = c1;
+    c2.memory_khz = 500000;
     other.gpu.driver = "620.00";
     slot(1, slot_json(c1, 5));
     slot(2, slot_json(c2, 10));
@@ -831,8 +833,12 @@ void gpu_vf_curve(const std::filesystem::path& root) {
           "a slot writes its V/F curve through the apply path alone, without the tuner's variable reads");
     d.sets.clear();
     d.offset_sets = 0;
-    check(c.execute(SlotLoad{2}).code == 0 && on_gpu(c2) && d.sets == std::vector{6} && d.offset_sets == 1,
-          "switching slots writes only the equations and offsets that differ");
+    auto logged = r.diagnostics.size();
+    check(c.execute(SlotLoad{2}).code == 0 && on_gpu(c2) && d.sets == std::vector{6} && d.offset_sets == 1 &&
+              std::find(r.diagnostics.begin() + logged, r.diagnostics.end(),
+                        "Slot V/F curve applied: 1 equation, 1 offset and the memory offset written") !=
+                  r.diagnostics.end(),
+          "switching slots writes only the equations and offsets that differ, the memory offset with the offsets");
     d.sets.clear();
     d.offset_sets = 0;
     check(c.execute(SlotLoad{2}).code == 0 && d.sets.empty() && d.offset_sets == 0,
@@ -845,7 +851,12 @@ void gpu_vf_curve(const std::filesystem::path& root) {
           "a GPU restart puts the stock curve back");
     c.tick(GetTickCount64() + 4000);
     check(on_gpu(c2), "the delayed GPU check writes the slot's curve again after the restart");
-    auto logged = r.diagnostics.size();
+    check(!c.execute(UiRead{0}).peripherals->at("ui").at("vfForeign"),
+          "switching between slots' curves and a GPU restart are not another tool's overclock");
+    d.offsets[10] = 45000; // another tool's offset over the slot's curve
+    check(c.execute(SlotLoad{2}).code == 0 && on_gpu(c2) && c.execute(UiRead{0}).peripherals->at("ui").at("vfForeign"),
+          "a slot's curve replaces another tool's offsets and the status says so");
+    logged = r.diagnostics.size();
     r.state->writes.clear();
     check(c.execute(SlotLoad{4}).code == 0 && !r.state->writes.empty() && on_gpu(c2) &&
               std::any_of(r.diagnostics.begin() + logged, r.diagnostics.end(),
@@ -856,9 +867,14 @@ void gpu_vf_curve(const std::filesystem::path& root) {
     check(c.execute(VfApply{std::nullopt, {{"global", 0}}}).code == 0 && on_gpu(stock) &&
               c.execute(SlotSave{5}).code == 0 &&
               read_json(path / "userprofile_5.json")["gpu"]["vfCurve"] == slot_json(stock, 0),
-          "after Restore stock, Save stores stock as a curve without records");
+          "after Restore stock, Save stores stock as a curve without records and with the memory offset 0");
     check(c.execute(SlotLoad{1}).code == 0 && on_gpu(c1) && c.execute(SlotLoad{5}).code == 0 && on_gpu(stock),
           "a slot saved at stock puts stock back");
+    auto slot5 = [&] { return read_json(path / "userprofile_5.json")["gpu"]["vfCurve"]; };
+    check(c.execute(VfForget{}).code == 0 && slot5().is_null() && c.execute(SlotSave{5}).code == 0 &&
+              slot5().is_null() && c.execute(SlotLoad{1}).code == 0 && c.execute(SlotLoad{5}).code == 0 && on_gpu(c1),
+          "Remove from profile takes the curve out of the loaded slot, a later Save keeps it out, and loading the "
+          "slot then leaves the GPU's curve");
     // A run that wrote no curve sends no V/F packet, and its Save keeps the slot's own curve.
     auto quiet_path = root / "gpu-vf-curve-untouched";
     auto quiet_owned = std::make_unique<VfGpu>();

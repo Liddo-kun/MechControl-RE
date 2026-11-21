@@ -67,6 +67,10 @@ public:
     explicit UiPageGpu(std::shared_ptr<UiPageState> s) : state_(std::move(s)) {
         enabled = true;
         driver_.follow = true;
+        // Offsets another tool left: +30 MHz at every point, +45 at point 90, and +250 MHz memory.
+        std::fill_n(driver_.offsets.begin(), 96, 30000);
+        driver_.offsets[90] = 45000;
+        driver_.offsets[99] = driver_.offsets[100] = 250000;
         api_.identity.device = 0x2c58;
         api_.identity.bios = "98.03.5e.00.1e";
         api_.identity.driver = "621.24";

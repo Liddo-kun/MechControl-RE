@@ -150,12 +150,16 @@ struct VfApply {
     std::optional<nv::vf::Curve> curve;
     config::Json tune;
 };
+// Removes the V/F curve from the loaded slot and forgets the one this run wrote or found, so that loading the slot
+// and a later Save leave the GPU's curve as it is. Writes nothing to the GPU.
+struct VfForget {};
 using ControlCommand =
     std::variant<CpuApply, GpuApply, FanApply, FanBoost, BatteryApply, SwitchApply, ProtectionApply, SlotLoad, SlotSave,
                  SlotRename, SlotClear, DefaultsApply, ThermalReset, ThermalTest, Visibility, Resume, AcEvent,
                  GpuUnlock, DlppcApply, CliCommand, LightingApply, LightingIdle, DimmingApply, PeripheralRead,
                  CoolerRequest, BatteryPage, UiRead, UiPage, UiPreflight, FanMaster, FanEdit, FanRead, PowerTransition,
-                 EcBypassApply, CoolerFlag, ChargeLimitApply, GpuKeepAwakeApply, VoltageOffsetApply, VfRead, VfApply>;
+                 EcBypassApply, CoolerFlag, ChargeLimitApply, GpuKeepAwakeApply, VoltageOffsetApply, VfRead, VfApply,
+                 VfForget>;
 // How the worker treats each command. Every command needs an entry: command_traits() fails to compile without one.
 struct CommandTraits {
     bool notification = false; // Lifecycle event, run even during the wait for a blocking device operation.
@@ -213,6 +217,7 @@ inline CommandTraits traits(const PowerTransition&) { return {.notification = tr
 inline CommandTraits traits(const AcEvent&) { return {.notification = true}; }
 inline CommandTraits traits(const VfRead&) { return {}; }
 inline CommandTraits traits(const VfApply&) { return {}; }
+inline CommandTraits traits(const VfForget&) { return {.catalog = true}; }
 inline CommandTraits command_traits(const ControlCommand& command) {
     return std::visit([](const auto& c) { return traits(c); }, command);
 }
@@ -220,14 +225,16 @@ namespace nv::vf {
 class Tuner;
 }
 // What the V/F Curve tab reads: the tuner when the read opened it, the GPU the driver's equations belong to, its live
-// equation records and curve points, how many equations and offsets a VfApply wrote, and the tune of the curve this run
-// last wrote (from the tab or a profile; null when none).
+// equation records and curve points, how many equations and offsets a VfApply wrote and whether it wrote the memory
+// offset, and the tune of the curve this run last wrote (from the tab or a profile; null when none).
 struct VfReading {
     std::shared_ptr<const nv::vf::Tuner> tuner;
     nv::vf::Gpu gpu;
     nv::Bytes records;
     nv::vf::Points points;
     int equations = 0, offsets = 0;
+    bool memory = false; // the memory offset was written
+    bool found = false;  // the tune is that of the curve found on the GPU, which Save stores (Controller::vf_found_)
     config::Json tune;
 };
 // Status of the current curve/master/link request, not boost/switch, physical cooling or saved state.
@@ -327,7 +334,8 @@ private:
         run(const CoolerRequest&), run(const BatteryPage&), run(const UiRead&), run(const UiPage&),
         run(const UiPreflight&), run(const FanMaster&), run(const FanEdit&), run(const FanRead&),
         run(const PowerTransition&), run(const EcBypassApply&), run(const CoolerFlag&), run(const ChargeLimitApply&),
-        run(const GpuKeepAwakeApply&), run(const VoltageOffsetApply&), run(const VfRead&), run(const VfApply&);
+        run(const GpuKeepAwakeApply&), run(const VoltageOffsetApply&), run(const VfRead&), run(const VfApply&),
+        run(const VfForget&);
     cli::Reply cli(const std::vector<std::string>&);
     config::Json status();
     config::Json cpu_status(), gpu_status(bool presentation = false), fans_status(), gpu_telemetry(), gpu_budget();
@@ -364,6 +372,7 @@ private:
     std::filesystem::path vf_directory() const;
     std::shared_ptr<VfReading> vf_read(nv::Api&);
     void apply_vf(const nv::vf::Curve&, const char* what);
+    bool vf_overclock();
     std::unique_ptr<nv::Power> nvidia_;
     // DLPPC and the temperature target need only NVAPI; used while nvidia_ is unavailable (an older GPU or
     // unsupported BIOS limits).
@@ -378,6 +387,12 @@ private:
     // slot Save stores them; the delayed GPU check writes the curve again after a GPU restart, which clears it.
     std::optional<nv::vf::Curve> vf_curve_;
     config::Json vf_tune_;
+    // Without one, the curve found on the GPU when the tab opened (another tool's offsets or equations), with vf_tune_
+    // made from its offsets; Save stores it, but nothing writes it.
+    std::optional<nv::vf::Curve> vf_found_;
+    // Offsets that no curve of this run wrote, looked for once by the first GPU status: the status bar's notice.
+    bool vf_looked_ = false, vf_seen_ = false;
+    bool vf_foreign_ = false; // a slot's curve replaced another tool's offsets: the status bar's warning
     std::optional<nv::TempTarget> temp_target_; // As last read or written.
     std::optional<int> temp_target_request_;    // What this run applied; the delayed GPU check restores it.
     bool nvidia_offered_ = false; // Fixed at startup; nvidia_available_ also goes false when the driver refuses.
