@@ -26,6 +26,16 @@ To start MechControl at logon, create a Task Scheduler task for the full executa
 path that runs with highest privileges, has no execution time limit and is allowed
 on battery. The project page has a PowerShell command for this.
 
+## Update notice
+
+The **About** tab shows the version, the system information and links to the project's GitHub
+page and Discord server. Once a day, starting a minute after MechControl starts, it asks GitHub
+for the latest release. This is the only connection it makes to the internet. When a newer
+version exists, the tray shows a notice once, and the About tab links to the release page.
+MechControl never downloads or installs anything itself. To update, exit it from the tray and
+extract the new archive over this folder. **Check now** asks at once. Clear **Check for updates
+daily** to stop the daily check.
+
 ## Upgrading from the C# version (v1.6.0)
 
 This version reads the settings and profile files that v1.6.0 writes. Exit the old

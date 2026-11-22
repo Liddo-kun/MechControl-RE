@@ -1,5 +1,8 @@
 #include <windows.h>
 1 ICON "app.ico"
+2 ICON "about/github-light.ico"
+3 ICON "about/github-dark.ico"
+4 ICON "about/discord.ico"
 1000 RCDATA "TrayIcons/kekwait_000.png"
 1001 RCDATA "TrayIcons/kekwait_001.png"
 1002 RCDATA "TrayIcons/kekwait_002.png"

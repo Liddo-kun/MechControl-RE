@@ -3,6 +3,7 @@
 #include "config_text.h"
 #include "gpu_keepawake.h"
 #include "page.h"
+#include "update.h"
 #include "theme.h"
 #include "vf_tab.h"
 #ifdef MECHCONTROL_WITH_CLI
@@ -39,7 +40,8 @@ constexpr wchar_t mainClass[] = L"MechControl.Native.Main";
 constexpr wchar_t panelClass[] = L"MechControl.Native.Panel";
 constexpr UINT trayMessage = WM_APP + 2, fanEditMessage = WM_APP + 4;
 constexpr int appIconId = 1; // resources/app.rc; the lowest icon ID is the one Explorer shows for the executable.
-// The tabs made at startup, Power to System Info, then the V/F Curve tab, which is offered on an NVIDIA GPU only.
+// The tabs made at startup, Power to About (which holds the system information), then the V/F Curve tab, which is
+// offered on an NVIDIA GPU only.
 constexpr int pageCount = 7, vfPage = pageCount;
 // GUID_CONSOLE_DISPLAY_STATE and GUID_ACDC_POWER_SOURCE.
 constexpr GUID displayState{0x6FE69556, 0x704A, 0x47A0, {0x8F, 0x24, 0xC2, 0x8D, 0x93, 0x6F, 0xDA, 0x47}},
@@ -134,8 +136,23 @@ enum Id {
     coolerGId,
     coolerBId,
     rgbModeId,
-    coolerRgbApplyId
+    coolerRgbApplyId,
+    updateStatusId = 900,
+    checkNowId,
+    updateCheckId,
+    githubId,
+    discordId
 };
+// resources/app.rc: the About section's GitHub mark in dark ink (3: light ink), and the Discord mark.
+constexpr int githubIconId = 2, discordIconId = 4;
+constexpr wchar_t githubUrl[] = L"https://github.com/Liddo-kun/MechControl-RE",
+                  discordUrl[] = L"https://discord.gg/nEBspQXNR";
+constexpr UINT_PTR updateTimer = 4; // 1 animates the tray icon; GpuKeepAwake has 2 and 3.
+#ifdef MECHCONTROL_PAGE_CHECK
+constexpr bool automaticUpdates = false; // The UI checks answer Check now themselves (checkReply_).
+#else
+constexpr bool automaticUpdates = true;
+#endif
 std::wstring w(const std::string& value) { return wide(value); }
 std::wstring text(HWND window) {
     int n = GetWindowTextLengthW(window);
@@ -425,6 +442,8 @@ public:
         for (auto icon : slotIcons_)
             if (icon) DestroyIcon(icon);
         for (auto icon : animation_) DestroyIcon(icon);
+        for (auto icon : aboutIcons_)
+            if (icon) DestroyIcon(icon);
         if (appIcon_) DestroyIcon(appIcon_);
     }
     HWND create() {
@@ -461,7 +480,7 @@ public:
 private:
     static LRESULT CALLBACK pageProcedure(HWND window, UINT message, WPARAM wp, LPARAM lp, UINT_PTR, DWORD_PTR data) {
         auto app = reinterpret_cast<Application*>(data);
-        if (message == WM_COMMAND || message == WM_HSCROLL || message == WM_NOTIFY)
+        if (message == WM_COMMAND || message == WM_HSCROLL || message == WM_NOTIFY || message == WM_DRAWITEM)
             return SendMessageW(app->window_, message, wp, lp);
         // Up-down controls also send WM_VSCROLL; only the page's own scroll bar scrolls it.
         if ((message == WM_VSCROLL && !lp) || message == WM_MOUSEWHEEL) {
@@ -638,8 +657,8 @@ private:
         updating_ = true;
         tabs_ = control(window_, WC_TABCONTROLW, L"", WS_TABSTOP | WS_CLIPSIBLINGS, tabsId);
         styleTabs(tabs_);
-        const wchar_t* names[]{L"Power",    L"Fan Control",   L"Thermal Failsafe", L"Battery",
-                               L"Lighting", L"Liquid Cooler", L"System Info"};
+        const wchar_t* names[]{L"Power",         L"Fan Control", L"Thermal Failsafe", L"Battery", L"Lighting",
+                               L"Liquid Cooler", L"About"};
         for (int i = 0; i < pageCount; ++i) {
             TCITEMW item{};
             item.mask = TCIF_TEXT;
@@ -785,6 +804,12 @@ private:
         rgb(5, coolerRgbOnId);
         combo(5, rgbModeId, {L"Static", L"Breathe", L"Colorful", L"Breathe Color"});
         button(5, coolerRgbApplyId, L"Apply", true);
+        row(6, updateStatusId, L"", WC_LINK, WS_TABSTOP | LWS_TRANSPARENT | LWS_NOPREFIX);
+        button(6, checkNowId, L"Check now");
+        check(6, updateCheckId, L"Check for updates daily");
+        row(6, githubId, L"GitHub", L"BUTTON", WS_TABSTOP | BS_OWNERDRAW);
+        row(6, discordId, L"Discord", L"BUTTON", WS_TABSTOP | BS_OWNERDRAW);
+        showUpdate();
         progress_ = control(window_, PROGRESS_CLASSW, L"Device operation progress", PBS_MARQUEE, 0);
         ShowWindow(progress_, SW_HIDE);
         for (int id : {cpuChartId, gpuChartId, debugCpuId, debugGpuId}) styleFrame(get(id));
@@ -852,6 +877,13 @@ private:
         header_ = header;
         heading_ = heading;
         for (int id : {cpuChartId, gpuChartId, debugCpuId, debugGpuId}) SendMessageW(get(id), chartDpiMessage, dpi_, 0);
+        // The About section's app icon and the marks on its link buttons, each from its nearest larger size.
+        for (auto& icon : aboutIcons_)
+            if (icon) DestroyIcon(std::exchange(icon, nullptr));
+        constexpr int icons[]{appIconId, githubIconId, githubIconId + 1, discordIconId};
+        for (int i = 0; i < 4; ++i)
+            LoadIconWithScaleDown(instance_, MAKEINTRESOURCEW(icons[i]), scale(i ? 16 : 40), scale(i ? 16 : 40),
+                                  &aboutIcons_[i]);
         setThemeDpi(dpi_);
         for (auto& p : pages_) p.texts.clear(); // measured with the old fonts, whose handles may be reused
         layout(true);
@@ -1395,20 +1427,59 @@ private:
         s.frames.back().rect.right = cx + ref(135);
         if (s.place) coolerSwatch_ = swatch;
     }
-    // System Identity, Temperatures and Power Delivery, as in the reference SystemInfoTab. Each section fits its
-    // contents; the readings are painted into their cells.
+    // About: the app icon, name and version with the update notice beside it, the update controls, then the links.
+    void layoutAbout(Sections& s) {
+        s.open(L"About", s.x, 0);
+        int left = s.x + ref(21), icon = scale(40), header = s.height(header_), textLeft = left + icon + ref(18);
+        auto status = get(updateStatusId);
+        SIZE ideal{};
+        int statusHeight = int(
+                SendMessageW(status, LM_GETIDEALSIZE, std::max(0, s.end - textLeft), reinterpret_cast<LPARAM>(&ideal))),
+            block = std::max(icon, header + ref(4) + statusHeight), top = s.y,
+            textTop = top + (block - header - ref(4) - statusHeight) / 2;
+        if (s.place) aboutIcon_ = {left, top + (block - icon) / 2, left + icon, top + (block - icon) / 2 + icon};
+        int right = s.say(L"MechControl", textLeft, textTop, palette().text, header_, header);
+        right = s.say(L"Version " + update::text(update::current()), right + ref(12),
+                      textTop + header - s.line - ref(2), palette().muted, font_);
+        s.put(status, textLeft, textTop + header + ref(4), ideal.cx, statusHeight);
+        right = std::max(right, textLeft + int(ideal.cx));
+        s.y = top + block + ref(14);
+        int check = s.extent(font_, L"Check now") + ref(48), box = s.checkWidth(updateCheckId, font_);
+        s.put(get(checkNowId), left, s.y, check, s.button);
+        s.put(get(updateCheckId), left + check + ref(20), s.y + (s.button - s.box) / 2, box, s.box);
+        right = std::max(right, left + check + ref(20) + box);
+        s.y += s.button + ref(12);
+        int x = left;
+        for (int id : {githubId, discordId}) {
+            // A link button: its mark, then its name.
+            int w = ref(16) + scale(16) + ref(10) + s.extent(font_, text(get(id))) + ref(22);
+            s.put(get(id), x, s.y, w, s.button);
+            x += w + ref(12);
+        }
+        right = std::max(right, x - ref(12));
+        s.y += s.button;
+        auto& f = s.frames.back();
+        f.rect.right = s.fit(f.title, s.x, right + ref(21));
+        s.close();
+    }
+    // About, then System Identity, Temperatures and Power Delivery, as in the reference SystemInfoTab. Each section
+    // fits its contents; the readings are painted into their cells.
     void layoutInfo(Sections& s) {
-        int left = s.x + ref(21), right = 0;
+        layoutAbout(s);
+        // A section starts at from, its content at left; close() returns its right edge.
+        int from = s.x, left = 0, right = 0;
         COLORREF black = palette().text;
         std::array<RECT, 9> cells{};
         auto open = [&](const wchar_t* title) {
-            s.open(title, s.x, 0);
+            s.open(title, from, 0);
+            left = from + ref(21);
             right = 0;
         };
         auto close = [&] {
             auto& f = s.frames.back();
-            f.rect.right = s.fit(f.title, s.x, right + ref(21));
+            f.rect.right = s.fit(f.title, from, right + ref(21));
             s.close();
+            return int(f.rect.right);
         };
         // Bold captions and their readings' cells. Index -1 is a source heading.
         auto table = [&](const wchar_t* title, const std::vector<std::pair<int, std::wstring>>& rows) {
@@ -1433,6 +1504,7 @@ private:
         };
         auto identity = identity_.is_object() ? identity_ : Json::object();
         auto board = w(identity.value("baseboard", std::string{})), cpu = w(identity.value("cpu", std::string{}));
+        int top = s.y, beside = s.x;
         if (!board.empty() || !cpu.empty()) {
             open(L"System Identity");
             if (!board.empty()) {
@@ -1444,7 +1516,7 @@ private:
                 right = std::max(right, s.say(cpu, left, s.y, black, font_));
                 s.y += s.line;
             }
-            close();
+            beside = close() + ref(24);
         }
         // Temperature registers come from the model profile; the other readings use fixed registers.
         auto reg = [&](const char* key) {
@@ -1452,8 +1524,19 @@ private:
             if (state_.contains(key)) swprintf_s(t, L" [0x%03X]", state_[key].get<int>());
             return std::wstring(t);
         };
-        table(L"Temperatures", {{0, L"CPU Temperature" + reg("cpuTempRegister") + L":"},
-                                {1, L"GPU Temperature" + reg("gpuTempRegister") + L":"}});
+        std::vector<std::pair<int, std::wstring>> temperatures{{0, L"CPU Temperature" + reg("cpuTempRegister") + L":"},
+                                                               {1, L"GPU Temperature" + reg("gpuTempRegister") + L":"}};
+        // Temperatures sits beside System Identity where it fits, and below it otherwise.
+        int captions = std::max(s.extent(bold_, temperatures[0].second), s.extent(bold_, temperatures[1].second)),
+            width = ref(21) + captions + ref(16) + std::max(infoWidth(s.dc, 0), infoWidth(s.dc, 1)) + ref(21),
+            below = s.y;
+        if (s.fit(L"Temperatures", beside, beside + width) <= s.right) {
+            from = beside;
+            s.y = top;
+        }
+        table(L"Temperatures", temperatures);
+        s.y = std::max(s.y, below);
+        from = s.x;
         std::vector<std::pair<int, std::wstring>> power{{2, L"Input Power, smoothed (One Euro):"},
                                                         {3, L"Input Power, EC smoothed [0x700-0x701]:"},
                                                         {4, L"Input Current [0x449] x Voltage [0x448]:"},
@@ -1499,6 +1582,8 @@ private:
             for (int zone = 0; zone < 3; ++zone) swatch(swatches_[zone], zoneBaseId + zone * 16);
         if (index == 5) swatch(coolerSwatch_, coolerRgbOnId);
         if (index == 6) {
+            DrawIconEx(dc, aboutIcon_.left, aboutIcon_.top, aboutIcons_[0], aboutIcon_.right - aboutIcon_.left,
+                       aboutIcon_.bottom - aboutIcon_.top, 0, nullptr, DI_NORMAL);
             for (int i = 0; i < 9; ++i)
                 if (infoCells_[i].right > infoCells_[i].left) {
                     // The smoothed input power is the figure to read: bold and accented, with the EC's own readings
@@ -1803,7 +1888,8 @@ private:
         }
     }
     bool flat(int id) const {
-        return id == saveId || id == defaultsId || id == readId || (id >= slotId && id < slotId + 5);
+        return id == saveId || id == defaultsId || id == readId || id == githubId || id == discordId ||
+               (id >= slotId && id < slotId + 5);
     }
     bool emptySlot(int i) const { return state_.contains("slots") && !state_.at("slots").at(i).get<bool>(); }
     // The reference's flat profile buttons: the selected slot is filled with the accent color, empty slots are gray.
@@ -1829,26 +1915,43 @@ private:
         Buffer buffer(d.hDC, d.rcItem);
         auto dc = buffer.dc;
         RECT r = d.rcItem;
-        FillRect(dc, &r, brush(p.window));
+        int page = index(GetParent(d.hwndItem));
+        FillRect(dc, &r, brush(page >= 0 ? pages_[page].backdrop(d.hwndItem) : p.window));
         roundRect(dc, r, ref(8), fill, edge);
         if (p.contrast && focus) {
             RECT inner = r;
             InflateRect(&inner, -ref(3), -ref(3));
             DrawFocusRect(dc, &inner);
         }
+        UINT align = DT_CENTER;
+        // The About section's link buttons start with their mark; GitHub's is in the ink nearer the text color.
+        if (id == githubId || id == discordId) {
+            bool lightInk = GetRValue(p.text) + GetGValue(p.text) + GetBValue(p.text) > 384;
+            int size = scale(16), x = r.left + ref(16);
+            DrawIconEx(dc, x, (r.top + r.bottom - size) / 2,
+                       aboutIcons_[id == discordId ? 3
+                                   : lightInk      ? 2
+                                                   : 1],
+                       size, size, 0, nullptr, DI_NORMAL);
+            r.left = x + size + ref(10);
+            align = DT_LEFT;
+        }
         SelectObject(dc, active || id == saveId ? bold_ : font_);
         SetTextColor(dc, ink);
         auto s = text(d.hwndItem);
         DrawTextW(dc, s.c_str(), -1, &r,
-                  DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS |
+                  align | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS |
                       (d.itemState & ODS_NOACCEL ? DT_HIDEPREFIX : 0));
     }
     LRESULT customDraw(const NMCUSTOMDRAW& draw) {
         int id = int(draw.hdr.idFrom);
         if (draw.hdr.hwndFrom != get(id)) return CDRF_DODEFAULT;
         // A support note takes the color of the painted note it stands in for; other link text is normal text.
-        if (id == advancedId || id == detailsId || support_.contains(id))
-            return drawLink(draw, support_.contains(id) ? support_.at(id).color : palette().text);
+        if (id == advancedId || id == detailsId || id == updateStatusId || support_.contains(id))
+            return drawLink(draw, support_.contains(id) ? support_.at(id).color
+                                  : id == updateStatusId
+                                      ? (updateNotice_.starts_with(L"Version") ? palette().accent : palette().muted)
+                                      : palette().text);
         return drawControl(draw, primary_.contains(id));
     }
     void scroll(HWND window, UINT message, WPARAM wp) {
@@ -2263,10 +2366,14 @@ private:
             break;
         }
         case dlppcId: request(DlppcApply{checked(id)}); break;
+        case checkNowId: checkUpdates(true); break;
+        case githubId: openUnelevated(githubUrl); break;
+        case discordId: openUnelevated(discordUrl); break;
         case bypassId:
         case coolerFlagId:
         case autoBootId:
-        case keepAwakeId: {
+        case keepAwakeId:
+        case updateCheckId: {
             bool on = checked(id);
             updating_ = true;
             SendMessageW(get(id), BM_SETCHECK, on ? BST_UNCHECKED : BST_CHECKED, 0);
@@ -2277,6 +2384,8 @@ private:
                 request(AcAutoBootApply{on});
             else if (id == keepAwakeId)
                 request(GpuKeepAwakeApply{on});
+            else if (id == updateCheckId)
+                request(UpdateCheckApply{on});
             else if (
                 !on ||
                 confirm(
@@ -2704,6 +2813,13 @@ private:
             checked(keepAwakeId, j["gpuKeepAwake"].get<bool>());
             if (keepAwake_) keepAwake_->enable(j["gpuKeepAwake"].get<bool>());
         }
+        if (j.contains("updateCheck") && j["updateCheck"].get<bool>() != updateCheck_) {
+            updateCheck_ = j["updateCheck"].get<bool>();
+            checked(updateCheckId, updateCheck_);
+            // The first check waits a minute, so it does not compete with startup or a network still connecting.
+            scheduleUpdate(latest_ ? 24 * 3600 * 1000 : 60 * 1000);
+            showUpdate();
+        }
         if (j.value("vfCurve", false) && !vfOffered_) {
             vfOffered_ = true;
             TCITEMW item{TCIF_TEXT};
@@ -2866,6 +2982,72 @@ private:
         GetTextExtentPoint32W(dc, usual[i], int(wcslen(usual[i])), &a);
         GetTextExtentPoint32W(dc, infoText_[i].c_str(), int(infoText_[i].size()), &b);
         return int(std::max(a.cx, b.cx));
+    }
+    // The update notice (update.h): with the daily check on, the first check runs a minute after start and the next a
+    // day after a check. A failed check is only logged. Check now asks at once, also with the daily check off.
+    void scheduleUpdate(UINT ms) {
+        KillTimer(window_, updateTimer);
+        if (updateCheck_ && automaticUpdates && !checking_) SetTimer(window_, updateTimer, ms, nullptr);
+    }
+    void checkUpdates(bool manual) {
+        if (checking_) return;
+        checking_ = true;
+        manualCheck_ = manual;
+        KillTimer(window_, updateTimer);
+        showUpdate();
+#ifdef MECHCONTROL_PAGE_CHECK
+        delivery_->post(
+            {checkReply_.starts_with(L"v") ? ResultKind::update : ResultKind::updateFailed, 0, checkReply_});
+#else
+        update::check(delivery_);
+#endif
+    }
+    void updateResult(const Result& r) {
+        checking_ = false;
+        auto latest = r.kind == ResultKind::update ? update::parse(utf8(r.text)) : std::nullopt;
+        if (latest) {
+            latest_ = latest;
+            SYSTEMTIME t{};
+            GetLocalTime(&t);
+            wchar_t date[80]{}, clock[80]{};
+            GetDateFormatEx(LOCALE_NAME_USER_DEFAULT, DATE_SHORTDATE, &t, nullptr, date, 80, nullptr);
+            GetTimeFormatEx(LOCALE_NAME_USER_DEFAULT, TIME_NOSECONDS, &t, nullptr, clock, 80);
+            checkedAt_ = std::wstring(date) + L" " + clock;
+            log_.write("Update check: the latest release is " + utf8(r.text) + ", this is " +
+                       utf8(update::text(update::current())));
+            // Once per version. Someone who clicked Check now is looking at the answer; otherwise the tray tells.
+            if (*latest > update::current() && announced_ != latest) {
+                announced_ = latest;
+                if (!manualCheck_) {
+                    balloon(L"MechControl " + update::text(*latest) + L" is available",
+                            L"Click to open the About tab, which links to the release.", NIIF_INFO);
+                    updateBalloon_ = true;
+                }
+            }
+        } else
+            log_.write(std::string(r.kind == ResultKind::update ? "Update check: no version in the tag "
+                                                                : "Update check failed: ") +
+                       utf8(r.text));
+        scheduleUpdate(24 * 3600 * 1000);
+        showUpdate();
+    }
+    // The notice beside the version; a newer release links to its page.
+    void showUpdate() {
+        std::wstring notice;
+        if (checking_)
+            notice = L"Checking for updates…";
+        else if (latest_ && *latest_ > update::current())
+            notice = L"Version " + update::text(*latest_) + L" is available. <a>Get it on GitHub</a>";
+        else if (latest_)
+            notice = L"You have the latest version. Checked " + checkedAt_ + L".";
+        else
+            notice =
+                updateCheck_ ? L"Checks for updates a minute after start, then daily." : L"Not checked for updates.";
+        enable(checkNowId, !checking_);
+        if (notice == updateNotice_) return;
+        updateNotice_ = notice;
+        SetWindowTextW(get(updateStatusId), notice.c_str());
+        if (font_) layoutPage(pages_[6]);
     }
     void peripherals(const Json& j) {
         if (j.contains("battery")) peripheralState_.erase("batteryError");
@@ -3135,6 +3317,10 @@ private:
                 selectModel(result.selection);
                 continue;
             }
+            if (result.kind == ResultKind::update || result.kind == ResultKind::updateFailed) {
+                updateResult(result);
+                continue;
+            }
             if (result.kind == ResultKind::warning) {
                 setStatus(L"EC initialization had errors; see mechcontrol.log.");
                 MessageBoxW(window_, result.text.c_str(), L"EC Init Warning", MB_OK | MB_ICONWARNING);
@@ -3321,6 +3507,7 @@ private:
         icon.uID = 1;
         icon.uFlags = NIF_INFO;
         icon.dwInfoFlags = flags;
+        updateBalloon_ = false; // The update notice sets it after showing its balloon.
         wcsncpy_s(icon.szInfoTitle, title.c_str(), _TRUNCATE);
         wcsncpy_s(icon.szInfo, text.c_str(), _TRUNCATE);
         Shell_NotifyIconW(NIM_MODIFY, &icon);
@@ -3412,6 +3599,10 @@ private:
                 } else
                     tray();
             }
+            if (wp == updateTimer) {
+                KillTimer(window_, updateTimer);
+                checkUpdates(false);
+            }
             if (keepAwake_) keepAwake_->timer(wp);
             return 0;
         case GpuKeepAwake::sleepMessage:
@@ -3474,6 +3665,8 @@ private:
             if (n->code == NM_CUSTOMDRAW) return customDraw(*reinterpret_cast<NMCUSTOMDRAW*>(lp));
             if (auto note = support_.find(int(n->idFrom)); note != support_.end())
                 if (n->code == NM_CLICK || n->code == NM_RETURN) openUnelevated(issueUrl(note->second));
+            if (n->idFrom == updateStatusId && (n->code == NM_CLICK || n->code == NM_RETURN))
+                openUnelevated(update::releasePage);
             if (n->idFrom == advancedId && (n->code == NM_CLICK || n->code == NM_RETURN)) {
                 advanced_ = !advanced_;
                 SetWindowTextW(get(advancedId),
@@ -3529,6 +3722,11 @@ private:
                 menu();
             else if (LOWORD(lp) == NIN_SELECT || LOWORD(lp) == NIN_KEYSELECT)
                 show();
+            else if (LOWORD(lp) == NIN_BALLOONUSERCLICK && updateBalloon_) {
+                show();
+                TabCtrl_SetCurSel(tabs_, 6);
+                selectPage();
+            }
             return 0;
         case WM_POWERBROADCAST:
             if (keepAwake_ && wp == PBT_POWERSETTINGCHANGE) {
@@ -3599,6 +3797,16 @@ private:
     std::array<HICON, 5> slotIcons_{};
     std::vector<HICON> animation_;
     HICON appIcon_ = nullptr;
+    // The About section: its app icon, GitHub's mark in dark and in light ink, Discord's mark; where the app icon is.
+    std::array<HICON, 4> aboutIcons_{};
+    RECT aboutIcon_{};
+    // The update notice. latest_ is the release the last successful check found; announced_ the one the tray told.
+    bool updateCheck_ = false, checking_ = false, manualCheck_ = false, updateBalloon_ = false;
+    std::optional<update::Version> latest_, announced_;
+    std::wstring checkedAt_, updateNotice_;
+#ifdef MECHCONTROL_PAGE_CHECK
+    std::wstring checkReply_; // What Check now gets: a tag, or a failure's reason.
+#endif
     size_t animationFrame_ = 0;
     int trayState_ = -3, lostAlerts_ = 0;
     bool closing_ = false, trayAdded_ = false, updating_ = false, busy_ = false, ready_ = false, tripped_ = false,

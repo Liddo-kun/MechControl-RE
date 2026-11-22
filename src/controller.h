@@ -59,6 +59,10 @@ struct AcAutoBootApply {
 struct GpuKeepAwakeApply {
     bool enabled;
 };
+// Application setting; the UI runs the daily update check itself (update.h).
+struct UpdateCheckApply {
+    bool enabled;
+};
 // Millivolts below stock, stored in the BIOS and not in a slot; see VoltageOffset.
 struct VoltageOffsetApply {
     int millivolts;
@@ -162,8 +166,8 @@ using ControlCommand =
                  SlotRename, SlotClear, DefaultsApply, ThermalReset, ThermalTest, Visibility, Resume, AcEvent,
                  GpuUnlock, DlppcApply, CliCommand, LightingApply, LightingIdle, DimmingApply, PeripheralRead,
                  CoolerRequest, BatteryPage, UiRead, UiPage, UiPreflight, FanMaster, FanEdit, FanRead, PowerTransition,
-                 EcBypassApply, CoolerFlag, ChargeLimitApply, AcAutoBootApply, GpuKeepAwakeApply, VoltageOffsetApply,
-                 VfRead, VfApply, VfForget>;
+                 EcBypassApply, CoolerFlag, ChargeLimitApply, AcAutoBootApply, GpuKeepAwakeApply, UpdateCheckApply,
+                 VoltageOffsetApply, VfRead, VfApply, VfForget>;
 // How the worker treats each command. Every command needs an entry: command_traits() fails to compile without one.
 struct CommandTraits {
     bool notification = false; // Lifecycle event, run even during the wait for a blocking device operation.
@@ -196,6 +200,7 @@ inline CommandTraits traits(const BatteryApply&) { return {.stale = tab::battery
 inline CommandTraits traits(const ChargeLimitApply&) { return {.stale = tab::battery}; }
 inline CommandTraits traits(const AcAutoBootApply&) { return {.stale = tab::battery}; }
 inline CommandTraits traits(const GpuKeepAwakeApply&) { return {.present = true}; }
+inline CommandTraits traits(const UpdateCheckApply&) { return {.present = true}; }
 inline CommandTraits traits(const VoltageOffsetApply&) { return {.present = true}; }
 inline CommandTraits traits(const LightingApply&) { return {.stale = tab::lighting}; }
 inline CommandTraits traits(const LightingIdle&) { return {.stale = tab::lighting}; }
@@ -341,8 +346,8 @@ private:
         run(const CoolerRequest&), run(const BatteryPage&), run(const UiRead&), run(const UiPage&),
         run(const UiPreflight&), run(const FanMaster&), run(const FanEdit&), run(const FanRead&),
         run(const PowerTransition&), run(const EcBypassApply&), run(const CoolerFlag&), run(const ChargeLimitApply&),
-        run(const AcAutoBootApply&), run(const GpuKeepAwakeApply&), run(const VoltageOffsetApply&), run(const VfRead&),
-        run(const VfApply&), run(const VfForget&);
+        run(const AcAutoBootApply&), run(const GpuKeepAwakeApply&), run(const UpdateCheckApply&),
+        run(const VoltageOffsetApply&), run(const VfRead&), run(const VfApply&), run(const VfForget&);
     cli::Reply cli(const std::vector<std::string>&);
     config::Json status();
     config::Json cpu_status(), gpu_status(bool presentation = false), fans_status(), gpu_telemetry(), gpu_budget();

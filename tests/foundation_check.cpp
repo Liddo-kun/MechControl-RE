@@ -1,5 +1,6 @@
 #include "worker.h"
 #include "counters.h"
+#include "update.h"
 #include <pdh.h>
 #include <iostream>
 #include <stdexcept>
@@ -22,6 +23,26 @@ int wmain(int argc, wchar_t**) {
         delivery->close();
         delivery->post({mech::ResultKind::ble, 0, L"late callback"});
         require(delivery->take().empty(), "closed delivery rejects late callback");
+        using mech::update::parse, mech::update::Version;
+        require(parse("v3.1.0") == Version{3, 1, 0} && parse("3.1") == Version{3, 1, 0} &&
+                    parse("v10.0.2") == Version{10, 0, 2},
+                "release tags are versions");
+        require(!parse("v3") && !parse("v3.1.0-beta") && !parse("3.1.0.1") && !parse("v-1.0") && !parse("v3..1") &&
+                    !parse(""),
+                "other tags are not versions");
+        require(*parse("v10.0.0") > *parse("v9.9.9") && *parse("v3.0.1") > *parse("v3.0.0") &&
+                    !(*parse("v3.0.0") > *parse("3.0")),
+                "versions compare by number");
+        require(mech::update::latestTag(R"({"tag_name":"v3.1.0","name":"MechControl v3.1.0"})") == "v3.1.0",
+                "the latest release's tag is read from GitHub's reply");
+        bool refused = false;
+        try {
+            mech::update::latestTag(R"({"message":"Not Found"})");
+        } catch (const std::runtime_error&) {
+            refused = true;
+        }
+        require(refused && mech::update::current()[0] >= 3,
+                "a reply without a tag is an error; this build has a version");
         if (argc > 1) {
             mech::Counters counters;
             require(counters.error() == ERROR_SUCCESS, "native PerfLib provider starts");

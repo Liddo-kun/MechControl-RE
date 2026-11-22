@@ -1607,6 +1607,10 @@ ControlResult Controller::run(const GpuKeepAwakeApply& c) {
     store_.set_gpu_keep_awake(c.enabled); // The UI runs it; see GpuKeepAwake.
     return {.text = c.enabled ? "GPU keep-awake on" : "GPU keep-awake off", .applied = true};
 }
+ControlResult Controller::run(const UpdateCheckApply& c) {
+    store_.set_update_check(c.enabled);
+    return {.text = c.enabled ? "Update checks on" : "Update checks off", .applied = true};
+}
 ControlResult Controller::run(const VoltageOffsetApply& c) {
     if (!voltage_.unavailable.empty())
         throw std::runtime_error("CPU core voltage offset unavailable: " + voltage_.unavailable);

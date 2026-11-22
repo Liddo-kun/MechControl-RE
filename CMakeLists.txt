@@ -39,19 +39,20 @@ add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/mechcontrol_counters.h" "
   COMMAND "${CTRPP}" -o "${CMAKE_CURRENT_BINARY_DIR}/mechcontrol_counters.h"
     -rc "${CMAKE_CURRENT_BINARY_DIR}/counters.rc" "${CMAKE_CURRENT_SOURCE_DIR}/resources/counters.man"
   DEPENDS resources/counters.man VERBATIM)
-add_library(foundation STATIC src/log.cpp src/worker.cpp src/counters.cpp
+add_library(foundation STATIC src/log.cpp src/worker.cpp src/counters.cpp src/update.cpp
   "${CMAKE_CURRENT_BINARY_DIR}/mechcontrol_counters.h")
 target_include_directories(foundation PUBLIC src PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
-target_link_libraries(foundation PUBLIC advapi32 windowsapp ec)
+target_compile_definitions(foundation PRIVATE "MECHCONTROL_VERSION=\"${PROJECT_VERSION}\"")
+target_link_libraries(foundation PUBLIC advapi32 windowsapp ec winhttp)
 add_executable(MechControl WIN32 src/ui.cpp src/fan_chart.cpp src/theme.cpp src/page.cpp src/gpu_keepawake.cpp src/vf_tab.cpp src/vf_chart.cpp
   src/vf_numbers.cpp resources/app.rc
   "${CMAKE_CURRENT_BINARY_DIR}/counters.rc")
-# GDI+ draws the window's rounded shapes, fan curves and V/F chart, and Direct3D runs the GPU keep-awake.
-# Delay-loading keeps them out of the hidden tray app until the window is first painted or the keep-awake first runs.
+# GDI+ draws the window's rounded shapes, fan curves and V/F chart, Direct3D runs the GPU keep-awake and WinHTTP the
+# update check. Delay-loading keeps them out of the tray app until the window is first painted or they first run.
 target_link_libraries(MechControl PRIVATE foundation comctl32 shell32 gdi32 comdlg32 gdiplus d3d11 dxgi wevtapi
   cfgmgr32 delayimp uxtheme dwmapi)
 target_link_options(MechControl PRIVATE /DELAYLOAD:gdiplus.dll /DELAYLOAD:d3d11.dll /DELAYLOAD:dxgi.dll
-  /DELAYLOAD:wevtapi.dll /MANIFEST:EMBED
+  /DELAYLOAD:wevtapi.dll /DELAYLOAD:winhttp.dll /MANIFEST:EMBED
   "/MANIFESTUAC:level='requireAdministrator' uiAccess='false'"
   /MANIFESTINPUT:${CMAKE_CURRENT_SOURCE_DIR}/resources/app.manifest)
 # The checks find the profiles beside their executables, so they depend on this copy rather than on MechControl.
@@ -89,7 +90,7 @@ if(BUILD_TESTING)
     src/vf_chart.cpp src/vf_numbers.cpp resources/app.rc "${CMAKE_CURRENT_BINARY_DIR}/counters.rc")
   target_compile_definitions(ui-pages-check PRIVATE MECHCONTROL_PAGE_CHECK)
   target_link_libraries(ui-pages-check PRIVATE foundation comctl32 shell32 gdi32 comdlg32 gdiplus d3d11 dxgi wevtapi cfgmgr32 delayimp uxtheme dwmapi)
-  target_link_options(ui-pages-check PRIVATE /DELAYLOAD:gdiplus.dll /DELAYLOAD:d3d11.dll /DELAYLOAD:dxgi.dll /DELAYLOAD:wevtapi.dll /MANIFEST:EMBED "/MANIFESTUAC:level='requireAdministrator' uiAccess='false'" /MANIFESTINPUT:${CMAKE_CURRENT_SOURCE_DIR}/resources/app.manifest)
+  target_link_options(ui-pages-check PRIVATE /DELAYLOAD:gdiplus.dll /DELAYLOAD:d3d11.dll /DELAYLOAD:dxgi.dll /DELAYLOAD:wevtapi.dll /DELAYLOAD:winhttp.dll /MANIFEST:EMBED "/MANIFESTUAC:level='requireAdministrator' uiAccess='false'" /MANIFESTINPUT:${CMAKE_CURRENT_SOURCE_DIR}/resources/app.manifest)
   add_dependencies(ui-pages-check profiles)
   add_executable(configuration-check tests/configuration_check.cpp)
   target_link_libraries(configuration-check PRIVATE configuration)

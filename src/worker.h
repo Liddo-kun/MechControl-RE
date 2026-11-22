@@ -15,7 +15,18 @@
 
 namespace mech {
 inline constexpr UINT resultMessage = WM_APP + 1;
-enum class ResultKind { sample, command, ble, battery, failure, presentation, selection, warning };
+enum class ResultKind {
+    sample,
+    command,
+    ble,
+    battery,
+    failure,
+    presentation,
+    selection,
+    warning,
+    update,
+    updateFailed
+};
 struct ModelSelection {
     std::vector<std::filesystem::path> paths;
     std::optional<std::filesystem::path> chosen;

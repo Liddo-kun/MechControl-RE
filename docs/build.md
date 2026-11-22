@@ -33,11 +33,17 @@ writes `MechControl-win-x64[-cli].zip`, a separate symbols ZIP and `artifacts.js
 with every file's hash. CMake install rules choose the shipped files: the executables,
 `Profiles/MECHREVO`, `Profiles/boards.json`, the counter manifest, `counters.ps1`, the notices and
 `docs/release.md` as `README.md`. Set the version in `CMakeLists.txt` and
-`resources/app.rc` before packaging.
+`resources/app.rc` before packaging. The app compares the CMake version with the tag of the latest
+GitHub release, so tag releases `vMAJOR.MINOR.PATCH` and do not mark a release as latest before its
+assets are uploaded.
 
 `resources/app.ico` is committed and rendered from the SVGs in `resources/app-icon/`:
 `app-16px.svg` for 16, 20, 32 and 40 px, `app-24px.svg` for 24 and 48 px and `app.svg`
 for 64 and 256 px. The small sources sit on the pixel grid so the letter stays sharp.
+The About tab's marks in `resources/about/` are rendered from the Simple Icons paths beside them
+at 16, 20, 24, 32, 40, 48 and 64 px: `github-light.ico` in the light theme's text color
+(#1C1E21), `github-dark.ico` in the dark theme's (#E8EAEE) and `discord.ico` in Discord's blurple
+(#5865F2).
 
 
 ## Measuring

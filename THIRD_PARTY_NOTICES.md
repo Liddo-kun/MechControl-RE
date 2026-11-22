@@ -25,3 +25,10 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+# Simple Icons
+
+The GitHub and Discord marks in `resources/about/` come from Simple Icons
+(https://simpleicons.org), released under CC0 1.0 Universal. GitHub and Discord
+are trademarks of their owners. The marks are used only to link to this
+project's pages on those services.

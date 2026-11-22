@@ -339,6 +339,9 @@ int main(int argc, char** argv) try {
     require(!store.settings().ac_auto_boot, "AC auto boot off by default");
     store.set_ac_auto_boot(true);
     require(ProfileStore(persistence).settings().ac_auto_boot, "AC auto boot persistence");
+    require(store.settings().update_check, "daily update check on by default");
+    store.set_update_check(false);
+    require(!ProfileStore(persistence).settings().update_check, "daily update check persistence");
     store.rename(5, "Keep name");
     auto before = read_json(persistence / "settings.json");
     {

@@ -13,7 +13,7 @@ reusing the heights of wrapped texts the last pass measured; scrolling moves the
 the controls together, and a repaint of a few parts far apart paints each part alone.
 `ControlWorker` (`worker.*`) owns a serialized command queue,
 controller and monitor on one `std::jthread`. Besides its one-second timer it arms a second, one-shot
-timer only while System Info is shown, for the smoothed input power: it reads two EC bytes just after
+timer only while the About tab (system information) is shown, for the smoothed input power: it reads two EC bytes just after
 each of the EC's 100 ms updates. `Delivery` posts owned results to
 the UI; it is detached before destruction. Shutdown stops producers and joins
 the worker. Synchronous driver, WMI, NVIDIA and HID calls must return before
@@ -110,7 +110,7 @@ two-minute one that the EC must count down before it is trusted. Firmware that p
 module ID (`0x7D2` = 0 with a GPU in `0x456` bit 7) is known to lack the hold: it is refused before
 those checks and the Battery page has no Charge Limit section. Elsewhere an unavailable limit
 is greyed with its reason. Where those variables are recognized, the Battery page
-shows them and says what the battery modes do to the charge voltage. System Info shows the
+shows them and says what the battery modes do to the charge voltage. The About tab shows the
 EC's record of the last power-off.
 
 AC auto boot (`0x726` bit 3: the EC powers the machine on when a power source is attached) is
@@ -188,6 +188,14 @@ for the rest of that screen-off period if the GPU is not in D0 or the app was fr
 on Kernel-Power event 566 (going to sleep), since Modern Standby sends no suspend broadcast. The
 fault is waking a GPU that has just powered down, so it uses Direct3D only, the path reported safe,
 and the NVIDIA reads elsewhere skip a GPU outside D0. Direct3D and the event log API are delay-loaded.
+`update.*` is the update notice on the About tab; it only reports a newer release and never downloads
+anything. With the daily check on (`checkForUpdates` in `settings.json`, on by default; the controller
+only stores it) a UI timer asks a minute after start, then a day after each check; a failed check is
+only logged. Check now asks at once. Each check is one HTTPS GET of GitHub's latest-release API on a
+detached thread through WinHTTP (delay-loaded, with 15 s timeouts). The thread posts the tag through
+`Delivery`, which drops a reply that comes after shutdown, so nothing waits for it. The UI compares
+the tag with `MECHCONTROL_VERSION` from CMake and, for an automatic check, shows a tray balloon once
+per newer version. Clicking the balloon opens the About tab. Pre-release tags never match.
 `peripherals.*`, `cooler.*` and `ble.*` own HID lighting and BLE operations. A single-zone RGB
 keyboard has no HID controller; where EC support byte 2 reports one, its zone is written through
 the EC instead, and what the EC holds replaces the saved intent before that is shown, captured

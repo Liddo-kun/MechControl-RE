@@ -281,7 +281,37 @@ void Application::checkPages(const std::filesystem::path& directory, const std::
     fixture->asleep = false;
     read();
     wait([&] { return !busy_ && infoText_[7] == L"250 W" && infoText_[8] == L"350 W"; });
-    capture(L"system-info");
+    // The About section: the daily check's setting goes through the controller to settings.json; Check now's answers
+    // come through the production delivery, with the replies injected instead of asking GitHub.
+    check(checked(updateCheckId) && !checking_ &&
+              updateNotice_ == L"Checks for updates a minute after start, then daily.",
+          "About shows the daily update check on and nothing checked before its time");
+    auto savedCheck = [&] {
+        return Json::parse(std::ifstream(directory / L"settings.json")).value("checkForUpdates", true);
+    };
+    SendMessageW(get(updateCheckId), BM_CLICK, 0, 0);
+    wait([&] { return !busy_ && !updateCheck_; });
+    check(!checked(updateCheckId) && !savedCheck() && updateNotice_ == L"Not checked for updates.",
+          "turning the daily update check off saves it");
+    SendMessageW(get(updateCheckId), BM_CLICK, 0, 0);
+    wait([&] { return !busy_ && updateCheck_; });
+    check(checked(updateCheckId) && savedCheck(), "turning it on again saves it");
+    auto checkNow = [&](const std::wstring& reply) {
+        checkReply_ = reply;
+        command(checkNowId, BN_CLICKED);
+        wait([&] { return !checking_ && IsWindowEnabled(get(checkNowId)); });
+    };
+    checkNow(L"Sending the request: error 12007");
+    check(updateNotice_ == L"Checks for updates a minute after start, then daily.", "a failed check is only logged");
+    checkNow(L"v" + update::text(update::current()));
+    check(updateNotice_.starts_with(L"You have the latest version. Checked "), "the current release is up to date");
+    checkNow(L"v99.0.0");
+    check(updateNotice_ == L"Version 99.0.0 is available. <a>Get it on GitHub</a>" &&
+              announced_ == update::Version{99, 0, 0} && !updateBalloon_,
+          "a newer release links to its page, and Check now shows no tray balloon");
+    check(IsWindowVisible(get(updateStatusId)) && IsWindowVisible(get(githubId)) && IsWindowVisible(get(discordId)),
+          "About shows the notice and the GitHub and Discord buttons");
+    capture(L"about");
     // The V/F Curve tab on the fake driver: made when first shown and opened on the worker; then a slider, the memory
     // offset and a point offset, Apply with the readback once the driver settles, every number, Restore and Load.
     check(vfOffered_ && TabCtrl_GetItemCount(tabs_) == vfPage + 1 && !vf_,

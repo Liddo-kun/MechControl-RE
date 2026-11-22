@@ -236,7 +236,8 @@ void to_json(Json& j, const ThermalState& v) {
 }
 void to_json(Json& j, const Settings& v) {
     j = {{"lastProfile", v.last_slot},    {"disableDlppc", v.disable_dlppc}, {"gpuKeepAwake", v.gpu_keep_awake},
-         {"chargeLimit", v.charge_limit}, {"acAutoBoot", v.ac_auto_boot},    {"thermalProtection", v.thermal}};
+         {"chargeLimit", v.charge_limit}, {"acAutoBoot", v.ac_auto_boot},    {"checkForUpdates", v.update_check},
+         {"thermalProtection", v.thermal}};
     j["profileNames"] = Json::array();
     for (const auto& n : v.names) j["profileNames"].push_back(nullable(n));
 }
@@ -346,6 +347,7 @@ void ProfileStore::load_settings() {
                 warn("Invalid chargeLimit; the battery charge limit is off.");
             }
             read_field(root, "acAutoBoot", s.ac_auto_boot);
+            read_field(root, "checkForUpdates", s.update_check);
             if (auto i = root.find("thermalProtection"); i != root.end()) {
                 object(*i);
                 auto& t = s.thermal;
@@ -446,6 +448,16 @@ void ProfileStore::set_ac_auto_boot(bool value) {
         save_settings();
     } catch (...) {
         settings_.ac_auto_boot = old;
+        throw;
+    }
+}
+void ProfileStore::set_update_check(bool value) {
+    bool old = settings_.update_check;
+    settings_.update_check = value;
+    try {
+        save_settings();
+    } catch (...) {
+        settings_.update_check = old;
         throw;
     }
 }
