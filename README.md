@@ -11,9 +11,10 @@ MechControl is a native C++ Windows app. It needs no .NET runtime and keeps its 
 
 - **CPU power:** PL1, PL2, PL4 and the CPU temperature limit
 - **GPU power:** TGP, Dynamic Boost and the NVIDIA GPU temperature target. With an RTX 40 or newer GPU, an optional NVIDIA unlock raises the power ceiling and lets you change the GPU current limits.
+- **GPU V/F curve:** edits the NVIDIA GPU's voltage-frequency curve itself, not only offsets on top of it, with a memory overclock. Saved per profile and written again after sleep or a driver restart.
 - **Fans:** boost, custom fan curves, linked CPU/GPU fans, fan ramp speed
 - **Thermal failsafe:** holds the GPU at minimum power if it stays too hot
-- **Battery:** charge modes and battery info
+- **Battery:** charge modes, a charge limit, AC auto boot (start when power is connected) on boards known to have it, and battery info
 - **Lighting:** keyboard, light bar, logo, idle timeout and mini-LED local dimming
 - **Bluetooth liquid cooler:** fan, pump and RGB
 - **Advanced (Power tab):** EC power-limit bypass where the model supports it (never saved; turns itself off on sleep, display off, AC loss and exit), the EC's liquid cooler connection flag, and a CPU core voltage offset (undervolt) where the BIOS takes one from the OEM app
