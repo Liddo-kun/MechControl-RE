@@ -24,7 +24,8 @@ Json Controller::presentation(bool read, bool gpu_live, int page) {
               {"peak", nullable(thermal_->peak_temperature())},
               {"dlppcDisabled", dlppc_disabled_},
               {"gpuKeepAwake", store_.settings().gpu_keep_awake},
-              {"updateCheck", store_.settings().update_check}};
+              {"updateCheck", store_.settings().update_check},
+              {"vfIntro", store_.settings().vf_intro}};
     if (read) j["readPage"] = page;
     if (read && page < 0) {
         j["names"] = store_.settings().names;

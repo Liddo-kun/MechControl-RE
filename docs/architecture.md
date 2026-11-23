@@ -159,7 +159,9 @@ once (the status bar's notice), and an opening `VfRead` keeps the curve it finds
 (`vf::current`, with a tune from its offsets) for a slot Save, which nothing writes. The V/F Curve tab is offered on any NVIDIA GPU and is created on its first
 selection (`vf_tab.*` on the shared page code, with `vf_chart.*` drawing the curve in GDI+ and
 `vf_numbers.*` painting the read-only tables of every equation number), so nothing of it runs before then.
-Like the other tabs, it follows the window's size only while it is shown. It reads the driver
+Like the other tabs, it follows the window's size only while it is shown. A card under its buttons
+says what the tab is for until its Hide link is clicked (`vfIntroShown` in `settings.json`; the
+controller only stores it). It reads the driver
 only when opened, on Read and after a write, and the timer that works out its slider bars stops
 while the window is hidden. A slider step paints the chart and the changed texts before the next
 mouse move is taken: Windows paints only when no input waits, and in a fast drag the next move

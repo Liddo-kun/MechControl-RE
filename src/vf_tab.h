@@ -15,6 +15,7 @@ struct VfHost {
     std::function<std::uint64_t(ControlCommand, bool busy)> submit;
     std::function<void(const std::wstring& reason)> report; // opens a GitHub issue about this GPU
     HWND tooltip;                                           // the window's tooltip control
+    bool intro = true;                                      // the intro card is shown (settings.json)
 };
 class VfTab {
 public:

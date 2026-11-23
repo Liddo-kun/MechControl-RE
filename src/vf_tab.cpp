@@ -148,7 +148,10 @@ struct VfTab::Impl {
     VfHost host;
     PageFonts fonts{};
     HWND root = nullptr, panel = nullptr;
-    Page page; // the scrolling cards in panel
+    Page page;  // the scrolling cards in panel
+    Page intro; // what the tab is for, in root under the buttons, until Hide
+    HWND introLink = nullptr;
+    bool introOpen = true;
     HWND applyButton = nullptr, restoreButton = nullptr, resetButton = nullptr, importButton = nullptr,
          exportButton = nullptr, forgetButton = nullptr;
     HWND issueLink = nullptr, modeBox = nullptr, linesCheck = nullptr, referenceButton = nullptr, numbersLink = nullptr,
@@ -239,6 +242,10 @@ struct VfTab::Impl {
         resetButton = make(root, L"BUTTON", L"Reset all", WS_TABSTOP | BS_PUSHBUTTON);
         importButton = make(root, L"BUTTON", L"Import…", WS_TABSTOP | BS_PUSHBUTTON);
         exportButton = make(root, L"BUTTON", L"Export…", WS_TABSTOP | BS_PUSHBUTTON);
+        intro.window = root;
+        introOpen = host.intro;
+        introLink = make(root, WC_LINK, L"<a>Hide</a>", WS_TABSTOP | LWS_TRANSPARENT | LWS_NOPREFIX);
+        if (!introOpen) ShowWindow(introLink, SW_HIDE);
         chart = std::make_unique<VfChart>(instance, root);
         chart->bump = [this](const std::set<int>& points, int steps) { bump(points, steps); };
         panel =
@@ -1177,8 +1184,32 @@ struct VfTab::Impl {
         }
         ReleaseDC(root, dc);
         statusRect = {x + ref(8), y, status, y + h};
+        // What the tab is for, as a card under the buttons until Hide removes it for good.
+        int top = y + h + ref(10);
+        if (fonts.font) {
+            PageLayout s(intro, fonts, rc.right, true);
+            SIZE size{};
+            SendMessageW(introLink, LM_GETIDEALSIZE, ref(200), LPARAM(&size));
+            s.put(introLink, s.end - size.cx, top + ref(14), size.cx, size.cy, introOpen);
+            if (introOpen) {
+                s.frames.push_back({{s.x, top, s.right, 0}});
+                int to = s.end - size.cx - ref(16);
+                s.y = s.paragraph(
+                    L"This tab allows for direct editing of the GPU VF curve, unlike other tools such as Afterburner. "
+                    L"This allows for the fix of discontinuities such as the slow fallback curve crossover that occurs "
+                    L"on mobile GPUs, as well as poorly made factory VF curves that are not correctable with typical "
+                    L"offset curves.",
+                    s.left, top + ref(14), to, palette().text, fonts.font);
+                s.y = s.paragraph(L"WARNING: offset style overclocking will stack with VF curve edits, so disable any "
+                                  L"external overclocks and use this tab instead.",
+                                  s.left, s.y + ref(4), to, palette().warn, fonts.bold);
+                s.close();
+                top = s.y - ref(2);
+            }
+            s.finish();
+        }
         // The chart keeps its shape: 2.5 times as wide as high, and at most half of the height below the buttons.
-        int top = y + h + ref(10), width = rc.right - 2 * ref(16), height = std::max(0, int(rc.bottom) - top);
+        int width = rc.right - 2 * ref(16), height = std::max(0, int(rc.bottom) - top);
         int chartHeight = std::min(int(width / 2.5), height / 2), chartWidth = std::min(width, int(chartHeight * 2.5));
         MoveWindow(chart->window(), (rc.right - chartWidth) / 2, top, chartWidth, chartHeight, TRUE);
         int below = top + chartHeight + ref(6);
@@ -1606,6 +1637,7 @@ struct VfTab::Impl {
     void style(const PageFonts& f) {
         fonts = f;
         page.texts.clear(); // measured with the old fonts, whose handles may be reused
+        intro.texts.clear();
         widths.clear();
         heights.clear();
         linkSizes.clear();
@@ -1656,7 +1688,7 @@ struct VfTab::Impl {
         RECT rc{};
         GetClientRect(root, &rc);
         Buffer buffer(target, rc);
-        FillRect(buffer.dc, &rc, brush(palette().window));
+        intro.paint(buffer.dc, rc, fonts);
         SelectObject(buffer.dc, fonts.bold);
         SetTextColor(buffer.dc, statusColor);
         RECT r = statusRect;
@@ -1725,6 +1757,11 @@ struct VfTab::Impl {
         if (n->code == NM_CLICK || n->code == NM_RETURN) {
             if (n->hwndFrom == issueLink && host.report)
                 host.report(openError.empty() && tuner ? w(tuner->refusal) : openError);
+            if (n->hwndFrom == introLink) {
+                introOpen = false;
+                host.submit(VfIntro{false}, false);
+                layoutRoot();
+            }
             if (n->hwndFrom == numbersLink || n->hwndFrom == structureLink) {
                 bool& open = n->hwndFrom == numbersLink ? numbersOpen : structureOpen;
                 open = !open;
@@ -1743,7 +1780,7 @@ struct VfTab::Impl {
         return 0;
     }
     LRESULT colors(UINT message, HDC dc, HWND child) const {
-        return controlColors(message, dc, GetParent(child) == panel ? page.backdrop(child) : palette().window);
+        return controlColors(message, dc, (GetParent(child) == panel ? page : intro).backdrop(child));
     }
     LRESULT rootMessage(UINT message, WPARAM wp, LPARAM lp) {
         switch (message) {
@@ -1756,6 +1793,7 @@ struct VfTab::Impl {
             return 0;
         }
         case WM_SIZE: layoutRoot(); return 0;
+        case WM_PRINTCLIENT: intro.printClient(reinterpret_cast<HDC>(wp)); return 0;
         case WM_COMMAND: return command(reinterpret_cast<HWND>(lp), HIWORD(wp));
         case WM_NOTIFY: return notify(reinterpret_cast<NMHDR*>(lp));
         case WM_MOUSEWHEEL: SendMessageW(panel, message, wp, lp); return 0;

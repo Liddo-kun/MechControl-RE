@@ -1985,7 +1985,7 @@ private:
                         return busySequence_;
                     },
                     [this](const std::wstring& reason) { openUnelevated(issueUrl({L"V/F curve tuner", L"", reason})); },
-                    tooltip_};
+                    tooltip_, state_.value("vfIntro", true)};
         vf_ = std::make_unique<VfTab>(instance_, window_, std::move(host));
         SetWindowPos(vf_->window(), HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
         EnableWindow(vf_->window(), !busy_);

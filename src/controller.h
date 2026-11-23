@@ -161,13 +161,17 @@ struct VfApply {
 // Removes the V/F curve from the loaded slot and forgets the one this run wrote or found, so that loading the slot
 // and a later Save leave the GPU's curve as it is. Writes nothing to the GPU.
 struct VfForget {};
+// Application setting: false once the V/F Curve tab's intro card was hidden for good.
+struct VfIntro {
+    bool open;
+};
 using ControlCommand =
     std::variant<CpuApply, GpuApply, FanApply, FanBoost, BatteryApply, SwitchApply, ProtectionApply, SlotLoad, SlotSave,
                  SlotRename, SlotClear, DefaultsApply, ThermalReset, ThermalTest, Visibility, Resume, AcEvent,
                  GpuUnlock, DlppcApply, CliCommand, LightingApply, LightingIdle, DimmingApply, PeripheralRead,
                  CoolerRequest, BatteryPage, UiRead, UiPage, UiPreflight, FanMaster, FanEdit, FanRead, PowerTransition,
                  EcBypassApply, CoolerFlag, ChargeLimitApply, AcAutoBootApply, GpuKeepAwakeApply, UpdateCheckApply,
-                 VoltageOffsetApply, VfRead, VfApply, VfForget>;
+                 VoltageOffsetApply, VfRead, VfApply, VfForget, VfIntro>;
 // How the worker treats each command. Every command needs an entry: command_traits() fails to compile without one.
 struct CommandTraits {
     bool notification = false; // Lifecycle event, run even during the wait for a blocking device operation.
@@ -228,6 +232,7 @@ inline CommandTraits traits(const AcEvent&) { return {.notification = true}; }
 inline CommandTraits traits(const VfRead&) { return {}; }
 inline CommandTraits traits(const VfApply&) { return {}; }
 inline CommandTraits traits(const VfForget&) { return {.catalog = true}; }
+inline CommandTraits traits(const VfIntro&) { return {.posts = false}; }
 inline CommandTraits command_traits(const ControlCommand& command) {
     return std::visit([](const auto& c) { return traits(c); }, command);
 }
@@ -347,7 +352,7 @@ private:
         run(const UiPreflight&), run(const FanMaster&), run(const FanEdit&), run(const FanRead&),
         run(const PowerTransition&), run(const EcBypassApply&), run(const CoolerFlag&), run(const ChargeLimitApply&),
         run(const AcAutoBootApply&), run(const GpuKeepAwakeApply&), run(const UpdateCheckApply&),
-        run(const VoltageOffsetApply&), run(const VfRead&), run(const VfApply&), run(const VfForget&);
+        run(const VoltageOffsetApply&), run(const VfRead&), run(const VfApply&), run(const VfForget&), run(const VfIntro&);
     cli::Reply cli(const std::vector<std::string>&);
     config::Json status();
     config::Json cpu_status(), gpu_status(bool presentation = false), fans_status(), gpu_telemetry(), gpu_budget();

@@ -120,4 +120,8 @@ ControlResult Controller::run(const VfForget&) {
     diagnostic_("V/F curve removed from slot " + std::to_string(active_slot_));
     return {.text = "V/F curve removed from the profile; the GPU keeps the curve it has now", .saved = true};
 }
+ControlResult Controller::run(const VfIntro& c) {
+    store_.set_vf_intro(c.open);
+    return {};
+}
 }

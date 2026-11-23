@@ -337,6 +337,30 @@ void Application::checkPages(const std::filesystem::path& directory, const std::
     };
     check(vfPanel && vfChart && chartShape(), "the V/F chart is 2.5 times as wide as high");
     capture(L"vf-curve");
+    // Hide removes the intro card for good: the chart gets the room and settings.json keeps it hidden.
+    {
+        auto introLink = FindWindowExW(vfRoot, nullptr, WC_LINK, nullptr);
+        auto chartTop = [&] {
+            RECT r{};
+            GetWindowRect(vfChart, &r);
+            return r.top;
+        };
+        // The worker replaces settings.json, which cannot be read for a moment.
+        auto hidden = [&] {
+            try {
+                return !read_json(directory / L"settings.json").value("vfIntroShown", true);
+            } catch (const std::exception&) {
+                return false;
+            }
+        };
+        int openTop = chartTop();
+        NMHDR click{introLink, 0, UINT(NM_CLICK)};
+        SendMessageW(vfRoot, WM_NOTIFY, 0, reinterpret_cast<LPARAM>(&click));
+        for (auto deadline = GetTickCount64() + 6000; !hidden() && GetTickCount64() < deadline; Sleep(10)) pump();
+        check(hidden() && !IsWindowVisible(introLink) && chartTop() < openTop && chartShape(),
+              "Hide removes the V/F intro for good");
+        capture(L"vf-curve-intro-hidden");
+    }
     check(SendMessageW(FindWindowExW(vfPanel, nullptr, WC_COMBOBOXW, nullptr), CB_GETCOUNT, 0, 0) == 2,
           "the difference from a reference curve is not offered before one is loaded");
     // Answers the tab's confirmation with Yes from inside its message box.

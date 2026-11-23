@@ -105,6 +105,7 @@ struct Settings {
     int charge_limit = 100;      // Percent at which charging stops; 100 is no limit.
     bool ac_auto_boot = false;   // Keeps the EC's AC auto boot bit set; see Controller::ensure_auto_boot.
     bool update_check = true;    // The UI asks GitHub for the latest release once a day; see update.h.
+    bool vf_intro = true;        // The V/F Curve tab's intro card, until it is hidden.
     ThermalState thermal;
 };
 #define MECH_JSON(Type)                 \
@@ -143,6 +144,7 @@ public:
     void set_charge_limit(int percent);
     void set_ac_auto_boot(bool enabled);
     void set_update_check(bool enabled);
+    void set_vf_intro(bool open);
     void rename(int slot, const std::string& name);
     void clear(int slot);
     bool exists(int slot) const;

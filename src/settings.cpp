@@ -237,7 +237,7 @@ void to_json(Json& j, const ThermalState& v) {
 void to_json(Json& j, const Settings& v) {
     j = {{"lastProfile", v.last_slot},    {"disableDlppc", v.disable_dlppc}, {"gpuKeepAwake", v.gpu_keep_awake},
          {"chargeLimit", v.charge_limit}, {"acAutoBoot", v.ac_auto_boot},    {"checkForUpdates", v.update_check},
-         {"thermalProtection", v.thermal}};
+         {"vfIntroShown", v.vf_intro},     {"thermalProtection", v.thermal}};
     j["profileNames"] = Json::array();
     for (const auto& n : v.names) j["profileNames"].push_back(nullable(n));
 }
@@ -348,6 +348,7 @@ void ProfileStore::load_settings() {
             }
             read_field(root, "acAutoBoot", s.ac_auto_boot);
             read_field(root, "checkForUpdates", s.update_check);
+            read_field(root, "vfIntroShown", s.vf_intro);
             if (auto i = root.find("thermalProtection"); i != root.end()) {
                 object(*i);
                 auto& t = s.thermal;
@@ -458,6 +459,16 @@ void ProfileStore::set_update_check(bool value) {
         save_settings();
     } catch (...) {
         settings_.update_check = old;
+        throw;
+    }
+}
+void ProfileStore::set_vf_intro(bool value) {
+    bool old = settings_.vf_intro;
+    settings_.vf_intro = value;
+    try {
+        save_settings();
+    } catch (...) {
+        settings_.vf_intro = old;
         throw;
     }
 }
