@@ -3866,6 +3866,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         }
         checks = argv[2];
         LocalFree(argv);
+        std::filesystem::create_directories(checks); // missing, every save fails with an error box
         auto fixture = std::make_shared<UiPageState>();
 #else
         std::filesystem::path diagnostic;

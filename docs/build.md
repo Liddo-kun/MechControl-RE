@@ -14,7 +14,7 @@ hardware, elevation and the OEM UWACPIDriver, not a bundled driver or .NET/VC ru
 
 `-WithCli` adds the pipe server and `mcctl.exe`. Keep build directories outside the
 source tree. `-Check` runs the CTest checks, which use synthetic hardware and do not
-prove physical behavior. `ui-pages-check.exe --ui-check <fresh existing directory>`
+prove physical behavior. `ui-pages-check.exe --ui-check <fresh directory>` (made if missing)
 renders the real pages with fake hardware at 100, 150 and 200% DPI; run it on an
 interactive desktop and inspect the captures.
 
