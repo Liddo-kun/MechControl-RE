@@ -378,7 +378,7 @@ void Application::checkPages(const std::filesystem::path& directory, const std::
     auto slowCheck = FindWindowExW(vfPanel, nullptr, L"Button", L"Disable slow curve (written with Apply)");
     // Opened with no curve written this run, the tab takes the offsets another tool left on the GPU (the fixture's
     // +30 MHz at every point, +45 at one, +250 MHz memory), the chart says so, and Save stores them as they are.
-    // Restore stock and Reset all then start from stock.
+    // Restore stock then shows stock, and Reset all the tab's own start with the slow curve disabled.
     check(SendMessageW(afterburner, TBM_GETPOS, 0, 0) == 1 && SendMessageW(memory, TBM_GETPOS, 0, 0) == 25 &&
               vfText().ends_with(L"\nExisting overclock detected\nCurrent Changes: Afterburner Style OC at 96 points + "
                                  L"Memory OC +250 MHz") &&
@@ -396,6 +396,8 @@ void Application::checkPages(const std::filesystem::path& directory, const std::
               found["tune"]["pp"] == mech::config::Json{{"90", 15.0}} && found["tune"]["mem"] == 250 &&
               found["tune"]["keepSlow"] == true && vfText().find(L"Existing overclock detected") == std::wstring::npos,
           "Save stores the curve found on the GPU as it is, with its tune, and the notice goes");
+    // Beside the status, what the loaded profile holds where that is not the curve on the GPU.
+    wait([&] { return vfText().find(L"\nProfile has") == std::wstring::npos; });
     yes();
     SendMessageW(vfPanel, WM_COMMAND, MAKEWPARAM(0, BN_CLICKED),
                  reinterpret_cast<LPARAM>(FindWindowExW(vfPanel, nullptr, L"Button", L"Remove from profile")));
@@ -403,14 +405,18 @@ void Application::checkPages(const std::filesystem::path& directory, const std::
     check(read_json(directory / L"userprofile_3.json")["gpu"]["vfCurve"].is_null() &&
               status_.starts_with(L"V/F curve removed from the profile"),
           "Remove from profile takes the V/F curve out of the loaded profile");
+    wait([&] { return vfText().find(L"\nProfile has no V/F curve\n") != std::wstring::npos; });
     yes();
     SendMessageW(vfRoot, WM_COMMAND, MAKEWPARAM(0, BN_CLICKED), reinterpret_cast<LPARAM>(vfButton(L"Restore stock")));
-    vfWait(L"Unapplied (currently stock)\nStock restored (");
+    vfWait(L"Applied to the GPU\nStock restored (");
+    check(SendMessageW(afterburner, TBM_GETPOS, 0, 0) == 0 && SendMessageW(memory, TBM_GETPOS, 0, 0) == 0 &&
+              Button_GetCheck(slowCheck) == BST_UNCHECKED && vfText().ends_with(L"\nCurrent Changes: None"),
+          "Restore stock leaves stock on the GPU and in the tab, the slow curve on");
     yes();
     SendMessageW(vfRoot, WM_COMMAND, MAKEWPARAM(0, BN_CLICKED), reinterpret_cast<LPARAM>(vfButton(L"Reset all")));
-    check(SendMessageW(afterburner, TBM_GETPOS, 0, 0) == 0 && SendMessageW(memory, TBM_GETPOS, 0, 0) == 0 &&
+    check(Button_GetCheck(slowCheck) == BST_CHECKED && vfText().starts_with(L"Unapplied (currently stock)") &&
               vfText().ends_with(L"\nCurrent Changes: Slow curve disabled only"),
-          "Restore stock and Reset all leave stock on the GPU and in the tab");
+          "Reset all starts from stock with the slow curve disabled");
     auto track = FindWindowExW(vfPanel, nullptr, TRACKBAR_CLASSW, L"Native VF Curve");
     SendMessageW(track, TBM_SETPOS, TRUE, 12);
     SendMessageW(vfPanel, WM_HSCROLL, MAKEWPARAM(TB_THUMBPOSITION, 12), reinterpret_cast<LPARAM>(track));
@@ -512,10 +518,12 @@ void Application::checkPages(const std::filesystem::path& directory, const std::
     }
     yes();
     SendMessageW(vfRoot, WM_COMMAND, MAKEWPARAM(0, BN_CLICKED), reinterpret_cast<LPARAM>(vfButton(L"Restore stock")));
-    vfWait(L"Unapplied (currently stock)\nStock restored (");
+    vfWait(L"Applied to the GPU\nStock restored (");
     check(vfText().find(L", Memory OC set to 0).\nReadback matches this tab") != std::wstring::npos &&
-              vfText().find(L"\nMemory OC on the GPU: 0 MHz.") != std::wstring::npos,
-          "Restore puts the stock curve back, Memory OC 0 included");
+              vfText().find(L"\nMemory OC on the GPU: 0 MHz.") != std::wstring::npos &&
+              SendMessageW(track, TBM_GETPOS, 0, 0) == 0 && SendMessageW(memory, TBM_GETPOS, 0, 0) == 0 &&
+              vfText().ends_with(L"\nCurrent Changes: None"),
+          "Restore puts the stock curve back, Memory OC 0 included, and the tab shows it");
     // Loading the profile writes its curve and shows its settings in place of the unapplied ones.
     SendMessageW(track, TBM_SETPOS, TRUE, 8);
     SendMessageW(vfPanel, WM_HSCROLL, MAKEWPARAM(TB_THUMBPOSITION, 8), reinterpret_cast<LPARAM>(track));

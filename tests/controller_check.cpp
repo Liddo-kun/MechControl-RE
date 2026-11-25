@@ -847,6 +847,9 @@ void gpu_vf_curve(const std::filesystem::path& root) {
     check(c.execute(SlotSave{3}).code == 0 &&
               read_json(path / "userprofile_3.json")["gpu"]["vfCurve"] == slot_json(c2, 10),
           "Save stores the curve on the GPU with its tune");
+    // What the tab says about the loaded profile beside its status.
+    auto saved = [&] { return c.execute(UiRead{0}).peripherals->at("ui").value("vfSaved", -1); };
+    check(saved() == 1, "the status says that the loaded profile has the curve on the GPU");
     check(c.execute(VfRead{}).vf->tune == Json{{"global", 10}}, "the tab reads the tune of the applied slot's curve");
     check(c.execute(GpuUnlock{false}).code == 0 && gpu->restarts == 1 && on_gpu(stock),
           "a GPU restart puts the stock curve back");
@@ -866,6 +869,7 @@ void gpu_vf_curve(const std::filesystem::path& root) {
                                   "Slot V/F curve not applied: This V/F curve was made for driver 620.00");
                           }),
           "a curve made for another driver is logged and skipped before any write, and the rest of the slot applies");
+    check(saved() == 2, "the status says that the loaded profile has another curve than the GPU");
     check(c.execute(VfApply{std::nullopt, {{"global", 0}}}).code == 0 && on_gpu(stock) &&
               c.execute(SlotSave{5}).code == 0 &&
               read_json(path / "userprofile_5.json")["gpu"]["vfCurve"] == slot_json(stock, 0),
@@ -877,6 +881,7 @@ void gpu_vf_curve(const std::filesystem::path& root) {
               slot5().is_null() && c.execute(SlotLoad{1}).code == 0 && c.execute(SlotLoad{5}).code == 0 && on_gpu(c1),
           "Remove from profile takes the curve out of the loaded slot, a later Save keeps it out, and loading the "
           "slot then leaves the GPU's curve");
+    check(saved() == 0, "the status says that the loaded profile has no V/F curve");
     // A run that wrote no curve sends no V/F packet, and its Save keeps the slot's own curve.
     auto quiet_path = root / "gpu-vf-curve-untouched";
     auto quiet_owned = std::make_unique<VfGpu>();

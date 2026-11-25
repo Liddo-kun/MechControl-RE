@@ -29,6 +29,8 @@ public:
     void loaded();                // a profile was loaded: shows its tune and the GPU's curve
     void delivered(std::uint64_t sequence, const ControlResult&);
     void saved(); // the profile bar's Save stored the curve
+    // The loaded profile's V/F curve beside the GPU's (Controller::vf_saved), said next to the status; -1 not known.
+    void profile(int saved);
     // The status beside the buttons, the readback, the chart's notice and Current Changes, for the UI checks.
     std::wstring text() const;
 

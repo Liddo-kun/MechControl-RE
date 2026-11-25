@@ -114,7 +114,7 @@ profile's offset over this one, so its services must not start with Windows eith
 The **V/F Curve** tab, shown with an NVIDIA GPU, edits the GPU's voltage-frequency curve
 through the driver's own clock equations and per-point offsets.
 **Apply to GPU** writes the curve and checks it against the driver's readback; **Restore
-stock** puts NVIDIA's equations back. For a few seconds after each write the GPU runs a
+stock** puts NVIDIA's equations back and sets the tab's sliders to stock too. For a few seconds after each write the GPU runs a
 slower fallback curve, so apply at idle, not in a game, and not while MSI Afterburner or
 another tool changes the curve. **Import** and **Export** read and write the tune as a
 `vfe-tune.json` file; a tune from an older version of the VFCURVE page, with numbers typed
@@ -133,7 +133,9 @@ profile's curve again a few seconds after one it starts itself, after waking fro
 after a power-source change. A curve made for another GPU, VBIOS or driver is skipped with a
 note in `mechcontrol.log` (make it again in the tab). Profiles saved without a curve leave
 the GPU's as it is. **Remove from profile** takes the curve out of the loaded profile; it
-writes nothing to the GPU.
+writes nothing to the GPU. Beside the tab's status, "Profile has no V/F curve" or "Profile has
+a different curve" says when the loaded profile does not hold the curve on the GPU, which is
+what Save would store.
 
 An overclock another tool left on the GPU (MSI Afterburner's offsets, for example) is
 mentioned in amber in the status bar when MechControl first reads the GPU. Opened before any

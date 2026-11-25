@@ -26,6 +26,7 @@ Json Controller::presentation(bool read, bool gpu_live, int page) {
               {"gpuKeepAwake", store_.settings().gpu_keep_awake},
               {"updateCheck", store_.settings().update_check},
               {"vfIntro", store_.settings().vf_intro}};
+    if (vf_available_) j["vfSaved"] = vf_saved(); // for the V/F Curve tab's status
     if (read) j["readPage"] = page;
     if (read && page < 0) {
         j["names"] = store_.settings().names;

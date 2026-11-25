@@ -209,6 +209,8 @@ struct VfTab::Impl {
     RECT statusRect{};
     std::wstring statusText;
     COLORREF statusColor = 0;
+    int profileCurve = -1;    // VfTab::profile
+    std::wstring profileText; // what the loaded profile holds, after the status
     std::wstring changesText; // Current Changes' summary, for the UI checks
 
     struct {
@@ -853,6 +855,7 @@ struct VfTab::Impl {
                 readback = Readback{L"The write stopped.", message, L"", L"", false};
                 submit(VfRead{}, Job::reading);
             } else {
+                if (done == Job::restoring) take(stockTune());
                 auto what =
                     done == Job::restoring
                         ? L"Stock restored (" + plural(r.vf->equations, L"equation") +
@@ -1014,14 +1017,17 @@ struct VfTab::Impl {
         if (!confirm(
                 L"Write NVIDIA's stock equations back and set the Afterburner Style OC" +
                 std::wstring(memoryPoints ? L" and Memory OC" : L"") +
-                L" offsets to 0 (slow curve on again, none of your changes)?\n\nThe settings on this tab stay as they are."))
+                L" offsets to 0 (slow curve on again, none of your changes)?\n\nThe settings on this tab go back to stock too; Export keeps them in a file."))
             return;
         submitWrite({});
     }
-    // The tune goes with the write, so that a profile Save stores it beside the curve; what is shown does not.
+    // NVIDIA's curve: no change, and the slow curve left on.
+    static Tune stockTune() { return {.keep_slow = true}; }
+    // The tune goes with the write, so that a profile Save stores it beside the curve; what is shown does not. A
+    // restore goes with stock's, which the tab shows once the write is done.
     void submitWrite(std::optional<Curve> curve) {
         auto next = curve ? Job::writing : Job::restoring;
-        submit(VfApply{std::move(curve), tuner->state(tune)}, next, true);
+        submit(VfApply{std::move(curve), tuner->state(next == Job::writing ? tune : stockTune())}, next, true);
         buttons();
         status();
     }
@@ -1131,8 +1137,9 @@ struct VfTab::Impl {
     // ---- the status beside the buttons ----
     void status() {
         auto& p = palette();
-        auto before = std::pair(statusText, statusColor);
+        auto before = std::tuple(statusText, statusColor, profileText);
         statusColor = p.muted;
+        profileText.clear();
         if (!tuner)
             statusText = job == Job::opening ? L"Opening…" : L"Not open";
         else if (job == Job::writing || job == Job::restoring)
@@ -1152,8 +1159,12 @@ struct VfTab::Impl {
                             std::ranges::all_of(liveMemory, [](int o) { return o == 0; });
             statusText = same ? L"Applied to the GPU" : stockNow ? L"Unapplied (currently stock)" : L"Unapplied";
             statusColor = same ? p.ok : p.warn;
+            // A Save stores the curve last written to the GPU, so the profile's is named where it is not that one.
+            profileText = profileCurve == 0   ? L"Profile has no V/F curve"
+                          : profileCurve == 2 ? L"Profile has a different curve"
+                                              : L"";
         }
-        if (before != std::pair(statusText, statusColor)) InvalidateRect(root, &statusRect, FALSE);
+        if (before != std::tuple(statusText, statusColor, profileText)) InvalidateRect(root, &statusRect, FALSE);
     }
 
     // ---- layout ----
@@ -1693,6 +1704,14 @@ struct VfTab::Impl {
         SetTextColor(buffer.dc, statusColor);
         RECT r = statusRect;
         DrawTextW(buffer.dc, statusText.c_str(), -1, &r, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+        if (profileText.empty()) return;
+        SIZE size{};
+        GetTextExtentPoint32W(buffer.dc, statusText.c_str(), int(statusText.size()), &size);
+        r.left += size.cx + ref(14);
+        if (r.left >= r.right) return;
+        SelectObject(buffer.dc, fonts.font);
+        SetTextColor(buffer.dc, palette().text);
+        DrawTextW(buffer.dc, profileText.c_str(), -1, &r, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
     }
 
     // ---- messages ----
@@ -1963,10 +1982,15 @@ void VfTab::loaded() {
 }
 void VfTab::delivered(std::uint64_t sequence, const ControlResult& result) { impl_->delivered(sequence, result); }
 void VfTab::saved() { impl_->stored(); }
+void VfTab::profile(int saved) {
+    impl_->profileCurve = saved;
+    impl_->status();
+}
 std::wstring VfTab::text() const {
     auto& r = impl_->readback;
     return impl_->statusText +
            (r ? L"\n" + r->what + L"\n" + r->verdict + L"\n" + r->offsets + L"\n" + r->memory : L"") +
+           (impl_->profileText.empty() ? L"" : L"\n" + impl_->profileText) +
            (impl_->found ? L"\nExisting overclock detected" : L"") + L"\nCurrent Changes: " + impl_->changesText;
 }
 }

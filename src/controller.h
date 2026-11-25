@@ -390,6 +390,7 @@ private:
     std::shared_ptr<VfReading> vf_read(nv::Api&);
     void apply_vf(const nv::vf::Curve&, const char* what);
     bool vf_overclock();
+    int vf_saved() const;
     std::unique_ptr<nv::Power> nvidia_;
     // DLPPC and the temperature target need only NVAPI; used while nvidia_ is unavailable (an older GPU or
     // unsupported BIOS limits).

@@ -89,6 +89,13 @@ bool Controller::vf_overclock() {
     }
     return vf_seen_ && !vf_curve_;
 }
+// The loaded profile's V/F curve beside the one a Save would store: 0 the profile has none, 1 it has that one, 2 it
+// has another.
+int Controller::vf_saved() const {
+    if (!saved_profile_ || !saved_profile_->gpu || saved_profile_->gpu->vf_curve.is_null()) return 0;
+    auto& vf = vf_curve_ ? vf_curve_ : vf_found_;
+    return vf && saved_profile_->gpu->vf_curve.value("curve", config::Json()) == nv::vf::to_json(*vf) ? 1 : 2;
+}
 ControlResult Controller::run(const VfApply& c) {
     auto& api = vf_api();
     auto directory = vf_directory();

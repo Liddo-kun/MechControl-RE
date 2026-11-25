@@ -1990,6 +1990,7 @@ private:
         SetWindowPos(vf_->window(), HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
         EnableWindow(vf_->window(), !busy_);
         vf_->style(fonts());
+        vf_->profile(state_.value("vfSaved", -1));
         layout();
     }
     // Like the pages, the V/F tab follows the window's size only while it is shown: its layout costs a resize.
@@ -2826,6 +2827,7 @@ private:
             item.pszText = const_cast<wchar_t*>(L"V/F Curve");
             TabCtrl_InsertItem(tabs_, vfPage, &item);
         }
+        if (vf_ && j.contains("vfSaved")) vf_->profile(j["vfSaved"].get<int>());
         if (initial && !ready_) {
             ready_ = true;
             busy(false);
