@@ -4,7 +4,8 @@
 *.user
 
 # Local only, never published: reverse-engineering notes, evidence and tools, and the
-# agent instructions.
+# agent instructions and skills.
 /re/
 /AGENTS.md
 /CLAUDE.md
+/.claude/
